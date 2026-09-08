@@ -1,0 +1,180 @@
+import { Archive, CalendarClock, Clock3, FilePenLine, Inbox as InboxIcon, Mail as MailIcon, MailOpen, ShieldAlert, Send, Star, Trash2 } from 'lucide-react'
+import { foldersApi } from '../services/folders'
+import type { Draft, Mail, Mailbox } from '../types'
+
+type NavGroup = 'mail' | 'compose' | 'more'
+type FolderNav = { label: Mailbox; icon: typeof InboxIcon; group: NavGroup }
+
+export const folders: FolderNav[] = [
+  { label: 'Inbox', icon: InboxIcon, group: 'mail' },
+  { label: 'Unread', icon: MailIcon, group: 'mail' },
+  { label: 'Starred', icon: Star, group: 'mail' },
+  { label: 'Snoozed', icon: Clock3, group: 'mail' },
+  { label: 'Sent', icon: Send, group: 'compose' },
+  { label: 'Scheduled', icon: CalendarClock, group: 'compose' },
+  { label: 'Drafts', icon: FilePenLine, group: 'compose' },
+  { label: 'All Mail', icon: MailOpen, group: 'more' },
+  { label: 'Archive', icon: Archive, group: 'more' },
+  { label: 'Spam', icon: ShieldAlert, group: 'more' },
+  { label: 'Trash', icon: Trash2, group: 'more' },
+]
+
+export const navGroupTitles: Record<NavGroup, string> = {
+  mail: 'Mail',
+  compose: 'Compose',
+  more: 'All folders',
+}
+
+export const folderSlug: Record<Mailbox, string> = {
+  Inbox: 'inbox',
+  Unread: 'unread',
+  Starred: 'starred',
+  Snoozed: 'snoozed',
+  Sent: 'sent',
+  Scheduled: 'scheduled',
+  Drafts: 'drafts',
+  'All Mail': 'all',
+  Archive: 'archive',
+  Spam: 'spam',
+  Trash: 'trash',
+}
+
+export const folderFromPath = (path: string): string => {
+  const customMatch = path.match(/\/mail\/folders\/([^/]+)/)
+  if (customMatch) {
+    const custom = foldersApi.byId(decodeURIComponent(customMatch[1]))
+    return custom?.name ?? 'Inbox'
+  }
+  const match = path.match(/\/mail\/([^/]+)/)
+  const slug = match?.[1] || 'inbox'
+  return folders.find(item => folderSlug[item.label] === slug)?.label || 'Inbox'
+}
+
+export const isCustomFolder = (folder: string): boolean => {
+  if (folder in folderSlug) return false
+  return Boolean(foldersApi.byName(folder))
+}
+
+export const folderPath = (folder: string): string => {
+  const slug = folderSlug[folder as Mailbox]
+  if (slug) return slug
+  return foldersApi.byName(folder)?.id ? `folders/${foldersApi.byName(folder)?.id}` : 'inbox'
+}
+
+export const categoryLabels: Record<string, string[]> = {
+  Primary: ['Clients', 'Important'],
+  Promotions: ['Finance'],
+  Social: ['Internal'],
+  Updates: ['Attachment'],
+}
+
+const folderCount = (mailbox: Mail[], folder: Mailbox) =>
+  mailbox.filter(mail => (mail.folder || 'Inbox') === folder).length
+
+export const getFolderCounts = (mailbox: Mail[]): Partial<Record<Mailbox, number>> => ({
+  Inbox: folderCount(mailbox, 'Inbox'),
+  Unread: mailbox.filter(mail => mail.unread && mail.folder !== 'Trash').length,
+  Starred: mailbox.filter(mail => mail.starred && mail.folder !== 'Trash').length,
+  Snoozed: folderCount(mailbox, 'Snoozed'),
+  Sent: folderCount(mailbox, 'Sent'),
+  Drafts: folderCount(mailbox, 'Drafts'),
+  'All Mail': mailbox.filter(mail => mail.folder !== 'Trash').length,
+  Archive: folderCount(mailbox, 'Archive'),
+  Spam: folderCount(mailbox, 'Spam'),
+  Trash: folderCount(mailbox, 'Trash'),
+})
+
+export const buildThread = (mail: Mail) => [
+  { sender: mail.sender, email: mail.email, initials: mail.initials, color: mail.color, copy: `${mail.preview} I have updated the project details and highlighted the items that need your attention before the next sync.`, time: mail.time },
+  { sender: 'Alex Morgan', email: 'alex@harbor.co', initials: 'AM', color: 'teal', copy: `On ${mail.time}, ${mail.sender} <${mail.email}> wrote:\n\n${mail.preview}\n\nThanks for the update. I will review the owners and milestones before our next sync.`, time: 'Yesterday' },
+  { sender: mail.sender, email: mail.email, initials: mail.initials, color: mail.color, copy: 'Perfect. I have added the latest notes to the brief and will bring any open questions to the meeting.', time: 'Yesterday' },
+]
+
+export const matchesSearch = (mail: Mail, query: string) => {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return terms.every(term => {
+    if (term.startsWith('from:')) return `${mail.sender} ${mail.email}`.toLowerCase().includes(term.slice(5))
+    if (term.startsWith('label:')) return mail.label.toLowerCase() === term.slice(6)
+    if (term === 'is:unread') return mail.unread
+    if (term === 'is:starred') return Boolean(mail.starred)
+    if (term === 'has:attachment') return Boolean(mail.attachment)
+    return `${mail.sender} ${mail.email} ${mail.subject} ${mail.preview} ${mail.label}`.toLowerCase().includes(term)
+  })
+}
+
+export const filterMails = (mailbox: Mail[], folder: string, query = '', category?: string): Mail[] =>
+  mailbox.filter(mail => (
+    matchesSearch(mail, query) &&
+    (folder === 'Inbox' && category && category !== 'Primary' ? categoryLabels[category]?.includes(mail.label) : true) &&
+    (folder === 'All Mail' ? mail.folder !== 'Trash'
+      : folder === 'Unread' ? mail.unread && mail.folder !== 'Trash'
+        : folder === 'Starred' ? mail.starred && mail.folder !== 'Trash'
+          : folder === 'Sent' ? mail.folder === 'Sent'
+            : (mail.folder || 'Inbox') === folder)
+  ))
+
+const prefixSubject = (mail: Mail, prefix: 'Re:' | 'Fwd:') =>
+  mail.subject.toLowerCase().startsWith(prefix.toLowerCase().replace(':', '')) ? mail.subject : `${prefix} ${mail.subject}`
+
+export const selfEmail = 'alex@harbor.co'
+
+export const buildReplyDraft = (mail: Mail): Partial<Draft> => ({
+  to: mail.email,
+  subject: prefixSubject(mail, 'Re:'),
+  body: '',
+})
+
+export const buildReplyAllDraft = (mail: Mail): Partial<Draft> => ({
+  to: [mail.email, ...(mail.to ?? []).filter(recipient => recipient.toLowerCase() !== selfEmail.toLowerCase())].join(', '),
+  cc: (mail.cc ?? []).filter(recipient => recipient.toLowerCase() !== selfEmail.toLowerCase()).join(', '),
+  subject: prefixSubject(mail, 'Re:'),
+  body: '',
+})
+
+export const buildForwardDraft = (mail: Mail): Partial<Draft> => ({
+  to: '',
+  subject: prefixSubject(mail, 'Fwd:'),
+  body: `\n\n\n---------- Forwarded message ----------\nFrom: ${mail.sender} <${mail.email}>\nSubject: ${mail.subject}\nDate: ${mail.time}\n\n${mail.preview}`,
+  attachments: mail.attachment && mail.attachmentName ? [mail.attachmentName] : [],
+})
+
+export const buildSentMail = (draft: Draft, time = 'Just now'): Mail => ({
+  id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  initials: 'AM',
+  sender: 'Alex Morgan',
+  email: 'alex@harbor.co',
+  subject: draft.subject || '(no subject)',
+  preview: draft.body.slice(0, 120) || (draft.attachments.length ? 'Attached file' : '(no body)'),
+  time,
+  label: 'Sent',
+  color: 'teal',
+  unread: false,
+  folder: 'Sent',
+  attachment: draft.attachments.length > 0,
+})
+
+export type SnoozeOption = 'later-today' | 'tomorrow' | 'this-weekend' | 'next-week'
+
+export const snoozeOptions: { id: SnoozeOption; label: string }[] = [
+  { id: 'later-today', label: 'Later today' },
+  { id: 'tomorrow', label: 'Tomorrow' },
+  { id: 'this-weekend', label: 'This weekend' },
+  { id: 'next-week', label: 'Next week' },
+]
+
+const nextWeekday = (date: Date, weekday: number) => {
+  const next = new Date(date)
+  next.setDate(date.getDate() + ((weekday - date.getDay() + 7) % 7 || 7))
+  return next
+}
+
+export const snoozeAt = (option: SnoozeOption, now = new Date()): string => {
+  const atHour = (date: Date, hour: number) => { const target = new Date(date); target.setHours(hour, 0, 0, 0); return target }
+  if (option === 'later-today') {
+    if (atHour(now, 17).getTime() > now.getTime()) return atHour(now, 17).toISOString()
+    return atHour(new Date(now.getTime() + 24 * 60 * 60 * 1000), 8).toISOString()
+  }
+  if (option === 'tomorrow') return atHour(new Date(now.getTime() + 24 * 60 * 60 * 1000), 8).toISOString()
+  if (option === 'this-weekend') return atHour(nextWeekday(now, 6), 8).toISOString()
+  return atHour(nextWeekday(now, 1), 8).toISOString()
+}

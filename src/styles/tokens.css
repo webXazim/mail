@@ -1,0 +1,43 @@
+:root {
+  /* Coat. Neutral shell represented by dark, warm black. */
+  --a2t-ink: #0b0f12;
+  --a2t-ink-2: #12181c;
+  --a2t-panel: #111817;
+  --a2t-panel-raised: #151d1b;
+  --a2t-panel-soft: #0e1413;
+
+  /* Paper. Warm off-whites used sparingly as high-contrast text or light surfaces. */
+  --a2t-paper: #f2f1eb;
+  --a2t-warm: #e7e3d8;
+  --a2t-white: #f4f5f0;
+  --a2t-silver: #d9e0dc;
+
+  /* Copy. Primary gray-green text hierarchy. */
+  --a2t-copy: #9ca6a1;
+  --a2t-copy-soft: #7d8883;
+
+  /* Accent. Signal green — actions, active states, highlights. */
+  --a2t-accent: #c8f34f;
+  --a2t-accent-hover: #ddff7d;
+
+  /* Satellites. Semantic + supporting tones. */
+  --a2t-green: #1f5545;
+  --a2t-green-deep: #173d34;
+  --a2t-danger: #ff6f66;
+  --a2t-warning: #f3c45a;
+  --a2t-success: #a9d86d;
+
+  /* Lines. Hairlines over dark surfaces. */
+  --a2t-line: rgba(255, 255, 255, 0.14);
+  --a2t-line-soft: rgba(255, 255, 255, 0.085);
+  --a2t-line-strong: rgba(255, 255, 255, 0.25);
+  --a2t-control-line: #45504c;
+
+  /* Utilities. */
+  --a2t-focus: 0 0 0 3px rgba(200, 243, 79, 0.2);
+  --a2t-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --a2t-mono: 'DM Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --a2t-header-h: 70px;
+
+  color-scheme: dark;
+}
