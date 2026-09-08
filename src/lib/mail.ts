@@ -111,28 +111,59 @@ export const buildThread = (mail: Mail) => [
   },
 ]
 
-export const matchesSearch = (mail: Mail, query: string) => {
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  return terms.every(term => {
-    if (term.startsWith('from:')) return `${mail.sender} ${mail.email}`.toLowerCase().includes(term.slice(5))
-    if (term.startsWith('label:')) return mail.label.toLowerCase() === term.slice(6)
-    if (term === 'is:unread') return mail.unread
-    if (term === 'is:starred') return Boolean(mail.starred)
-    if (term === 'has:attachment') return Boolean(mail.attachment)
-    return `${mail.sender} ${mail.email} ${mail.subject} ${mail.preview} ${mail.label}`.toLowerCase().includes(term)
-  })
+const searchTerms = (query: string) => query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+
+const inScopeFolder = (scope: string): string | 'any' | null => {
+  const map: Record<string, string> = {
+    inbox: 'Inbox',
+    sent: 'Sent',
+    trash: 'Trash',
+    archive: 'Archive',
+    spam: 'Spam',
+    drafts: 'Drafts',
+    snoozed: 'Snoozed',
+    starred: 'Starred',
+    unread: 'Unread',
+    all: 'All Mail',
+  }
+  if (scope === 'any') return 'any'
+  return map[scope] ?? null
 }
 
-export const filterMails = (mailbox: Mail[], folder: string, query = '', category?: string): Mail[] =>
-  mailbox.filter(mail => (
+export const matchesSearch = (mail: Mail, query: string) => searchTerms(query).every(term => {
+  const negate = term.startsWith('-')
+  const base = negate ? term.slice(1) : term
+  const textFields = `${mail.sender} ${mail.email} ${mail.subject} ${mail.preview} ${mail.label} ${(mail.to ?? []).join(' ')}`.toLowerCase()
+  let result = textFields.includes(base)
+  if (base.startsWith('from:')) result = `${mail.sender} ${mail.email}`.toLowerCase().includes(base.slice(5))
+  else if (base.startsWith('to:')) result = (mail.to ?? []).some(recipient => recipient.toLowerCase().includes(base.slice(4)))
+  else if (base.startsWith('subject:')) result = mail.subject.toLowerCase().includes(base.slice(8))
+  else if (base.startsWith('label:')) result = mail.label.toLowerCase() === base.slice(6)
+  else if (base.startsWith('in:')) { const scoped = inScopeFolder(base.slice(3)); result = scoped === 'any' || scoped === 'All Mail' ? mail.folder !== 'Trash' : (mail.folder || 'Inbox') === scoped }
+  else if (base === 'is:unread') result = mail.unread
+  else if (base === 'is:read') result = !mail.unread
+  else if (base === 'is:starred') result = Boolean(mail.starred)
+  else if (base === 'is:snoozed') result = mail.folder === 'Snoozed'
+  else if (base === 'is:sent') result = mail.folder === 'Sent'
+  else if (base === 'is:draft') result = mail.folder === 'Drafts'
+  else if (base === 'has:attachment') result = Boolean(mail.attachment)
+  return negate ? !result : result
+})
+
+export const filterMails = (mailbox: Mail[], folder: string, query = '', category?: string): Mail[] => {
+  const scope = query.match(/\bin:([a-zA-Z-]+)\b/)?.[1]?.toLowerCase()
+  const scoped = scope ? inScopeFolder(scope) : null
+  const effectiveFolder = scoped && scoped !== 'any' ? scoped : (scoped === 'any' ? 'All Mail' : folder)
+  return mailbox.filter(mail => (
     matchesSearch(mail, query) &&
-    (folder === 'Inbox' && category && category !== 'Primary' ? categoryLabels[category]?.includes(mail.label) : true) &&
-    (folder === 'All Mail' ? mail.folder !== 'Trash'
-      : folder === 'Unread' ? mail.unread && mail.folder !== 'Trash'
-        : folder === 'Starred' ? mail.starred && mail.folder !== 'Trash'
-          : folder === 'Sent' ? mail.folder === 'Sent'
-            : (mail.folder || 'Inbox') === folder)
+    (effectiveFolder === 'Inbox' && category && category !== 'Primary' ? categoryLabels[category]?.includes(mail.label) : true) &&
+    (effectiveFolder === 'All Mail' ? mail.folder !== 'Trash'
+      : effectiveFolder === 'Unread' ? mail.unread && mail.folder !== 'Trash'
+        : effectiveFolder === 'Starred' ? mail.starred && mail.folder !== 'Trash'
+          : effectiveFolder === 'Sent' ? mail.folder === 'Sent'
+            : (mail.folder || 'Inbox') === effectiveFolder)
   ))
+}
 
 const prefixSubject = (mail: Mail, prefix: 'Re:' | 'Fwd:') =>
   mail.subject.toLowerCase().startsWith(prefix.toLowerCase().replace(':', '')) ? mail.subject : `${prefix} ${mail.subject}`

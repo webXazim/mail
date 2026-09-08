@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { messages } from '../data'
 import type { Draft, Mail } from '../types'
-import { buildForwardDraft, buildReplyAllDraft, buildReplyDraft, buildSentMail, buildThread, filterMails, getFolderCounts, snoozeAt } from './mail'
+import { buildForwardDraft, buildReplyAllDraft, buildReplyDraft, buildSentMail, buildThread, filterMails, getFolderCounts, matchesSearch, snoozeAt } from './mail'
 
 const mail: Mail = { id: 'm1', initials: 'PK', sender: 'Priya Khan', email: 'priya@harbor.co', subject: 'Design review notes', preview: 'I have updated the project details…', time: '10:24 AM', label: 'Clients', color: 'coral', unread: true, attachment: true, attachmentName: 'meridian-contract-signed.pdf' }
 
@@ -164,5 +164,54 @@ describe('filterMails', () => {
     expect(filterMails(messages, 'Inbox', '', 'Promotions')).toHaveLength(0)
     expect(filterMails(messages, 'Inbox', 'is:unread')).toHaveLength(3)
     expect(filterMails(messages, 'Inbox', 'from:priya')).toHaveLength(1)
+  })
+})
+
+describe('search operators', () => {
+  const box: Mail[] = [
+    { id: 'a', initials: 'NL', sender: 'Nora Li', email: 'nora@northstar.studio', subject: 'Q3 launch plan', preview: 'milestones for Thursday', time: '9:42 AM', label: 'Clients', color: 'purple', unread: true, starred: true, folder: 'Inbox', to: ['alex@harbor.co'] },
+    { id: 'b', initials: 'JM', sender: 'Jonas Meier', email: 'jonas@meridian.co', subject: 'Meridian contract', preview: 'signed copy attached', time: '8:18 AM', label: 'Attachment', color: 'orange', unread: false, attachment: true, folder: 'Inbox', to: ['team@harbor.co', 'alex@harbor.co'] },
+    { id: 'c', initials: 'RB', sender: 'Riley Brooks', email: 'riley@papertrail.com', subject: 'Invoice #1048', preview: 'payment due', time: 'Aug 29', label: 'Finance', color: 'coral', unread: true, folder: 'Snoozed', to: ['alex@harbor.co'] },
+    { id: 'd', initials: 'X', sender: 'Old Client', email: 'old@agency.example', subject: 'Old files', preview: 'archive me', time: 'Aug 1', label: 'Clients', color: 'blue', unread: false, folder: 'Trash', to: ['alex@harbor.co'] },
+  ]
+
+  it('matches plain text across sender, subject, preview, labels and recipients', () => {
+    expect(matchesSearch(box[0], 'launch')).toBe(true)
+    expect(matchesSearch(box[0], 'milestones')).toBe(true)
+    expect(matchesSearch(box[0], 'Clients')).toBe(true)
+  })
+
+  it('filters by to: and subject: operators', () => {
+    expect(matchesSearch(box[1], 'to:team@harbor.co')).toBe(true)
+    expect(matchesSearch(box[1], 'to:meridian')).toBe(false)
+    expect(matchesSearch(box[2], 'subject:invoice')).toBe(true)
+    expect(matchesSearch(box[2], 'subject:payment')).toBe(false)
+  })
+
+  it('differentiates is:read from is:unread', () => {
+    expect(matchesSearch(box[0], 'is:unread')).toBe(true)
+    expect(matchesSearch(box[1], 'is:read')).toBe(true)
+    expect(matchesSearch(box[0], 'is:read')).toBe(false)
+  })
+
+  it('supports is:snoozed, is:sent and is:draft', () => {
+    expect(matchesSearch(box[2], 'is:snoozed')).toBe(true)
+    expect(matchesSearch(box[0], 'is:snoozed')).toBe(false)
+    expect(matchesSearch({ ...box[0], folder: 'Sent' }, 'is:sent')).toBe(true)
+    expect(matchesSearch({ ...box[0], folder: 'Drafts' }, 'is:draft')).toBe(true)
+  })
+
+  it('handles negated operators with a leading dash', () => {
+    expect(matchesSearch(box[2], '-has:attachment')).toBe(true)
+    expect(matchesSearch(box[1], '-has:attachment')).toBe(false)
+    expect(matchesSearch(box[1], '-is:unread')).toBe(true)
+    expect(matchesSearch(box[0], '-label:Clients')).toBe(false)
+  })
+
+  it('scopes searches across folders with in:', () => {
+    expect(filterMails(box, 'Inbox', 'in:trash').map(item => item.id)).toEqual(['d'])
+    expect(filterMails(box, 'Inbox', 'in:snoozed').map(item => item.id)).toEqual(['c'])
+    expect(filterMails(box, 'Inbox', 'in:any subject:invoice').map(item => item.id)).toEqual(['c'])
+    expect(filterMails(box, 'Inbox', 'in:all is:unread').map(item => item.id)).toEqual(['a', 'c'])
   })
 })
