@@ -1521,6 +1521,23 @@ input[type='radio'] {
   font-size: 12px;
 }
 
+.composer-signature-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 12px;
+  border-left: 1px solid var(--a2t-line-soft);
+  color: var(--a2t-copy-soft);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.composer-signature-toggle input {
+  accent-color: var(--a2t-accent);
+}
+
 .composer-editor__body {
   flex: 1;
   min-height: 0;
