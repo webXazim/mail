@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, CalendarDays, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, X } from 'lucide-react'
+import { Check, CalendarDays, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, UserRound, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { folderFromPath, folderSlug, folders, getFolderCounts, navGroupTitles } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
@@ -89,6 +89,9 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
       <button className="compose-button" onClick={onCompose}><SquarePen size={17} />Compose</button>
       <button className={`folder-link ${pathname.startsWith('/mail/calendar') ? 'folder-link--active' : ''}`} aria-current={pathname.startsWith('/mail/calendar') ? 'page' : undefined} onClick={() => { navigate('/mail/calendar'); onCloseMobile() }}>
         <CalendarDays size={17} /><span>Calendar</span>
+      </button>
+      <button className={`folder-link ${pathname.startsWith('/mail/contacts') ? 'folder-link--active' : ''}`} aria-current={pathname.startsWith('/mail/contacts') ? 'page' : undefined} onClick={() => { navigate('/mail/contacts'); onCloseMobile() }}>
+        <UserRound size={17} /><span>Contacts</span>
       </button>
       {navGroups.map(group => (
         <nav key={group} className="folder-nav" aria-label={navGroupTitles[group]}>

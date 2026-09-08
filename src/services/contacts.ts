@@ -1,6 +1,6 @@
 import { contacts as seedContacts } from '../contacts'
 
-export type Contact = { name: string; email: string }
+export type Contact = { name: string; email: string; company?: string; phone?: string }
 
 const contactsKey = 'harbor-mail:contacts'
 
@@ -22,6 +22,18 @@ export const contactsService = {
     const next = [...this.list().filter(existing => existing.email.toLowerCase() !== contact.email.toLowerCase()), contact]
     this.save(next)
     return next
+  },
+  update(email: string, patch: Partial<Contact>) {
+    const next = this.list().map(contact =>
+      contact.email.toLowerCase() === email.toLowerCase() ? { ...contact, ...patch, email } : contact,
+    )
+    this.save(next)
+    return next
+  },
+  upsert(contact: Contact) {
+    const match = this.list().find(existing => existing.email.toLowerCase() === contact.email.toLowerCase())
+    if (match) return this.update(contact.email, { company: contact.company ?? match.company, phone: contact.phone ?? match.phone })
+    return this.add(contact)
   },
   remove(email: string) {
     const next = this.list().filter(contact => contact.email.toLowerCase() !== email.toLowerCase())

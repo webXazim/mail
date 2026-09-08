@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
-import { buildSentMail } from '../../lib/mail'
+import { buildSentMail, parseAddresses } from '../../lib/mail'
 import { applyFaviconBadge } from '../../lib/favicon'
 import { buildReplyMail } from '../../lib/delivery'
 import { applyIncomingFilters } from '../../lib/pipeline'
@@ -189,6 +189,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
     chime()
     pushDesktopNotification(mail.sender, mail.subject)
     notificationsApi.add({ icon: 'mail', title: `New mail from ${mail.sender}`, detail: mail.subject })
+    if (mail.email && !mail.email.toLowerCase().endsWith('@harbor.co')) {
+      contactsService.upsert({ name: mail.sender, email: mail.email.toLowerCase() })
+    }
   }, [pushDesktopNotification])
 
   const openCompose = useCallback((initial?: Partial<Draft>) => {
@@ -249,6 +252,13 @@ export function MailProvider({ children }: { children: ReactNode }) {
       const contact = contactsService.list().find(item => item.email.toLowerCase() === firstRecipient)
       replyTimerRef.current = window.setTimeout(() => arrive(buildReplyMail(draft, contact?.name)), 8000)
     }
+    parseAddresses(draft.to + ',' + draft.cc).forEach(part => {
+      const displayName = part.match(/^([^<@]+?)\s*<[^>]+>$/)?.[1]?.trim()
+      const email = part.includes('<') ? (part.match(/<([^>]+)>/)?.[1] ?? part).toLowerCase() : part.toLowerCase()
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        contactsService.upsert({ name: displayName || email.split('@')[0], email })
+      }
+    })
   }, [arrive])
 
   const unsend = useCallback(() => {

@@ -7,7 +7,6 @@ import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { CommandPalette } from '../CommandPalette'
 import { Admin } from '../Admin'
 import { Billing } from '../Billing'
-import { ContactsDrawer } from '../ContactsDrawer'
 import { Notifications } from '../Notifications'
 import { Onboarding } from '../Onboarding'
 import { Settings } from '../Settings'
@@ -37,7 +36,6 @@ export function MailLayout() {
   const [sidebarWidth, setSidebarWidth] = useState(242)
   const [helpOpen, setHelpOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [contactsOpen, setContactsOpen] = useState(false)
   const [offline, setOffline] = useState(() => !navigator.onLine)
   const helpRef = useRef<HTMLElement>(null)
   const gPendingRef = useRef(false)
@@ -72,7 +70,6 @@ export function MailLayout() {
       if (event.key === 'Escape') {
         setHelpOpen(false)
         setPaletteOpen(false)
-        setContactsOpen(false)
         closeCompose()
         setMobile(false)
         if (pathnameRef.current.endsWith('/settings') || pathnameRef.current.endsWith('/notifications') || pathnameRef.current.endsWith('/billing') || pathnameRef.current.endsWith('/admin')) navigate(`/mail/${folderPath(folder)}`)
@@ -145,13 +142,12 @@ export function MailLayout() {
         onCompose={openCompose}
         onOpenSettings={() => navigate('/mail/settings')}
         onOpenNotifications={() => navigate('/mail/notifications')}
-        onOpenContacts={() => setContactsOpen(true)}
+        onOpenContacts={() => navigate('/mail/contacts')}
         onOpenAdmin={() => navigate('/mail/admin')}
         onOpenCalendar={() => navigate('/mail/calendar')}
         onToggleHelp={() => setHelpOpen(true)}
       />
       <Onboarding />
-      {contactsOpen && <ContactsDrawer close={() => setContactsOpen(false)} />}
       {composeOpen && <Suspense fallback={null}><Composer close={closeCompose} onSent={handleSent} initialDraft={composerInitial ?? undefined} /></Suspense>}
       {settingsOpen && <Settings close={() => navigate(`/mail/${folderPath(folder)}`)} />}
       {billingOpen && <Billing close={() => navigate(`/mail/${folderPath(folder)}`)} />}
