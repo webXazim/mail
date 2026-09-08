@@ -4,6 +4,7 @@ import { buildForwardDraft, buildReplyAllDraft, buildReplyDraft, filterMails, fo
 import { MailRow } from '../components/MailRow'
 import { Reader } from '../components/Reader'
 import { useMail } from '../state/mail/MailContext'
+import { calendarApi } from '../services/calendar'
 import type { Mail } from '../types'
 
 const isEditableTarget = (target: EventTarget | null) =>
@@ -14,7 +15,7 @@ export function ThreadPage() {
   const { pathname } = useLocation()
   const { mailId } = useParams()
   const folder = folderFromPath(pathname)
-  const { mailbox, loading, openCompose, toggleStar, markRead, markUnread, applyAction, moveToFolder, snooze } = useMail()
+  const { mailbox, loading, openCompose, toggleStar, markRead, markUnread, applyAction, moveToFolder, snooze, notify } = useMail()
   const mail = mailbox.find(message => message.id === mailId)
   const rows = useMemo(() => {
     if (!mail) return []
@@ -52,6 +53,7 @@ export function ThreadPage() {
   const deleteMail = () => { applyAction('trash', [mail.id]); backToFolder() }
   const move = (target: string) => { moveToFolder([mail.id], target); navigate(`/mail/${folderPath(target)}`) }
   const snoozeMail = (until: string) => { snooze([mail.id], until); backToFolder() }
+  const addToCalendar = () => { calendarApi.createFromMail(mail); notify('Event added to your calendar') }
   const goToThread = (item: Mail) => navigate(`/mail/${folderPath(folder)}/thread/${item.id}`)
   return (
     <div className="split-view">
@@ -76,7 +78,7 @@ export function ThreadPage() {
           {rows.length === 0 && <div className="list-state"><strong>One conversation</strong><span>No other messages in {folder.toLowerCase()}.</span></div>}
         </div>
       </aside>
-      <Reader mail={mail} onReply={() => openCompose(buildReplyDraft(mail))} onReplyAll={() => openCompose(buildReplyAllDraft(mail))} onForward={() => openCompose(buildForwardDraft(mail))} onToggleStar={() => toggleStar([mail.id])} onToggleRead={() => mail.unread ? markRead(mail.id) : markUnread([mail.id])} onBack={backToFolder} onArchive={archive} onDelete={deleteMail} onMove={move} onSnooze={snoozeMail} onSpam={() => move('Spam')} onPrint={() => window.print()} onPrevious={previous ? () => goToThread(previous) : undefined} onNext={next ? () => goToThread(next) : undefined} canPrevious={Boolean(previous)} canNext={Boolean(next)} />
+      <Reader mail={mail} onReply={() => openCompose(buildReplyDraft(mail))} onReplyAll={() => openCompose(buildReplyAllDraft(mail))} onForward={() => openCompose(buildForwardDraft(mail))} onToggleStar={() => toggleStar([mail.id])} onToggleRead={() => mail.unread ? markRead(mail.id) : markUnread([mail.id])} onBack={backToFolder} onArchive={archive} onDelete={deleteMail} onMove={move} onSnooze={snoozeMail} onSpam={() => move('Spam')} onPrint={() => window.print()} onAddToCalendar={addToCalendar} onPrevious={previous ? () => goToThread(previous) : undefined} onNext={next ? () => goToThread(next) : undefined} canPrevious={Boolean(previous)} canNext={Boolean(next)} />
     </div>
   )
 }

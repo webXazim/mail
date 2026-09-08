@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, X } from 'lucide-react'
+import { Check, CalendarDays, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { folderFromPath, folderSlug, folders, getFolderCounts, navGroupTitles } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
@@ -87,6 +87,9 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         <button className="icon-button sidebar-close" onClick={onCloseMobile} aria-label="Close navigation"><X size={17} /></button>
       </div>
       <button className="compose-button" onClick={onCompose}><SquarePen size={17} />Compose</button>
+      <button className={`folder-link ${pathname.startsWith('/mail/calendar') ? 'folder-link--active' : ''}`} aria-current={pathname.startsWith('/mail/calendar') ? 'page' : undefined} onClick={() => { navigate('/mail/calendar'); onCloseMobile() }}>
+        <CalendarDays size={17} /><span>Calendar</span>
+      </button>
       {navGroups.map(group => (
         <nav key={group} className="folder-nav" aria-label={navGroupTitles[group]}>
           <p className="nav-heading">{navGroupTitles[group]}</p>

@@ -56,6 +56,7 @@ export type MailContextValue = {
   unsend: () => void
   dismissToast: (id: number) => void
   handleSent: (draft: Draft) => void
+  notify: (message: string) => void
   reload: () => void
 }
 
@@ -153,6 +154,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
   }, [state.notice, state.undo, undoSendActive])
 
   const dismissToast = useCallback((id: number) => setToasts(current => current.filter(toast => toast.id !== id)), [])
+  const notify = useCallback((message: string) => dispatch({ type: 'notice', message }), [])
 
   const openCompose = useCallback((initial?: Partial<Draft>) => {
     setComposerInitial(initial ?? null)
@@ -242,8 +244,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
     unsend,
     dismissToast,
     handleSent,
+    notify,
     reload,
-  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, reload])
+  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, notify, reload])
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }

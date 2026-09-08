@@ -41,7 +41,9 @@ export function MailLayout() {
   const [offline, setOffline] = useState(() => !navigator.onLine)
   const helpRef = useRef<HTMLElement>(null)
   const gPendingRef = useRef(false)
+  const pathnameRef = useRef(location.pathname)
   useFocusTrap(helpRef, helpOpen)
+  useEffect(() => { pathnameRef.current = location.pathname }, [location.pathname])
   const folder = folderFromPath(location.pathname)
   const threadOpen = Boolean(location.pathname.match(/\/thread\/([^/]+)/)?.[1])
   const settingsOpen = location.pathname.endsWith('/settings')
@@ -73,7 +75,7 @@ export function MailLayout() {
         setContactsOpen(false)
         closeCompose()
         setMobile(false)
-        if (settingsOpen || notificationsOpen || billingOpen || adminOpen) navigate(`/mail/${folderPath(folder)}`)
+        if (pathnameRef.current.endsWith('/settings') || pathnameRef.current.endsWith('/notifications') || pathnameRef.current.endsWith('/billing') || pathnameRef.current.endsWith('/admin')) navigate(`/mail/${folderPath(folder)}`)
       }
       if (!typing) {
         if (event.key.toLowerCase() === 'g' && !gPendingRef.current) {
@@ -145,6 +147,7 @@ export function MailLayout() {
         onOpenNotifications={() => navigate('/mail/notifications')}
         onOpenContacts={() => setContactsOpen(true)}
         onOpenAdmin={() => navigate('/mail/admin')}
+        onOpenCalendar={() => navigate('/mail/calendar')}
         onToggleHelp={() => setHelpOpen(true)}
       />
       <Onboarding />

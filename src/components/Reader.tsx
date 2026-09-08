@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Download, Mail as MailIcon, Paperclip, Printer, ShieldAlert, ShieldCheck, Send, Star, Trash2 } from 'lucide-react'
+import { Archive, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Download, Mail as MailIcon, Paperclip, Printer, ShieldAlert, ShieldCheck, Send, Star, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { buildThread, snoozeAt, snoozeOptions } from '../lib/mail'
 import { getLocalAttachment, getRemoteAttachmentUrl } from '../services/attachments'
@@ -21,6 +21,7 @@ type ReaderProps = {
   onSpam?: () => void
   onPrint?: () => void
   onSave?: () => void
+  onAddToCalendar?: () => void
   onPrevious?: () => void
   onNext?: () => void
   canPrevious?: boolean
@@ -96,7 +97,7 @@ const saveEmailAsFile = (mail: Mail, thread: { sender: string; email: string; co
   URL.revokeObjectURL(url)
 }
 
-export function Reader({ mail, onReply, onReplyAll, onForward, onToggleStar, onToggleRead, onBack, onArchive, onDelete, onMove, onSnooze, onSpam, onPrint, onSave, onPrevious, onNext, canPrevious, canNext }: ReaderProps) {
+export function Reader({ mail, onReply, onReplyAll, onForward, onToggleStar, onToggleRead, onBack, onArchive, onDelete, onMove, onSnooze, onSpam, onPrint, onSave, onAddToCalendar, onPrevious, onNext, canPrevious, canNext }: ReaderProps) {
   const [openMessage, setOpenMessage] = useState(2)
   const recipientDisplay = mail.to && mail.to.length > 0 ? mail.to.join(', ') : 'Alex Morgan'
   const [moveOpen, setMoveOpen] = useState(false)
@@ -146,6 +147,7 @@ export function Reader({ mail, onReply, onReplyAll, onForward, onToggleStar, onT
         <button className="icon-button" aria-label="Delete" onClick={() => dispatchAction('trash')}><Trash2 size={17} /></button>
         <button className="icon-button" aria-label={mail.unread ? 'Mark as read' : 'Mark as unread'} aria-pressed={mail.unread} onClick={onToggleRead}><MailIcon size={17} /></button>
         <button className="icon-button" aria-label={mail.starred ? 'Unstar' : 'Star'} aria-pressed={mail.starred} onClick={onToggleStar}><Star size={17} fill={mail.starred ? 'currentColor' : 'none'} /></button>
+        <button className="icon-button" aria-label="Add to calendar" onClick={onAddToCalendar} disabled={!onAddToCalendar} title="Add to calendar"><CalendarPlus size={17} /></button>
         <span className="toolbar-spacer" />
         <div className="toolbar-pop">
           <button className="icon-button" aria-label="Move to folder" aria-expanded={moveOpen} onClick={event => { event.stopPropagation(); setMoveOpen(value => !value) }} disabled={!onMove}><CornerDownRight size={17} /></button>

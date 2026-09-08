@@ -5,6 +5,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage').then(module => ({ defau
 const MailLayout = lazy(() => import('./components/layout/MailLayout').then(module => ({ default: module.MailLayout })))
 const MailListPage = lazy(() => import('./pages/MailListPage').then(module => ({ default: module.MailListPage })))
 const ThreadPage = lazy(() => import('./pages/ThreadPage').then(module => ({ default: module.ThreadPage })))
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then(module => ({ default: module.CalendarPage })))
 
 const sessionKey = 'harbor-mail:session'
 
@@ -27,6 +28,7 @@ export default function App() {
             </RequireAuth>
           )}
         >
+          <Route path="calendar" element={<CalendarPage />} />
           <Route path=":folder" element={<MailListPage />} />
           <Route path=":folder/thread/:mailId" element={<ThreadPage />} />
           <Route path="folders/:folderId" element={<MailListPage />} />

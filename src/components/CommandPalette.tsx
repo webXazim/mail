@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, CircleHelp, Search, Server, Settings2, SquarePen, UserRound } from 'lucide-react'
+import { Bell, CalendarDays, CircleHelp, Search, Server, Settings2, SquarePen, UserRound } from 'lucide-react'
 import { folderSlug, folders } from '../lib/mail'
 
 type CommandPaletteProps = {
@@ -11,12 +11,13 @@ type CommandPaletteProps = {
   onOpenNotifications: () => void
   onOpenContacts: () => void
   onOpenAdmin: () => void
+  onOpenCalendar: () => void
   onToggleHelp: () => void
 }
 
 type Command = { id: string; label: string; icon: ReactNode; keywords: string; action: () => void }
 
-export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSettings, onOpenNotifications, onOpenContacts, onOpenAdmin, onToggleHelp }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSettings, onOpenNotifications, onOpenContacts, onOpenAdmin, onOpenCalendar, onToggleHelp }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
 
@@ -30,6 +31,7 @@ export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSet
     }))
     return [
       ...folderCommands,
+      { id: 'calendar', label: 'Open calendar', icon: <CalendarDays size={15} />, keywords: 'calendar schedule event agenda ics', action: onOpenCalendar },
       { id: 'compose', label: 'Compose new message', icon: <SquarePen size={15} />, keywords: 'compose write new email send', action: onCompose },
       { id: 'contacts', label: 'Open contacts', icon: <UserRound size={15} />, keywords: 'contacts people address book', action: onOpenContacts },
       { id: 'notifications', label: 'Tune notifications', icon: <Bell size={15} />, keywords: 'notifications alerts settings', action: onOpenNotifications },
@@ -37,7 +39,7 @@ export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSet
       { id: 'admin', label: 'Open admin panel', icon: <Server size={15} />, keywords: 'admin panel mailboxes aliases domain forwarders dns catch-all', action: onOpenAdmin },
       { id: 'help', label: 'Keyboard shortcuts', icon: <CircleHelp size={15} />, keywords: 'keyboard shortcuts help keys guide', action: onToggleHelp },
     ]
-  }, [onNavigate, onCompose, onOpenContacts, onOpenNotifications, onOpenSettings, onOpenAdmin, onToggleHelp])
+  }, [onNavigate, onCompose, onOpenContacts, onOpenNotifications, onOpenSettings, onOpenAdmin, onOpenCalendar, onToggleHelp])
 
   const filtered = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
