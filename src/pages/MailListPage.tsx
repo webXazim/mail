@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Filter, Mail as MailIcon, MailCheck, MailOpen, Palmtree, RotateCcw, SquarePen, Tag, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Download, FileUp, Filter, Mail as MailIcon, MailCheck, MailOpen, Palmtree, RotateCcw, SquarePen, Tag, Trash2 } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { categoryLabels, filterMails, folderFromPath, folderPath, snoozeAt, snoozeOptions } from '../lib/mail'
+import { exportToMbox, importFromMbox } from '../lib/mbox'
 import { MailRow } from '../components/MailRow'
 import { draftsApi } from '../services/drafts'
 import { foldersApi } from '../services/folders'
@@ -103,7 +104,7 @@ export function MailListPage() {
   const [searchParams] = useSearchParams()
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
-  const { mailbox, loading, loadError, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled, reload, notify } = useMail()
+  const { mailbox, loading, loadError, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled, reload, notify, importMails } = useMail()
   const [category, setCategory] = useState('Primary')
   const [checked, setChecked] = useState<string[]>([])
   const [labelsOpen, setLabelsOpen] = useState(false)
@@ -177,6 +178,34 @@ export function MailListPage() {
   const quickArchive = useCallback((mail: Mail) => applyAction('archive', [mail.id]), [applyAction])
   const quickTrash = useCallback((mail: Mail) => applyAction('trash', [mail.id]), [applyAction])
   const quickStar = useCallback((mail: Mail) => toggleStar([mail.id]), [toggleStar])
+
+  const mboxInputRef = useRef<HTMLInputElement | null>(null)
+  const exportMbox = () => {
+    const blob = new Blob([exportToMbox(mailbox)], { type: 'application/mbox' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'harbor-mail-export.mbox'
+    link.click()
+    URL.revokeObjectURL(url)
+    notify('Mailbox exported')
+  }
+  const onImportMbox = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    void file.text().then(content => {
+      const existing = new Set(mailbox.map(mail => mail.id))
+      const fresh = importFromMbox(content).filter(mail => !existing.has(mail.id))
+      if (fresh.length) {
+        importMails(fresh)
+        notify(`Imported ${fresh.length} message${fresh.length === 1 ? '' : 's'}`)
+      } else {
+        notify('Nothing new to import')
+      }
+    }).finally(() => {
+      if (event.target) event.target.value = ''
+    })
+  }
 
   const closeMenus = () => { setLabelsOpen(false); setSnoozeOpen(false); setFilterOpen(false); setSortOpen(false) }
   useEffect(() => {
@@ -287,6 +316,13 @@ export function MailListPage() {
           </>
         )}
         <span className="toolbar-spacer" />
+        {folder === 'All Mail' && (
+          <>
+            <input ref={mboxInputRef} type="file" accept=".mbox" hidden aria-label="Import mailbox" data-testid="mbox-import" onChange={onImportMbox} />
+            <button className="icon-button" aria-label="Export mailbox" title="Download your mailbox as an .mbox file" onClick={exportMbox}><Download size={17} /></button>
+            <button className="icon-button" aria-label="Import mailbox" title="Import messages from an .mbox file" onClick={() => mboxInputRef.current?.click()}><FileUp size={17} /></button>
+          </>
+        )}
         <div className="toolbar-pop">
           <button className="toolbar-text-button" aria-label="Filter messages" aria-expanded={filterOpen} onClick={event => { event.stopPropagation(); setFilterOpen(value => !value) }}>
             <Filter size={14} />Filter{activeFilterCount > 0 && <span className="toolbar-count">{activeFilterCount}</span>}

@@ -61,6 +61,7 @@ export type MailContextValue = {
   unsend: () => void
   dismissToast: (id: number) => void
   handleSent: (draft: Draft) => void
+  importMails: (mails: Mail[]) => void
   notify: (message: string) => void
   reload: () => void
 }
@@ -261,6 +262,10 @@ export function MailProvider({ children }: { children: ReactNode }) {
     })
   }, [arrive])
 
+  const importMails = useCallback((mails: Mail[]) => {
+    mails.forEach(mail => dispatch({ type: 'receive', mail }))
+  }, [])
+
   const unsend = useCallback(() => {
     if (!sentIdRef.current) return
     if (replyTimerRef.current !== null) {
@@ -301,9 +306,10 @@ export function MailProvider({ children }: { children: ReactNode }) {
     unsend,
     dismissToast,
     handleSent,
+    importMails,
     notify,
     reload,
-  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, notify, reload])
+  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, importMails, notify, reload])
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }
