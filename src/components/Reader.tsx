@@ -139,7 +139,7 @@ export function Reader({ mail, onReply, onReplyAll, onForward, onToggleStar, onT
   return (
     <aside className="reader" aria-label="Message">
       <div className="reader-toolbar">
-        <button className="icon-button" aria-label="Back" onClick={onBack}><ChevronLeft size={17} /></button>
+        <button className="icon-button reader-back" aria-label="Back" onClick={onBack}><ChevronLeft size={17} /><span className="reader-back__label">Back</span></button>
         <button className="icon-button" aria-label="Previous message" disabled={!canPrevious} onClick={onPrevious}><ChevronLeft size={17} /></button>
         <button className="icon-button" aria-label="Next message" disabled={!canNext} onClick={onNext}><ChevronRight size={17} /></button>
         <span className="reader-toolbar__sep" />

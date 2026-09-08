@@ -3743,3 +3743,113 @@ kbd {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Mobile polish                                                      */
+/* ------------------------------------------------------------------ */
+
+.reader-back__label {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .page-head .primary-button {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 25;
+    display: inline-flex;
+    height: 48px;
+    padding: 0 18px;
+    border-radius: 999px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .mail-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .mail-toolbar small,
+  .mail-toolbar .move-select {
+    display: none;
+  }
+
+  .reader-toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+  }
+
+  .reader-back {
+    width: auto;
+    padding: 0 10px 0 6px;
+    gap: 4px;
+  }
+
+  .reader-back__label {
+    display: inline;
+    color: var(--a2t-copy);
+    font-family: var(--a2t-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .formatting {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+  }
+
+  .formatting button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .composer-signature-toggle {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .composer footer {
+    flex-wrap: wrap;
+  }
+
+  .schedule-control input {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .thread-message header .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (max-width: 560px) {
+  .contacts-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .help-list div {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+}
+
+@media (hover: none) {
+  .notification-dismiss {
+    opacity: 1;
+  }
+}
