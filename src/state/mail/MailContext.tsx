@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { buildSentMail } from '../../lib/mail'
+import { applyIncomingFilters } from '../../lib/pipeline'
 import { mailboxApi } from '../../services/mailbox'
 import { scheduleApi } from '../../services/schedule'
 import { settingsApi } from '../../services/settings'
@@ -31,6 +32,7 @@ const chime = () => { if (settingsApi.load().alertSound) playAlertBeep() }
 export type MailContextValue = {
   mailbox: Mail[]
   loading: boolean
+  loadError: boolean
   notice: string
   undoActive: boolean
   undoSendActive: boolean
@@ -54,6 +56,7 @@ export type MailContextValue = {
   unsend: () => void
   dismissToast: (id: number) => void
   handleSent: (draft: Draft) => void
+  reload: () => void
 }
 
 const MailContext = createContext<MailContextValue | null>(null)
@@ -70,14 +73,41 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const toastSeqRef = useRef(0)
   const prevNoticeRef = useRef(state.notice)
 
+  const loadMailbox = useCallback(async () => {
+    let next
+    try {
+      next = await mailboxApi.list()
+    } catch {
+      dispatch({ type: 'load-failed' })
+      return
+    }
+    const applied = applyIncomingFilters(next)
+    dispatch({ type: 'hydrated', mailbox: applied.mailbox })
+    if (applied.report.forwarded.length) {
+      dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
     mailboxApi
       .list()
-      .then(next => { if (active) dispatch({ type: 'hydrated', mailbox: next }) })
+      .then(next => {
+        if (!active) return
+        const applied = applyIncomingFilters(next)
+        dispatch({ type: 'hydrated', mailbox: applied.mailbox })
+        if (applied.report.forwarded.length) {
+          dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
+        }
+      })
       .catch(() => { if (active) dispatch({ type: 'load-failed' }) })
     return () => { active = false }
   }, [])
+
+  const reload = useCallback(() => {
+    dispatch({ type: 'retry' })
+    void loadMailbox()
+  }, [loadMailbox])
 
   useEffect(() => {
     if (state.loading) return
@@ -187,6 +217,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const value = useMemo<MailContextValue>(() => ({
     mailbox: state.mailbox,
     loading: state.loading,
+    loadError: state.loadError,
     notice: state.notice,
     undoActive: state.undo !== null,
     undoSendActive,
@@ -211,7 +242,8 @@ export function MailProvider({ children }: { children: ReactNode }) {
     unsend,
     dismissToast,
     handleSent,
-  }), [state.mailbox, state.loading, state.notice, state.undo, undoSendActive, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent])
+    reload,
+  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, reload])
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }

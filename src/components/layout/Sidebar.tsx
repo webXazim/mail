@@ -69,7 +69,11 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
     }
   }, [resizing, onWidthChange])
   const goFolder = (label: Mailbox) => { navigate(`/mail/${folderSlug[label]}`); onCloseMobile() }
-  const goLabel = (label: string) => { navigate(`/mail/all?q=${encodeURIComponent(`label:${label}`)}`); onCloseMobile() }
+  const goLabel = (label: string) => {
+    const target = folder in folderSlug ? folderSlug[folder as Mailbox] : 'inbox'
+    navigate(`/mail/${target}?q=${encodeURIComponent(`label:${label}`)}`)
+    onCloseMobile()
+  }
   const goCustomFolder = (id: string) => { navigate(`/mail/folders/${id}`); onCloseMobile() }
   const closeMenu = () => setProfileOpen(false)
   const goAccount = (path: string) => { navigate(path); closeMenu(); onCloseMobile() }

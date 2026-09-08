@@ -85,9 +85,30 @@ export const getFolderCounts = (mailbox: Mail[]): Partial<Record<Mailbox, number
 })
 
 export const buildThread = (mail: Mail) => [
-  { sender: mail.sender, email: mail.email, initials: mail.initials, color: mail.color, copy: `${mail.preview} I have updated the project details and highlighted the items that need your attention before the next sync.`, time: mail.time },
-  { sender: 'Alex Morgan', email: 'alex@harbor.co', initials: 'AM', color: 'teal', copy: `On ${mail.time}, ${mail.sender} <${mail.email}> wrote:\n\n${mail.preview}\n\nThanks for the update. I will review the owners and milestones before our next sync.`, time: 'Yesterday' },
-  { sender: mail.sender, email: mail.email, initials: mail.initials, color: mail.color, copy: 'Perfect. I have added the latest notes to the brief and will bring any open questions to the meeting.', time: 'Yesterday' },
+  {
+    sender: mail.sender,
+    email: mail.email,
+    initials: mail.initials,
+    color: mail.color,
+    copy: `${mail.preview}\n\nI wanted to make sure “${mail.subject}” crossed your desk before the next sync call. Let me know if anything is missing.`,
+    time: mail.time,
+  },
+  {
+    sender: 'Alex Morgan',
+    email: 'alex@harbor.co',
+    initials: 'AM',
+    color: 'teal',
+    copy: `On ${mail.time}, ${mail.sender} <${mail.email}> wrote:\n\n${mail.preview}\n\nThanks for sending this over — I have worked through the points and the notes look ready for next steps.`,
+    time: 'Today',
+  },
+  {
+    sender: mail.sender,
+    email: mail.email,
+    initials: mail.initials,
+    color: mail.color,
+    copy: `Perfect — I have folded your feedback into the latest version of “${mail.subject}” and will flag anything that needs a decision.`,
+    time: 'Yesterday',
+  },
 ]
 
 export const matchesSearch = (mail: Mail, query: string) => {
@@ -118,6 +139,8 @@ const prefixSubject = (mail: Mail, prefix: 'Re:' | 'Fwd:') =>
 
 export const selfEmail = 'alex@harbor.co'
 
+export const parseAddresses = (value: string): string[] => value.split(',').map(part => part.trim()).filter(Boolean)
+
 export const buildReplyDraft = (mail: Mail): Partial<Draft> => ({
   to: mail.email,
   subject: prefixSubject(mail, 'Re:'),
@@ -138,20 +161,27 @@ export const buildForwardDraft = (mail: Mail): Partial<Draft> => ({
   attachments: mail.attachment && mail.attachmentName ? [mail.attachmentName] : [],
 })
 
-export const buildSentMail = (draft: Draft, time = 'Just now'): Mail => ({
-  id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-  initials: 'AM',
-  sender: 'Alex Morgan',
-  email: 'alex@harbor.co',
-  subject: draft.subject || '(no subject)',
-  preview: draft.body.slice(0, 120) || (draft.attachments.length ? 'Attached file' : '(no body)'),
-  time,
-  label: 'Sent',
-  color: 'teal',
-  unread: false,
-  folder: 'Sent',
-  attachment: draft.attachments.length > 0,
-})
+export const buildSentMail = (draft: Draft, time = 'Just now'): Mail => {
+  const from = draft.from
+  const sender = from?.name ?? 'Alex Morgan'
+  const email = from?.email ?? 'alex@harbor.co'
+  const initials = sender.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'AM'
+  return {
+    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    initials,
+    sender,
+    email,
+    subject: draft.subject || '(no subject)',
+    preview: draft.body.slice(0, 120) || (draft.attachments.length ? 'Attached file' : '(no body)'),
+    time,
+    label: 'Sent',
+    color: 'teal',
+    unread: false,
+    folder: 'Sent',
+    to: parseAddresses(draft.to),
+    attachment: draft.attachments.length > 0,
+  }
+}
 
 export type SnoozeOption = 'later-today' | 'tomorrow' | 'this-weekend' | 'next-week'
 

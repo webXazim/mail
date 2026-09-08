@@ -6,7 +6,7 @@ test.describe('thread', () => {
     await openThread(page, 'Nora Li')
     await expect(page.locator('.split-list')).toBeVisible()
     await expect(page.locator('.reader-content')).toContainText('Q3 launch plan - review before Thursday')
-    await expect(page.locator('.reader')).toContainText('latest notes to the brief')
+    await expect(page.locator('.reader')).toContainText('folded your feedback into the latest version')
   })
 
   test('backs out to the folder list', async ({ page }) => {

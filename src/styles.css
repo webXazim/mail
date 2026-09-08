@@ -1026,6 +1026,38 @@ input[type='radio'] {
   font-size: 11px;
 }
 
+.list-state .primary-button {
+  margin-top: 6px;
+}
+
+.mail-status {
+  display: grid;
+  gap: 8px;
+  padding: 12px 18px 0;
+}
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--a2t-line);
+  border-left: 3px solid var(--a2t-accent);
+  background: var(--a2t-panel);
+  color: var(--a2t-copy-soft);
+  font-size: 11px;
+}
+
+.status-banner svg {
+  flex: none;
+  color: var(--a2t-accent);
+}
+
+.status-banner strong {
+  color: var(--a2t-silver);
+  font-weight: 600;
+}
+
 .list-state strong {
   color: var(--a2t-silver);
   font-family: var(--a2t-sans);
@@ -1296,6 +1328,24 @@ input[type='radio'] {
 .reply-box small {
   color: var(--a2t-copy-soft);
   font-size: 10px;
+}
+
+.reader-links-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--a2t-line);
+  border-left: 3px solid var(--a2t-accent);
+  background: var(--a2t-panel);
+  color: var(--a2t-copy-soft);
+  font-size: 10px;
+}
+
+.reader-links-note svg {
+  flex: none;
+  color: var(--a2t-accent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2130,6 +2180,27 @@ kbd {
 .notification-list {
   display: grid;
 }
+
+.notifications-empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 44px 20px;
+  color: var(--a2t-copy-soft);
+  text-align: center;
+}
+
+.notifications-empty strong {
+  color: var(--a2t-silver);
+  font-family: var(--a2t-sans);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.notifications-empty span {
+  font-size: 10px;
+}
+
 
 .notification {
   position: relative;

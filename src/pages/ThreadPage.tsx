@@ -14,7 +14,7 @@ export function ThreadPage() {
   const { pathname } = useLocation()
   const { mailId } = useParams()
   const folder = folderFromPath(pathname)
-  const { mailbox, openCompose, toggleStar, markRead, markUnread, applyAction, moveToFolder, snooze } = useMail()
+  const { mailbox, loading, openCompose, toggleStar, markRead, markUnread, applyAction, moveToFolder, snooze } = useMail()
   const mail = mailbox.find(message => message.id === mailId)
   const rows = useMemo(() => {
     if (!mail) return []
@@ -45,6 +45,7 @@ export function ThreadPage() {
     return () => window.removeEventListener('keydown', handle)
   }, [mail, folder, navigate, openCompose, toggleStar, applyAction, previous, next])
 
+  if (loading) return <div className="list-state"><div className="loading-spinner" /><strong>Loading conversation</strong><span>Syncing your Harbor Mailbox...</span></div>
   if (!mail) return <div className="list-state"><strong>Message not found</strong><span>This conversation may have been removed.</span></div>
   const backToFolder = () => navigate(`/mail/${folderPath(folder)}`)
   const archive = () => { applyAction('archive', [mail.id]); backToFolder() }

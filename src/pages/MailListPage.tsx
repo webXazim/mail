@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Clock3, Filter, Mail as MailIcon, MailCheck, MailOpen, RotateCcw, SquarePen, Tag, Trash2 } from 'lucide-react'
+import { Archive, ArrowDownUp, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Filter, Mail as MailIcon, MailCheck, MailOpen, Palmtree, RotateCcw, SquarePen, Tag, Trash2 } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { categoryLabels, filterMails, folderFromPath, folderPath, snoozeAt, snoozeOptions } from '../lib/mail'
 import { MailRow } from '../components/MailRow'
 import { draftsApi } from '../services/drafts'
 import { foldersApi } from '../services/folders'
+import { forwardingApi } from '../services/forwarding'
 import { labelsApi } from '../services/labels'
 import { scheduleApi } from '../services/schedule'
 import { settingsApi } from '../services/settings'
+import { vacationApi } from '../services/vacation'
 import { useMail } from '../state/mail/MailContext'
 import type { MailActionKind } from '../state/mail/mailboxReducer'
 import type { Draft, Mail } from '../types'
@@ -100,7 +102,7 @@ export function MailListPage() {
   const [searchParams] = useSearchParams()
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
-  const { mailbox, loading, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled } = useMail()
+  const { mailbox, loading, loadError, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled, reload } = useMail()
   const [category, setCategory] = useState('Primary')
   const [checked, setChecked] = useState<string[]>([])
   const [labelsOpen, setLabelsOpen] = useState(false)
@@ -203,6 +205,20 @@ export function MailListPage() {
         </div>
         <button className="primary-button" onClick={() => openCompose()}><SquarePen size={16} />Compose</button>
       </header>
+      {folder === 'Inbox' && (() => {
+        const forwarding = forwardingApi.load()
+        const vacation = vacationApi.load()
+        return (forwarding.enabled || vacation.enabled) ? (
+          <div className="mail-status">
+            {forwarding.enabled && forwarding.address && (
+              <div className="status-banner"><CornerDownRight size={14} /><span>Forwarding is on — mail to <strong>alex@harbor.co</strong> is sent to <strong>{forwarding.address}</strong>{forwarding.keepCopy ? '' : ' (no copy is kept in this mailbox)'}.</span></div>
+            )}
+            {vacation.enabled && (
+              <div className="status-banner"><Palmtree size={14} /><span>Auto-reply is on — <strong>&ldquo;{vacation.subject}&rdquo;</strong>{vacation.endsAt ? ` until ${new Date(vacation.endsAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}.</span></div>
+            )}
+          </div>
+        ) : null
+      })()}
       {folder === 'Inbox' && (
         <div className="category-tabs">
           {['Primary', 'Promotions', 'Social', 'Updates'].map(name => (
@@ -295,6 +311,12 @@ export function MailListPage() {
       <section className="mail-list">
         {loading ? (
           <div className="list-state"><div className="loading-spinner" /><strong>Loading messages</strong><span>Syncing your Harbor Mailbox...</span></div>
+        ) : loadError ? (
+          <div className="list-state" role="alert">
+            <strong>We couldn't load your mailbox</strong>
+            <span>Something went wrong while syncing with the server. Your connection may be offline.</span>
+            <button className="primary-button" onClick={reload}><RotateCcw size={16} />Try again</button>
+          </div>
         ) : visible.length ? (
           visible.map(mail => (
             <MailRow

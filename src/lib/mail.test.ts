@@ -54,6 +54,20 @@ describe('buildSentMail', () => {
     expect(sent.subject).toBe('(no subject)')
     expect(sent.preview).toBe('(no body)')
   })
+
+  it('uses the selected identity for the From line', () => {
+    const sent = buildSentMail({ ...draft, from: { name: 'Marketing', email: 'marketing@harbor.co' } })
+    expect(sent.sender).toBe('Marketing')
+    expect(sent.email).toBe('marketing@harbor.co')
+    expect(sent.initials).toBe('M')
+  })
+
+  it('falls back to the profile defaults without an identity', () => {
+    const sent = buildSentMail(draft)
+    expect(sent.sender).toBe('Alex Morgan')
+    expect(sent.email).toBe('alex@harbor.co')
+    expect(sent.initials).toBe('AM')
+  })
 })
 
 describe('getFolderCounts', () => {

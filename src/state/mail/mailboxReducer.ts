@@ -7,6 +7,7 @@ export type MailUndo = { previous: Mail[]; ids: string[] }
 export type MailState = {
   mailbox: Mail[]
   loading: boolean
+  loadError: boolean
   notice: string
   undo: MailUndo | null
 }
@@ -14,6 +15,7 @@ export type MailState = {
 export type MailboxAction =
   | { type: 'hydrated'; mailbox: Mail[] }
   | { type: 'load-failed' }
+  | { type: 'retry' }
   | { type: 'mark-read'; ids: string[] }
   | { type: 'mark-unread'; ids: string[] }
   | { type: 'mark-all-read'; ids: string[] }
@@ -31,7 +33,7 @@ export type MailboxAction =
   | { type: 'notice'; message: string }
   | { type: 'clear-notice' }
 
-export const initialMailState: MailState = { mailbox: [], loading: true, notice: '', undo: null }
+export const initialMailState: MailState = { mailbox: [], loading: true, loadError: false, notice: '', undo: null }
 
 export const applyNotice: Record<MailActionKind, string> = {
   archive: 'Archived',
@@ -51,9 +53,11 @@ const atIds = (ids: string[], mail: Mail) => ids.includes(mail.id)
 export function mailboxReducer(state: MailState, action: MailboxAction): MailState {
   switch (action.type) {
     case 'hydrated':
-      return { ...state, mailbox: action.mailbox, loading: false }
+      return { ...state, mailbox: action.mailbox, loading: false, loadError: false }
     case 'load-failed':
-      return { ...state, loading: false, notice: 'Unable to sync mailbox' }
+      return { ...state, loading: false, loadError: true, notice: 'Unable to sync mailbox' }
+    case 'retry':
+      return { ...state, loading: true, loadError: false, notice: '' }
     case 'mark-read':
       return { ...state, mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, unread: false } : mail) }
     case 'mark-unread':
