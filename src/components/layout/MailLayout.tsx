@@ -32,7 +32,7 @@ const goShortcuts: Record<string, string> = {
 export function MailLayout() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { toasts, dismissToast, unsend, undoAction, composeOpen, composerInitial, openCompose, closeCompose, handleSent } = useMail()
+  const { toasts, dismissToast, unsend, undoAction, composeOpen, composerInitial, openCompose, closeCompose, handleSent, undoSecondsLeft } = useMail()
   const [mobile, setMobile] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(242)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -112,8 +112,8 @@ export function MailLayout() {
               {toast.canUndoAction && (
                 <button className="toast-action" onClick={() => { undoAction(); dismissToast(toast.id) }}>Undo</button>
               )}
-              {toast.canUndoSend && (
-                <button className="toast-action" onClick={() => { unsend(); dismissToast(toast.id) }}>Undo</button>
+              {toast.canUndoSend && undoSecondsLeft > 0 && (
+                <button className="toast-action" onClick={() => { unsend(); dismissToast(toast.id) }}>Undo · {undoSecondsLeft}s</button>
               )}
             </div>
           ))}

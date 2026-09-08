@@ -7,6 +7,7 @@ import { draftsApi } from '../services/drafts'
 import { foldersApi } from '../services/folders'
 import { forwardingApi } from '../services/forwarding'
 import { labelsApi } from '../services/labels'
+import { receiptsApi } from '../services/receipts'
 import { scheduleApi } from '../services/schedule'
 import { settingsApi } from '../services/settings'
 import { vacationApi } from '../services/vacation'
@@ -102,7 +103,7 @@ export function MailListPage() {
   const [searchParams] = useSearchParams()
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
-  const { mailbox, loading, loadError, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled, reload } = useMail()
+  const { mailbox, loading, loadError, scheduledCount, openCompose, markRead, markUnread, markAllRead, applyAction, moveToFolder, emptyTrash, toggleLabel, toggleStar, snooze, removeScheduled, reload, notify } = useMail()
   const [category, setCategory] = useState('Primary')
   const [checked, setChecked] = useState<string[]>([])
   const [labelsOpen, setLabelsOpen] = useState(false)
@@ -157,7 +158,14 @@ export function MailListPage() {
   const goToPage = (next: number) => setPage(Math.max(1, Math.min(pageCount, next)))
   const activeFilterCount = Number(filters.unread) + Number(filters.starred) + Number(filters.attachment)
 
-  const openThread = useCallback((mail: Mail) => { if (settingsApi.load().markReadOnOpen) markRead(mail.id); navigate(`/mail/${folderPath(folder)}/thread/${mail.id}`) }, [folder, markRead, navigate])
+  const openThread = useCallback((mail: Mail) => {
+    if (settingsApi.load().markReadOnOpen) markRead(mail.id)
+    if (settingsApi.load().sendReadReceipts && mail.email && !mail.email.toLowerCase().endsWith('@harbor.co') && !receiptsApi.has(mail.id)) {
+      receiptsApi.record(mail)
+      notify(`Read receipt sent to ${mail.sender}`)
+    }
+    navigate(`/mail/${folderPath(folder)}/thread/${mail.id}`)
+  }, [folder, markRead, navigate, notify])
   const openDraft = useCallback(() => { openCompose() }, [openCompose])
   const openScheduled = useCallback((mail: Mail) => {
     const entry = scheduledById.get(mail.id)

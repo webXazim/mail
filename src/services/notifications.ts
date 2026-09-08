@@ -1,6 +1,6 @@
 export type NotificationItem = {
   id: number
-  icon: 'mention' | 'security' | 'scheduled'
+  icon: 'mention' | 'security' | 'scheduled' | 'mail'
   title: string
   detail: string
   unread: boolean
@@ -26,5 +26,8 @@ export const notificationsApi = {
   },
   save(items: NotificationItem[]) {
     localStorage.setItem(KEY, JSON.stringify(items))
+  },
+  add(item: Pick<NotificationItem, 'icon' | 'title' | 'detail'>) {
+    this.save([{ ...item, id: Date.now(), unread: true }, ...this.load()])
   },
 }

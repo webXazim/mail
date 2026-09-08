@@ -29,6 +29,7 @@ export type MailboxAction =
   | { type: 'undo' }
   | { type: 'too-late' }
   | { type: 'sent'; mail: Mail }
+  | { type: 'receive'; mail: Mail }
   | { type: 'unsend-mail'; id: string }
   | { type: 'notice'; message: string }
   | { type: 'clear-notice' }
@@ -133,6 +134,8 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       return { ...state, undo: null }
     case 'sent':
       return { ...state, mailbox: [action.mail, ...state.mailbox], notice: 'Message sent' }
+    case 'receive':
+      return { ...state, mailbox: [action.mail, ...state.mailbox] }
     case 'unsend-mail':
       return { ...state, mailbox: state.mailbox.filter(mail => mail.id !== action.id), notice: 'Send undone' }
     case 'notice':

@@ -1,7 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { buildSentMail } from '../../lib/mail'
+import { applyFaviconBadge } from '../../lib/favicon'
+import { buildReplyMail } from '../../lib/delivery'
 import { applyIncomingFilters } from '../../lib/pipeline'
 import { mailboxApi } from '../../services/mailbox'
+import { notificationsApi } from '../../services/notifications'
+import { contactsService } from '../../services/contacts'
 import { scheduleApi } from '../../services/schedule'
 import { settingsApi } from '../../services/settings'
 import type { Draft, Mail } from '../../types'
@@ -36,6 +40,7 @@ export type MailContextValue = {
   notice: string
   undoActive: boolean
   undoSendActive: boolean
+  undoSecondsLeft: number
   toasts: MailToast[]
   composeOpen: boolean
   composerInitial: Partial<Draft> | null
@@ -68,7 +73,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const [composerInitial, setComposerInitial] = useState<Partial<Draft> | null>(null)
   const [scheduledCount, setScheduledCount] = useState(() => scheduleApi.list().length)
   const [undoSendActive, setUndoSendActive] = useState(false)
+  const [undoSecondsLeft, setUndoSendSecondsLeft] = useState(0)
   const sentIdRef = useRef<string | null>(null)
+  const replyTimerRef = useRef<number | null>(null)
   const timersRef = useRef<number[]>([])
   const [toasts, setToasts] = useState<MailToast[]>([])
   const toastSeqRef = useRef(0)
@@ -135,14 +142,23 @@ export function MailProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [state.mailbox, state.loading])
 
-  useEffect(() => () => { timersRef.current.forEach(window.clearTimeout) }, [])
+  useEffect(() => () => {
+    timersRef.current.forEach(window.clearTimeout)
+    if (replyTimerRef.current !== null) window.clearTimeout(replyTimerRef.current)
+  }, [])
 
   useEffect(() => {
     const settings = settingsApi.load()
-    if (!settings.unreadBadge) return
     const unread = state.mailbox.filter(mail => mail.unread && mail.folder !== 'Trash').length
-    document.title = unread ? `(${unread}) Harbor Mail` : 'Harbor Mail'
+    document.title = settings.unreadBadge && unread ? `(${unread}) Harbor Mail` : 'Harbor Mail'
+    applyFaviconBadge(settings.unreadBadge ? unread : 0)
   }, [state.mailbox])
+
+  useEffect(() => {
+    if (!undoSendActive) return
+    const interval = window.setInterval(() => setUndoSendSecondsLeft(current => Math.max(0, current - 1)), 1000)
+    return () => window.clearInterval(interval)
+  }, [undoSendActive])
 
   useEffect(() => {
     if (state.notice && state.notice !== prevNoticeRef.current) {
@@ -155,6 +171,25 @@ export function MailProvider({ children }: { children: ReactNode }) {
 
   const dismissToast = useCallback((id: number) => setToasts(current => current.filter(toast => toast.id !== id)), [])
   const notify = useCallback((message: string) => dispatch({ type: 'notice', message }), [])
+
+  const pushDesktopNotification = useCallback((title: string, body: string) => {
+    try {
+      if (!settingsApi.load().desktopNotifications) return
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+      const notification = new Notification(title, { body, tag: `harbor-mail-${Date.now()}` })
+      notification.onclick = () => window.focus()
+    } catch {
+      /* notifications unavailable */
+    }
+  }, [])
+
+  const arrive = useCallback((mail: Mail) => {
+    dispatch({ type: 'receive', mail })
+    dispatch({ type: 'notice', message: `New mail from ${mail.sender} — ${mail.subject}` })
+    chime()
+    pushDesktopNotification(mail.sender, mail.subject)
+    notificationsApi.add({ icon: 'mail', title: `New mail from ${mail.sender}`, detail: mail.subject })
+  }, [pushDesktopNotification])
 
   const openCompose = useCallback((initial?: Partial<Draft>) => {
     setComposerInitial(initial ?? null)
@@ -203,14 +238,25 @@ export function MailProvider({ children }: { children: ReactNode }) {
     chime()
     sentIdRef.current = mail.id
     setUndoSendActive(true)
+    setUndoSendSecondsLeft(5)
     timersRef.current.push(window.setTimeout(() => {
       sentIdRef.current = null
       setUndoSendActive(false)
     }, 5000))
-  }, [])
+    const inboxRecipients = (draft.to + ',' + draft.cc).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []
+    const firstRecipient = inboxRecipients[0]?.toLowerCase()
+    if (firstRecipient && !firstRecipient.endsWith('@harbor.co')) {
+      const contact = contactsService.list().find(item => item.email.toLowerCase() === firstRecipient)
+      replyTimerRef.current = window.setTimeout(() => arrive(buildReplyMail(draft, contact?.name)), 8000)
+    }
+  }, [arrive])
 
   const unsend = useCallback(() => {
     if (!sentIdRef.current) return
+    if (replyTimerRef.current !== null) {
+      window.clearTimeout(replyTimerRef.current)
+      replyTimerRef.current = null
+    }
     dispatch({ type: 'unsend-mail', id: sentIdRef.current })
     sentIdRef.current = null
     setUndoSendActive(false)
@@ -223,6 +269,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
     notice: state.notice,
     undoActive: state.undo !== null,
     undoSendActive,
+    undoSecondsLeft,
     toasts,
     composeOpen,
     composerInitial,
@@ -246,7 +293,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
     handleSent,
     notify,
     reload,
-  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, notify, reload])
+  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, notify, reload])
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }

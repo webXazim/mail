@@ -1,10 +1,10 @@
-import { Bell, Check, ShieldCheck, X } from 'lucide-react'
+import { Bell, Check, Mail as MailIcon, ShieldCheck, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { notificationsApi, type NotificationItem } from '../services/notifications'
 
-const icons: Record<NotificationItem['icon'], ComponentType<{ size?: number }>> = { mention: Bell, security: ShieldCheck, scheduled: Check }
+const icons: Record<NotificationItem['icon'], ComponentType<{ size?: number }>> = { mention: Bell, security: ShieldCheck, scheduled: Check, mail: MailIcon }
 
 export function Notifications({ close }: { close: () => void }) {
   const [items, setItems] = useState<NotificationItem[]>(() => notificationsApi.load())
