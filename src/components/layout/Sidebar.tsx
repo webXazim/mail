@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, CalendarDays, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, UserRound, X } from 'lucide-react'
+import { Check, CalendarDays, ChevronDown, CreditCard, Folder, Layers, LogOut, Server, Settings2, SquarePen, UserRound, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { folderFromPath, folderSlug, folders, getFolderCounts, navGroupTitles } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
@@ -8,6 +8,7 @@ import { foldersApi } from '../../services/folders'
 import { labelsApi } from '../../services/labels'
 import { settingsApi } from '../../services/settings'
 import { authApi } from '../../services/auth'
+import { primaryAccountId, unifiedViewId } from '../../services/accounts'
 import { ManageFolders } from '../ManageFolders'
 import { ManageLabels } from '../ManageLabels'
 import type { Mailbox } from '../../types'
@@ -25,16 +26,17 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { mailbox, scheduledCount } = useMail()
+  const { mailbox, scheduledCount, accounts, activeAccount, setActiveAccount } = useMail()
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
   const counts = useMemo(() => getFolderCounts(mailbox), [mailbox])
   const profile = useMemo(() => {
-    const displayName = settingsApi.load().displayName || 'Alex Morgan'
+    const active = accounts.find(account => account.id === activeAccount) ?? accounts[0]
+    const displayName = active.id === primaryAccountId ? (settingsApi.load().displayName || active.name) : active.name
     const clear = displayName.trim().split(/\s+/)
     const initials = clear.map(part => part[0]?.toUpperCase() ?? '').slice(0, 2).join('') || 'AM'
-    return { displayName, initials }
-  }, [])
+    return { displayName, initials, email: active.email, color: active.color }
+  }, [accounts, activeAccount])
   const storage = useMemo(() => {
     const attachments = mailbox.filter(mail => mail.attachment).length
     const used = 0.4 + mailbox.filter(mail => mail.folder !== 'Trash').length * 0.002 + attachments * 0.012
@@ -108,6 +110,20 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         </nav>
       ))}
       <section className="side-section">
+        <div className="side-section__head"><p>Accounts</p><button type="button" aria-label="Manage accounts" onClick={() => goAccount('/mail/settings?tab=accounts')}><Settings2 size={13} /></button></div>
+        <button className={`folder-link ${activeAccount === unifiedViewId ? 'folder-link--active' : ''}`} aria-label="Switch to unified inbox" aria-current={activeAccount === unifiedViewId ? 'page' : undefined} onClick={() => { setActiveAccount(unifiedViewId); onCloseMobile() }}>
+          <Layers size={17} /><span>Unified inbox</span>
+        </button>
+        {accounts.map(account => {
+          const isActive = activeAccount === account.id
+          return (
+            <button key={account.id} className={`folder-link ${isActive ? 'folder-link--active' : ''}`} aria-label={`Switch to ${account.email}`} aria-current={isActive ? 'page' : undefined} onClick={() => { setActiveAccount(account.id); onCloseMobile() }}>
+              <span className={`avatar avatar--${account.color}`}>{account.initials}</span><span className="account-name">{account.name}<small>{account.email}</small></span>
+            </button>
+          )
+        })}
+      </section>
+      <section className="side-section">
         <div className="side-section__head"><p>Labels</p><button type="button" aria-label="Manage labels" onClick={() => setManageLabelsOpen(true)}><Settings2 size={13} /></button></div>
         {labels.map(({ name, color }) => (
           <button className={`label-link ${query.toLowerCase() === `label:${name.toLowerCase()}` ? 'label-link--active' : ''}`} key={name} onClick={() => goLabel(name)}>
@@ -135,13 +151,13 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         </div>
         <div className="profile-wrap">
           <button className="profile" onClick={event => { event.stopPropagation(); setProfileOpen(value => !value) }} aria-haspopup="menu" aria-expanded={profileOpen}>
-            <span className="avatar avatar--teal">{profile.initials}</span>
-            <span><strong>{profile.displayName}</strong><small>alex@harbor.co</small></span>
+            <span className={`avatar avatar--${profile.color}`}>{profile.initials}</span>
+            <span><strong>{profile.displayName}</strong><small>{profile.email}</small></span>
             <ChevronDown size={15} className={`profile-chevron ${profileOpen ? 'profile-chevron--open' : ''}`} />
           </button>
 {profileOpen && (
             <div className="profile-menu" role="menu">
-              <div className="profile-menu__account"><span className="avatar avatar--teal">{profile.initials}</span><span><strong>{profile.displayName}</strong><small>alex@harbor.co</small></span><Check size={14} /></div>
+              <div className="profile-menu__account"><span className={`avatar avatar--${profile.color}`}>{profile.initials}</span><span><strong>{profile.displayName}</strong><small>{profile.email}</small></span><Check size={14} /></div>
               <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/settings')}><Settings2 size={14} />Settings</button>
               <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/billing')}><CreditCard size={14} />Billing</button>
               <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/admin')}><Server size={14} />Admin panel</button>

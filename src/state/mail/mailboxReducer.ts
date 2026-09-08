@@ -1,4 +1,5 @@
 import type { Mail } from '../../types'
+import { primaryAccountId } from '../../services/accounts'
 
 export type MailActionKind = 'archive' | 'read' | 'trash'
 
@@ -30,6 +31,8 @@ export type MailboxAction =
   | { type: 'too-late' }
   | { type: 'sent'; mail: Mail }
   | { type: 'receive'; mail: Mail }
+  | { type: 'append'; mails: Mail[] }
+  | { type: 'drop-account'; accountId: string }
   | { type: 'unsend-mail'; id: string }
   | { type: 'notice'; message: string }
   | { type: 'clear-notice' }
@@ -136,6 +139,10 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       return { ...state, mailbox: [action.mail, ...state.mailbox], notice: 'Message sent' }
     case 'receive':
       return { ...state, mailbox: [action.mail, ...state.mailbox] }
+    case 'append':
+      return { ...state, mailbox: [...state.mailbox, ...action.mails] }
+    case 'drop-account':
+      return { ...state, mailbox: state.mailbox.filter(mail => (mail.accountId ?? primaryAccountId) !== action.accountId) }
     case 'unsend-mail':
       return { ...state, mailbox: state.mailbox.filter(mail => mail.id !== action.id), notice: 'Send undone' }
     case 'notice':

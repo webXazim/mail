@@ -4,6 +4,7 @@ import { applyFaviconBadge } from '../../lib/favicon'
 import { buildReplyMail } from '../../lib/delivery'
 import { applyIncomingFilters } from '../../lib/pipeline'
 import { mailboxApi } from '../../services/mailbox'
+import { accountsApi, unifiedViewId, primaryAccountId, type Account } from '../../services/accounts'
 import { notificationsApi } from '../../services/notifications'
 import { contactsService } from '../../services/contacts'
 import { scheduleApi } from '../../services/schedule'
@@ -35,6 +36,11 @@ const chime = () => { if (settingsApi.load().alertSound) playAlertBeep() }
 
 export type MailContextValue = {
   mailbox: Mail[]
+  accounts: Account[]
+  activeAccount: string
+  setActiveAccount: (accountId: string) => void
+  addAccount: (input: { name: string; email: string; password: string }) => Account
+  removeAccount: (accountId: string) => void
   loading: boolean
   loadError: boolean
   notice: string
@@ -70,6 +76,8 @@ const MailContext = createContext<MailContextValue | null>(null)
 
 export function MailProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(mailboxReducer, initialMailState)
+  const [accounts, setAccounts] = useState<Account[]>(() => accountsApi.list())
+  const [activeAccount, setActiveAccountState] = useState<string>(unifiedViewId)
   const [composeOpen, setComposeOpen] = useState(false)
   const [composerInitial, setComposerInitial] = useState<Partial<Draft> | null>(null)
   const [scheduledCount, setScheduledCount] = useState(() => scheduleApi.list().length)
@@ -83,35 +91,24 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const prevNoticeRef = useRef(state.notice)
 
   const loadMailbox = useCallback(async () => {
-    let next
     try {
-      next = await mailboxApi.list()
+      const primary = await mailboxApi.list()
+      const secondaryAccounts = accountsApi.list().filter(account => account.id !== primaryAccountId)
+      const secondary = (await Promise.all(secondaryAccounts.map(account => mailboxApi.listFor(account.id)))).flat()
+      const combined = secondary.length ? [...primary, ...secondary] : primary
+      const applied = applyIncomingFilters(combined)
+      dispatch({ type: 'hydrated', mailbox: applied.mailbox })
+      if (applied.report.forwarded.length) {
+        dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
+      }
     } catch {
       dispatch({ type: 'load-failed' })
-      return
-    }
-    const applied = applyIncomingFilters(next)
-    dispatch({ type: 'hydrated', mailbox: applied.mailbox })
-    if (applied.report.forwarded.length) {
-      dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
     }
   }, [])
 
   useEffect(() => {
-    let active = true
-    mailboxApi
-      .list()
-      .then(next => {
-        if (!active) return
-        const applied = applyIncomingFilters(next)
-        dispatch({ type: 'hydrated', mailbox: applied.mailbox })
-        if (applied.report.forwarded.length) {
-          dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
-        }
-      })
-      .catch(() => { if (active) dispatch({ type: 'load-failed' }) })
-    return () => { active = false }
-  }, [])
+    void loadMailbox()
+  }, [loadMailbox])
 
   const reload = useCallback(() => {
     dispatch({ type: 'retry' })
@@ -138,7 +135,13 @@ export function MailProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.loading) return
     const timer = window.setTimeout(() => {
-      void mailboxApi.replace(state.mailbox).catch(() => dispatch({ type: 'notice', message: 'Unable to save mailbox changes' }))
+      const all = state.mailbox
+      void mailboxApi
+        .replace(all.filter(mail => (mail.accountId ?? primaryAccountId) === primaryAccountId))
+        .catch(() => dispatch({ type: 'notice', message: 'Unable to save mailbox changes' }))
+      accountsApi.list().filter(account => account.id !== primaryAccountId).forEach(account => {
+        void mailboxApi.replaceFor(account.id, all.filter(mail => mail.accountId === account.id)).catch(() => { /* best effort */ })
+      })
     }, 400)
     return () => window.clearTimeout(timer)
   }, [state.mailbox, state.loading])
@@ -287,8 +290,39 @@ export function MailProvider({ children }: { children: ReactNode }) {
     setUndoSendActive(false)
   }, [])
 
+  const mailbox = useMemo(
+    () => (activeAccount === unifiedViewId ? state.mailbox : state.mailbox.filter(mail => (mail.accountId ?? primaryAccountId) === activeAccount)),
+    [state.mailbox, activeAccount],
+  )
+
+  const setActiveAccount = useCallback((accountId: string) => {
+    setActiveAccountState(accountId)
+    dispatch({ type: 'clear-notice' })
+  }, [])
+
+  const addAccount = useCallback((input: { name: string; email: string; password: string }) => {
+    const result = accountsApi.add(input)
+    setAccounts(accountsApi.list())
+    dispatch({ type: 'append', mails: result.mailbox })
+    dispatch({ type: 'notice', message: `Added ${result.account.email} to your accounts` })
+    return result.account
+  }, [])
+
+  const removeAccount = useCallback((accountId: string) => {
+    accountsApi.remove(accountId)
+    setAccounts(accountsApi.list())
+    if (activeAccount === accountId) setActiveAccountState(unifiedViewId)
+    dispatch({ type: 'drop-account', accountId })
+    dispatch({ type: 'notice', message: 'Account removed' })
+  }, [activeAccount])
+
   const value = useMemo<MailContextValue>(() => ({
-    mailbox: state.mailbox,
+    mailbox,
+    accounts,
+    activeAccount,
+    setActiveAccount,
+    addAccount,
+    removeAccount,
     loading: state.loading,
     loadError: state.loadError,
     notice: state.notice,
@@ -319,7 +353,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
     importMails,
     notify,
     reload,
-  }), [state.mailbox, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, importMails, notify, reload])
+  }), [mailbox, accounts, activeAccount, setActiveAccount, addAccount, removeAccount, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, importMails, notify, reload])
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }

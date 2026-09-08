@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { AtSign, Bell, BellOff, Check, Filter, KeyRound, LockKeyhole, Mailbox, Save, ShieldCheck, UserRound, X } from 'lucide-react'
+import { AtSign, Bell, BellOff, Check, Filter, KeyRound, LockKeyhole, Mailbox, Save, ShieldCheck, UserRound, UsersRound, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { settingsApi, type UserSettings } from '../services/settings'
+import { AccountsSettings } from './settings/AccountsSettings'
 import { FiltersSettings } from './settings/FiltersSettings'
 import { IdentitiesSettings } from './settings/IdentitiesSettings'
 import { MailSettings } from './settings/MailSettings'
@@ -9,7 +11,7 @@ import { SpamSettings } from './settings/SpamSettings'
 
 export type SettingsProps = { close: () => void }
 
-type Tab = 'account' | 'mail' | 'filters' | 'spam' | 'identities' | 'notifications' | 'security'
+type Tab = 'account' | 'accounts' | 'mail' | 'filters' | 'spam' | 'identities' | 'notifications' | 'security'
 
 const sessions = [
   { id: 1, name: 'Chrome on macOS', location: 'San Francisco, US', active: true },
@@ -20,8 +22,9 @@ const sessions = [
 const notificationSupported = () => typeof window !== 'undefined' && 'Notification' in window
 
 export function Settings({ close }: SettingsProps) {
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') === 'accounts' ? 'accounts' : 'account'))
   const [settings, setSettings] = useState<UserSettings>(() => settingsApi.load())
-  const [tab, setTab] = useState<Tab>('account')
   const [saved, setSaved] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
   useFocusTrap(panelRef)
@@ -70,6 +73,7 @@ export function Settings({ close }: SettingsProps) {
         </header>
         <nav className="settings-nav" aria-label="Settings sections">
           <button type="button" className={tab === 'account' ? 'settings-nav--active' : ''} aria-current={tab === 'account' ? 'page' : undefined} onClick={() => setTab('account')}><UserRound size={15} />Account</button>
+          <button type="button" className={tab === 'accounts' ? 'settings-nav--active' : ''} aria-current={tab === 'accounts' ? 'page' : undefined} onClick={() => setTab('accounts')}><UsersRound size={15} />Accounts</button>
           <button type="button" className={tab === 'mail' ? 'settings-nav--active' : ''} aria-current={tab === 'mail' ? 'page' : undefined} onClick={() => setTab('mail')}><Mailbox size={15} />Mail</button>
           <button type="button" className={tab === 'filters' ? 'settings-nav--active' : ''} aria-current={tab === 'filters' ? 'page' : undefined} onClick={() => setTab('filters')}><Filter size={15} />Filters</button>
           <button type="button" className={tab === 'spam' ? 'settings-nav--active' : ''} aria-current={tab === 'spam' ? 'page' : undefined} onClick={() => setTab('spam')}><ShieldCheck size={15} />Spam</button>
@@ -102,6 +106,8 @@ export function Settings({ close }: SettingsProps) {
             </footer>
           </form>
         )}
+
+        {tab === 'accounts' && <AccountsSettings />}
 
         {tab === 'mail' && <MailSettings />}
 

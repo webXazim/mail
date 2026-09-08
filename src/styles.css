@@ -3853,3 +3853,47 @@ kbd {
     opacity: 1;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Accounts (multi-account / unified inbox)                           */
+/* ------------------------------------------------------------------ */
+
+.folder-link .account-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.folder-link .account-name small {
+  overflow: hidden;
+  color: var(--a2t-copy-soft);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.account-identity > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.account-identity strong,
+.account-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-identity__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
