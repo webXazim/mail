@@ -63,3 +63,48 @@ it('is idempotent across repeated passes', () => {
   const second = applyIncomingFilters(first).mailbox
   expect(second).toEqual(first)
 })
+
+it('matches the size condition using estimated message size', () => {
+  const big = { ...mailbox[0], id: 'e', attachment: true, attachmentName: 'final-reviewed-and-signed-annual-contract-update-v2.pdf' }
+  const small = { ...mailbox[1], id: 'f', preview: 'ok' }
+  localStorage.setItem('harbor-mail:rules', JSON.stringify([
+    { id: 'r5', name: 'Large mail', enabled: true, conditions: [{ field: 'size', op: 'larger', size: 1 }], actions: [{ kind: 'label', value: 'Bulk' }] },
+    { id: 'r6', name: 'Tiny mail', enabled: true, conditions: [{ field: 'size', op: 'smaller', size: 2 }], actions: [{ kind: 'archive' }] },
+  ]))
+  const { mailbox: next } = applyIncomingFilters([big, small])
+  expect(next.find(mail => mail.id === 'e')?.label).toBe('Bulk')
+  expect(next.find(mail => mail.id === 'e')?.folder).toBe('Inbox')
+  expect(next.find(mail => mail.id === 'f')?.folder).toBe('Archive')
+})
+
+it('matches the date condition against the message time', () => {
+  const today = new Date().toISOString().slice(0, 10)
+  const fresh = { ...mailbox[1], id: 'g', time: '9:42 AM' }
+  const old = { ...mailbox[2], id: 'h', time: 'Yesterday' }
+  localStorage.setItem('harbor-mail:rules', JSON.stringify([
+    { id: 'r7', name: 'Recent', enabled: true, conditions: [{ field: 'date', op: 'on', value: today }], actions: [{ kind: 'mark-starred' }] },
+    { id: 'r8', name: 'Older', enabled: true, conditions: [{ field: 'date', op: 'before', value: today }], actions: [{ kind: 'label', value: 'Old' }] },
+  ]))
+  const { mailbox: next } = applyIncomingFilters([fresh, old])
+  expect(next.find(mail => mail.id === 'g')?.starred).toBe(true)
+  expect(next.find(mail => mail.id === 'h')?.label).toBe('Old')
+})
+
+it('discards matching mail to Trash for a single incoming message', () => {
+  const single = { ...mailbox[1], id: 'i', email: 'spammy@example.com', subject: 'You won a prize now' }
+  localStorage.setItem('harbor-mail:rules', JSON.stringify([
+    { id: 'r9', name: 'Junk', enabled: true, conditions: [{ field: 'subject', value: 'prize' }], actions: [{ kind: 'discard' }] },
+  ]))
+  const { mailbox: next } = applyIncomingFilters([single])
+  expect(next.find(mail => mail.id === 'i')?.folder).toBe('Trash')
+})
+
+it('reports forwarding for a single incoming message but keeps it in the mailbox', () => {
+  const single = { ...mailbox[0], id: 'j', email: 'news@harbor.co' }
+  localStorage.setItem('harbor-mail:rules', JSON.stringify([
+    { id: 'r10', name: 'Shine a light', enabled: true, conditions: [{ field: 'from', value: 'news@harbor.co' }], actions: [{ kind: 'forward', value: 'team@harbor.co' }] },
+  ]))
+  const { mailbox: next, report } = applyIncomingFilters([single])
+  expect(report.forwarded).toEqual([{ address: 'team@harbor.co', count: 1 }])
+  expect(next.find(mail => mail.id === 'j')?.folder).toBe('Inbox')
+})

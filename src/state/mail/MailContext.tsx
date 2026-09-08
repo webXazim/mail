@@ -185,8 +185,18 @@ export function MailProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const arrive = useCallback((mail: Mail) => {
-    dispatch({ type: 'receive', mail })
-    dispatch({ type: 'notice', message: `New mail from ${mail.sender} — ${mail.subject}` })
+    const { mailbox: processedMail, report } = applyIncomingFilters([mail])
+    const processed = processedMail[0] ?? mail
+    dispatch({ type: 'receive', mail: processed })
+    if (report.forwarded.length) {
+      const item = report.forwarded[0]
+      dispatch({ type: 'notice', message: `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}` })
+    } else if (processed.folder === 'Trash') {
+      dispatch({ type: 'notice', message: `Discarded an unwanted message from ${mail.sender}` })
+    } else {
+      dispatch({ type: 'notice', message: `New mail from ${mail.sender} — ${mail.subject}` })
+    }
+    if (processed.folder === 'Trash') return
     chime()
     pushDesktopNotification(mail.sender, mail.subject)
     notificationsApi.add({ icon: 'mail', title: `New mail from ${mail.sender}`, detail: mail.subject })
