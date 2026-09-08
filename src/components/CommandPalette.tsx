@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, CircleHelp, Search, Settings2, SquarePen, UserRound } from 'lucide-react'
+import { Bell, CircleHelp, Search, Server, Settings2, SquarePen, UserRound } from 'lucide-react'
 import { folderSlug, folders } from '../lib/mail'
 
 type CommandPaletteProps = {
@@ -10,12 +10,13 @@ type CommandPaletteProps = {
   onOpenSettings: () => void
   onOpenNotifications: () => void
   onOpenContacts: () => void
+  onOpenAdmin: () => void
   onToggleHelp: () => void
 }
 
 type Command = { id: string; label: string; icon: ReactNode; keywords: string; action: () => void }
 
-export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSettings, onOpenNotifications, onOpenContacts, onToggleHelp }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSettings, onOpenNotifications, onOpenContacts, onOpenAdmin, onToggleHelp }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
 
@@ -33,9 +34,10 @@ export function CommandPalette({ open, onClose, onNavigate, onCompose, onOpenSet
       { id: 'contacts', label: 'Open contacts', icon: <UserRound size={15} />, keywords: 'contacts people address book', action: onOpenContacts },
       { id: 'notifications', label: 'Tune notifications', icon: <Bell size={15} />, keywords: 'notifications alerts settings', action: onOpenNotifications },
       { id: 'settings', label: 'Open settings', icon: <Settings2 size={15} />, keywords: 'settings preferences options signature', action: onOpenSettings },
+      { id: 'admin', label: 'Open admin panel', icon: <Server size={15} />, keywords: 'admin panel mailboxes aliases domain forwarders dns catch-all', action: onOpenAdmin },
       { id: 'help', label: 'Keyboard shortcuts', icon: <CircleHelp size={15} />, keywords: 'keyboard shortcuts help keys guide', action: onToggleHelp },
     ]
-  }, [onNavigate, onCompose, onOpenContacts, onOpenNotifications, onOpenSettings, onToggleHelp])
+  }, [onNavigate, onCompose, onOpenContacts, onOpenNotifications, onOpenSettings, onOpenAdmin, onToggleHelp])
 
   const filtered = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, CreditCard, Folder, LogOut, Settings2, SquarePen, X } from 'lucide-react'
+import { Check, ChevronDown, CreditCard, Folder, LogOut, Server, Settings2, SquarePen, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { folderFromPath, folderSlug, folders, getFolderCounts, navGroupTitles } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
@@ -138,6 +138,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
               <div className="profile-menu__account"><span className="avatar avatar--teal">{profile.initials}</span><span><strong>{profile.displayName}</strong><small>alex@harbor.co</small></span><Check size={14} /></div>
               <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/settings')}><Settings2 size={14} />Settings</button>
               <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/billing')}><CreditCard size={14} />Billing</button>
+              <button type="button" role="menuitem" className="profile-menu__item" onClick={() => goAccount('/mail/admin')}><Server size={14} />Admin panel</button>
               <div className="profile-menu__divider" />
               <button type="button" role="menuitem" className="profile-menu__item" onClick={signOut}><LogOut size={14} />Sign out</button>
             </div>

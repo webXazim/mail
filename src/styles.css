@@ -2050,6 +2050,22 @@ kbd {
   border-bottom: 1px solid var(--a2t-line-soft);
 }
 
+.admin-record {
+  display: block;
+  max-width: 480px;
+  margin-top: 4px;
+  font-family: var(--a2t-mono);
+  font-size: 12px;
+  color: var(--a2t-copy-soft);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.admin-record--pending {
+  font-weight: 500;
+  color: var(--a2t-copy-soft);
+}
+
 .plan-option {
   display: flex;
   align-items: center;

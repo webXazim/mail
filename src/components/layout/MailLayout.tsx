@@ -5,6 +5,7 @@ import { folderFromPath, folderPath, folderSlug } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { CommandPalette } from '../CommandPalette'
+import { Admin } from '../Admin'
 import { Billing } from '../Billing'
 import { ContactsDrawer } from '../ContactsDrawer'
 import { Notifications } from '../Notifications'
@@ -46,6 +47,7 @@ export function MailLayout() {
   const settingsOpen = location.pathname.endsWith('/settings')
   const notificationsOpen = location.pathname.endsWith('/notifications')
   const billingOpen = location.pathname.endsWith('/billing')
+  const adminOpen = location.pathname.endsWith('/admin')
 
   useEffect(() => {
     const online = () => setOffline(false)
@@ -71,7 +73,7 @@ export function MailLayout() {
         setContactsOpen(false)
         closeCompose()
         setMobile(false)
-        if (settingsOpen || notificationsOpen || billingOpen) navigate(`/mail/${folderPath(folder)}`)
+        if (settingsOpen || notificationsOpen || billingOpen || adminOpen) navigate(`/mail/${folderPath(folder)}`)
       }
       if (!typing) {
         if (event.key.toLowerCase() === 'g' && !gPendingRef.current) {
@@ -89,7 +91,7 @@ export function MailLayout() {
     }
     window.addEventListener('keydown', handle)
     return () => window.removeEventListener('keydown', handle)
-  }, [folder, settingsOpen, notificationsOpen, billingOpen, navigate, openCompose, closeCompose])
+  }, [folder, settingsOpen, notificationsOpen, billingOpen, adminOpen, navigate, openCompose, closeCompose])
 
   return (
     <div className={`app ${threadOpen ? 'app--thread' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
@@ -142,6 +144,7 @@ export function MailLayout() {
         onOpenSettings={() => navigate('/mail/settings')}
         onOpenNotifications={() => navigate('/mail/notifications')}
         onOpenContacts={() => setContactsOpen(true)}
+        onOpenAdmin={() => navigate('/mail/admin')}
         onToggleHelp={() => setHelpOpen(true)}
       />
       <Onboarding />
@@ -149,6 +152,7 @@ export function MailLayout() {
       {composeOpen && <Suspense fallback={null}><Composer close={closeCompose} onSent={handleSent} initialDraft={composerInitial ?? undefined} /></Suspense>}
       {settingsOpen && <Settings close={() => navigate(`/mail/${folderPath(folder)}`)} />}
       {billingOpen && <Billing close={() => navigate(`/mail/${folderPath(folder)}`)} />}
+      {adminOpen && <Admin close={() => navigate(`/mail/${folderPath(folder)}`)} />}
       {notificationsOpen && <Notifications close={() => navigate(`/mail/${folderPath(folder)}`)} />}
     </div>
   )
