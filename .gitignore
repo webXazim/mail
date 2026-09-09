@@ -41,7 +41,6 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Misc
-.aider*
 .cache/
 
 # Playwright

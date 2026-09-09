@@ -3,7 +3,7 @@ import { openInbox } from './helpers'
 
 test.describe('custom folders', () => {
   test('creates a folder and moves mail into it', async ({ page }) => {
-    await openInbox(page)
+await openInbox(page)
 
     await page.getByRole('button', { name: 'Manage folders' }).click()
     const dialog = page.getByRole('dialog', { name: 'Manage folders' })
@@ -28,9 +28,9 @@ test.describe('custom folders', () => {
 test.describe('settings — mail', () => {
   async function openSettings(page: Page) {
     await openInbox(page)
-    await page.getByRole('button', { name: /Alex Morgan/ }).click()
+    await page.getByRole('button', { name: 'Open account menu' }).click()
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const settings = page.getByRole('region', { name: 'Settings' })
     await expect(settings).toBeVisible()
     return settings
   }

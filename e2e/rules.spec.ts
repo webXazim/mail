@@ -5,15 +5,20 @@ const composeButton = (page: Page) => page.locator('.page-head').getByRole('butt
 
 async function openFilters(page: Page) {
   await openInbox(page)
-  await page.getByRole('button', { name: /Alex Morgan/ }).click()
+  await page.getByRole('button', { name: 'Open account menu' }).click()
   await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-  const settings = page.getByRole('dialog', { name: 'Settings' })
+  const settings = page.getByRole('region', { name: 'Settings' })
   await expect(settings).toBeVisible()
   await settings.getByRole('button', { name: 'Filters', exact: true }).click()
   await expect(page.getByText('Newsletters')).toBeVisible()
 }
 
-const sidebarButton = (page: Page, folder: string) => page.locator('.sidebar').getByRole('button', { name: new RegExp(`^${folder}\\s`) })
+const sidebarButton = async (page: Page, folder: string) => {
+  const sidebar = page.locator('.sidebar')
+  const moreFolders = sidebar.getByRole('button', { name: 'More', exact: true })
+  if (!(await sidebar.getByRole('button', { name: new RegExp(`^${folder}\\s`) }).count())) await moreFolders.click()
+  return sidebar.getByRole('button', { name: new RegExp(`^${folder}\\s`) })
+}
 
 async function addRule(page: Page, name: string, from: string, actionKind: string) {
   await page.getByRole('button', { name: 'New rule' }).click()
@@ -45,11 +50,11 @@ test.describe('rules parity', () => {
     await sendComposed(page, 'nora@northstar.studio', 'Rules parity')
     await expect(page.getByRole('status').filter({ hasText: 'New mail from Nora Li' })).toBeVisible({ timeout: 15000 })
 
-    await sidebarButton(page, 'Archive').click()
+    await (await sidebarButton(page, 'Archive')).click()
     await expect(page.getByRole('heading', { name: 'Archive', exact: true })).toBeVisible()
     await expect(page.locator('.mail-row', { hasText: 'Re: Rules parity' })).toBeVisible()
 
-    await sidebarButton(page, 'Inbox').click()
+    await (await sidebarButton(page, 'Inbox')).click()
     await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible()
     await expect(page.locator('.mail-row', { hasText: 'Re: Rules parity' })).toHaveCount(0)
   })
@@ -64,11 +69,11 @@ test.describe('rules parity', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Discarded an unwanted message from Jo' })).toBeVisible({ timeout: 15000 })
     await expect(page.getByRole('status').filter({ hasText: 'New mail from Jo' })).toHaveCount(0)
 
-    await sidebarButton(page, 'Trash').click()
+    await (await sidebarButton(page, 'Trash')).click()
     await expect(page.getByRole('heading', { name: 'Trash', exact: true })).toBeVisible()
     await expect(page.locator('.mail-row', { hasText: 'Re: Junk check' })).toBeVisible()
 
-    await sidebarButton(page, 'Inbox').click()
+    await (await sidebarButton(page, 'Inbox')).click()
     await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible()
     await expect(page.getByText('Re: Junk check')).toHaveCount(0)
   })

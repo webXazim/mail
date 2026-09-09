@@ -31,10 +31,13 @@ describe('calendarApi events', () => {
   })
 
   it('lists only events on the given date, all-day first', () => {
-    const allDay = calendarApi.add(blank({ title: 'Invoice', date: '2026-09-15', allDay: true, start: '', end: '' }))
-    const timed = calendarApi.add(blank({ title: 'Review', date: '2026-09-15', start: '14:00', end: '15:00' }))
+    const probe = new Date()
+    probe.setDate(probe.getDate() + 40)
+    const date = localDate(probe)
+    const allDay = calendarApi.add(blank({ title: 'Invoice', date, allDay: true, start: '', end: '' }))
+    const timed = calendarApi.add(blank({ title: 'Review', date, start: '14:00', end: '15:00' }))
     expect(allDay).toBeDefined()
-    const listed = calendarApi.listOn('2026-09-15')
+    const listed = calendarApi.listOn(date)
     expect(listed.map(item => item.title)).toEqual(['Invoice', 'Review'])
     expect(timed).toBeDefined()
   })

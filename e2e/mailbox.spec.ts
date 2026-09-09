@@ -25,6 +25,7 @@ test.describe('mailbox tools', () => {
     await page.getByLabel('Move to folder').selectOption('Trash')
     await expect(page.getByText('Priya Shah')).toBeHidden()
 
+    await page.locator('.sidebar').getByRole('button', { name: 'More', exact: true }).click()
     await page.locator('.sidebar').getByRole('button', { name: /Trash/ }).click()
     await expect(page.getByRole('heading', { name: 'Trash', exact: true })).toBeVisible()
     await expect(page.getByText('Design review notes')).toBeVisible()
@@ -47,6 +48,7 @@ test.describe('labels', () => {
   test('adds and removes a label from the sidebar', async ({ page }) => {
     await openInbox(page)
 
+    await page.getByRole('button', { name: 'Labels', exact: true }).click()
     await page.getByRole('button', { name: 'Manage labels' }).click()
     const dialog = page.getByRole('dialog', { name: 'Manage labels' })
     await expect(dialog).toBeVisible()
@@ -69,7 +71,7 @@ test.describe('billing', () => {
   test('switches plan and downloads an invoice', async ({ page }) => {
     await openInbox(page)
     await page.goto('/mail/billing')
-    const billing = page.getByRole('dialog', { name: 'Billing' })
+    const billing = page.getByRole('region', { name: 'Billing' })
     await expect(billing).toBeVisible()
 
     await billing.getByRole('button', { name: 'Invoices', exact: true }).click()
@@ -89,7 +91,7 @@ test.describe('settings tabs', () => {
   test('notifications and security tabs work', async ({ page }) => {
     await openInbox(page)
     await page.goto('/mail/settings')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const settings = page.getByRole('region', { name: 'Settings' })
     await expect(settings).toBeVisible()
 
     await settings.getByRole('button', { name: 'Notifications', exact: true }).click()
@@ -166,6 +168,7 @@ test.describe('scheduled messages', () => {
     await page.getByRole('button', { name: 'Schedule', exact: true }).click()
     await expect(composer).toBeHidden()
 
+    await page.locator('.sidebar').getByRole('button', { name: 'More', exact: true }).click()
     await page.locator('.sidebar').getByRole('button', { name: /Scheduled/ }).click()
     await expect(page.getByRole('heading', { name: 'Scheduled', exact: true })).toBeVisible()
     await expect(page.getByText('Deferred note')).toBeVisible()

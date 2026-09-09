@@ -22,7 +22,7 @@ export const folders: FolderNav[] = [
 export const navGroupTitles: Record<NavGroup, string> = {
   mail: 'Mail',
   compose: 'Compose',
-  more: 'All folders',
+  more: 'More',
 }
 
 export const folderSlug: Record<Mailbox, string> = {

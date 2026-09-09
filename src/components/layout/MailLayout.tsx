@@ -5,11 +5,8 @@ import { folderFromPath, folderPath, folderSlug } from '../../lib/mail'
 import { useMail } from '../../state/mail/MailContext'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { CommandPalette } from '../CommandPalette'
-import { Admin } from '../Admin'
-import { Billing } from '../Billing'
 import { Notifications } from '../Notifications'
 import { Onboarding } from '../Onboarding'
-import { Settings } from '../Settings'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
@@ -44,9 +41,7 @@ export function MailLayout() {
   useEffect(() => { pathnameRef.current = location.pathname }, [location.pathname])
   const folder = folderFromPath(location.pathname)
   const threadOpen = Boolean(location.pathname.match(/\/thread\/([^/]+)/)?.[1])
-  const settingsOpen = location.pathname.endsWith('/settings')
   const notificationsOpen = location.pathname.endsWith('/notifications')
-  const billingOpen = location.pathname.endsWith('/billing')
   const adminOpen = location.pathname.endsWith('/admin')
 
   useEffect(() => {
@@ -90,7 +85,7 @@ export function MailLayout() {
     }
     window.addEventListener('keydown', handle)
     return () => window.removeEventListener('keydown', handle)
-  }, [folder, settingsOpen, notificationsOpen, billingOpen, adminOpen, navigate, openCompose, closeCompose])
+  }, [folder, notificationsOpen, adminOpen, navigate, openCompose, closeCompose])
 
   return (
     <div className={`app ${threadOpen ? 'app--thread' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
@@ -149,9 +144,6 @@ export function MailLayout() {
       />
       <Onboarding />
       {composeOpen && <Suspense fallback={null}><Composer close={closeCompose} onSent={handleSent} initialDraft={composerInitial ?? undefined} /></Suspense>}
-      {settingsOpen && <Settings close={() => navigate(`/mail/${folderPath(folder)}`)} />}
-      {billingOpen && <Billing close={() => navigate(`/mail/${folderPath(folder)}`)} />}
-      {adminOpen && <Admin close={() => navigate(`/mail/${folderPath(folder)}`)} />}
       {notificationsOpen && <Notifications close={() => navigate(`/mail/${folderPath(folder)}`)} />}
     </div>
   )

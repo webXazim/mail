@@ -22,6 +22,7 @@ test.describe('inbox', () => {
   test('bulk selects and archives conversations', async ({ page }) => {
     await openInbox(page)
     await inboxRow(page, 'Q3 launch plan - review before Thursday').getByLabel('Select Q3 launch plan - review before Thursday').check()
+    await page.locator('.sidebar').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('button', { name: 'Archive', exact: true }).click()
     await expect(page.getByText('Nora Li')).toBeHidden()
     await expect(page.getByRole('status').filter({ hasText: 'Archived' })).toBeVisible()

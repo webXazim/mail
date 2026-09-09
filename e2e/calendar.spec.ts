@@ -81,6 +81,26 @@ test.describe('calendar', () => {
     await expect(page.locator('.calendar-agenda')).toContainText('Imported standup')
   })
 
+  test('keeps day columns aligned regardless of long event titles', async ({ page }) => {
+    await openInbox(page)
+    await page.goto('/mail/calendar')
+    await page.getByRole('button', { name: 'New event', exact: true }).click()
+    const longTitle = 'Quarterly planning offsite review session with the entire product and engineering leadership team'
+    const dialog = page.getByRole('dialog', { name: 'New event' })
+    await dialog.getByLabel('Event title').fill(longTitle)
+    await dialog.getByRole('button', { name: 'Create event' }).click()
+
+    const columns = await page.locator('.calendar-week .calendar-day:nth-child(1)').evaluateAll(nodes =>
+      nodes.map(node => {
+        const rect = (node as HTMLElement).getBoundingClientRect()
+        return { left: rect.left, width: rect.width }
+      }),
+    )
+    expect(columns.length).toBeGreaterThan(1)
+    expect(columns.slice(1).every(column => Math.abs(column.left - columns[0].left) < 0.5)).toBe(true)
+    expect(columns.slice(1).every(column => Math.abs(column.width - columns[0].width) < 0.5)).toBe(true)
+  })
+
   test('adds an event from an open message', async ({ page }) => {
     await openThread(page, 'Nora Li')
     await page.getByRole('button', { name: 'Add to calendar' }).click()

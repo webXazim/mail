@@ -18,7 +18,7 @@ test.describe('command palette', () => {
     await page.keyboard.press('Control+k')
     await page.getByPlaceholder('Type a command or folder name...').fill('options')
     await page.keyboard.press('Enter')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const settings = page.getByRole('region', { name: 'Settings' })
     await expect(settings).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(settings).toBeHidden()

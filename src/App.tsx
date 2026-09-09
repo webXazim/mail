@@ -7,6 +7,10 @@ const MailListPage = lazy(() => import('./pages/MailListPage').then(module => ({
 const ThreadPage = lazy(() => import('./pages/ThreadPage').then(module => ({ default: module.ThreadPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then(module => ({ default: module.CalendarPage })))
 const ContactsPage = lazy(() => import('./pages/ContactsPage').then(module => ({ default: module.ContactsPage })))
+const AdminPage = lazy(() => import('./pages/AdminPage').then(module => ({ default: module.AdminPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const BillingPage = lazy(() => import('./pages/BillingPage').then(module => ({ default: module.BillingPage })))
+const PricingPage = lazy(() => import('./pages/PricingPage').then(module => ({ default: module.PricingPage })))
 
 const sessionKey = 'harbor-mail:session'
 
@@ -31,6 +35,10 @@ export default function App() {
         >
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="contacts" element={<ContactsPage />} />
+          <Route path="admin" element={<AdminPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="billing" element={<BillingPage />} />
+          <Route path="pricing" element={<PricingPage />} />
           <Route path=":folder" element={<MailListPage />} />
           <Route path=":folder/thread/:mailId" element={<ThreadPage />} />
           <Route path="folders/:folderId" element={<MailListPage />} />

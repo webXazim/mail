@@ -31,7 +31,7 @@ test.describe('delivery realism', () => {
   test('sends a read receipt when the sender requests one', async ({ page }) => {
     await openInbox(page)
     await page.goto('/mail/settings')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const settings = page.getByRole('region', { name: 'Settings' })
     await expect(settings).toBeVisible()
     await settings.getByLabel('Send read receipts by default').check()
     await openThread(page, 'Nora Li')

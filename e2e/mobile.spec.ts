@@ -17,6 +17,17 @@ test.describe('mobile polish', () => {
     await expect(sidebar).not.toHaveClass(/sidebar--open/)
   })
 
+  test('keeps secondary destinations behind the More drawer', async ({ page }) => {
+    await openInbox(page)
+    const sidebar = page.locator('.sidebar')
+    await page.getByRole('button', { name: 'Open navigation' }).click()
+    await expect(sidebar.getByRole('button', { name: 'Calendar', exact: true })).toBeVisible()
+    await expect(sidebar.getByRole('button', { name: 'Labels', exact: true })).toBeVisible()
+    await sidebar.getByRole('button', { name: 'More', exact: true }).click()
+    await expect(sidebar.getByRole('button', { name: /Archive/ })).toBeVisible()
+    await expect(sidebar.getByRole('button', { name: 'Contacts', exact: true })).toBeVisible()
+  })
+
   test('keeps every list-toolbar action reachable with no horizontal overflow', async ({ page }) => {
     await openInbox(page)
     const overflow = await page.locator('.mail-toolbar').evaluate(el => el.scrollWidth - el.clientWidth)

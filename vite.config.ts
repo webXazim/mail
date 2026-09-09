@@ -18,12 +18,18 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5174,
+    strictPort: true,
     proxy: {
       '/api': {
         target: process.env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    port: 5174,
+    strictPort: true,
   },
   test: {
     environment: 'jsdom',
