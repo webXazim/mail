@@ -1,0 +1,32 @@
+.error-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--a2t-ink);
+}
+.error-page__card {
+  width: min(420px, 100%);
+  padding: 30px;
+  border: 1px solid var(--a2t-line-strong);
+  border-radius: 0;
+  background: var(--a2t-panel);
+  color: var(--a2t-silver);
+}
+.error-page__card h1 {
+  margin: 0;
+  color: var(--a2t-white);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.error-page__card p:last-of-type {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.error-page__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+}

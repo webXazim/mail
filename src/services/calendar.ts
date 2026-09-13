@@ -46,14 +46,108 @@ const atOffset = (days: number): string => {
 }
 
 const seed = (): CalendarEvent[] => [
-  { id: 'ev-standup', title: 'Team standup', date: atOffset(0), allDay: false, start: '09:00', end: '09:30', description: 'Daily sync — blockers and priorities.', location: 'Hangouts', category: 'work', invitees: [{ email: 'alex@harbor.co', status: 'accepted' }, { email: 'jonas@harbor.co', status: 'accepted' }] },
-  { id: 'ev-review', title: 'Design review', date: atOffset(0), allDay: false, start: '14:00', end: '15:00', description: 'Walk through the onboarding flows.', location: 'Conference Room B', category: 'meeting', invitees: [{ email: 'nora@harbor.co', status: 'pending' }] },
-  { id: 'ev-sync', title: 'Product sync', date: atOffset(1), allDay: false, start: '10:00', end: '10:45', description: 'Progress and open questions for the quarter.', location: 'Meet — product', category: 'work', invitees: [] },
-  { id: 'ev-lunch', title: 'Lunch with Priya', date: atOffset(2), allDay: false, start: '12:30', end: '13:30', description: '', location: 'The Blue Anchor', category: 'personal', invitees: [{ email: 'priya@harbor.co', status: 'accepted' }] },
-  { id: 'ev-rehearsal', title: 'Q3 launch rehearsal', date: atOffset(-1), allDay: false, start: '16:00', end: '17:00', description: 'Dry run of the launch demo.', location: 'Auditorium', category: 'meeting', invitees: [] },
-  { id: 'ev-invoice', title: 'Submit monthly invoice', date: atOffset(3), allDay: true, start: '', end: '', description: 'Due before the end of the week.', location: '', category: 'reminder', invitees: [] },
-  { id: 'ev-flight', title: 'Flight to Berlin', date: atOffset(6), allDay: false, start: '08:30', end: '11:30', description: 'TXL check-in two hours before.', location: 'Tegel Airport', category: 'personal', invitees: [] },
-  { id: 'ev-kickoff', title: 'Client kickoff', date: atOffset(9), allDay: false, start: '11:00', end: '12:00', description: 'First session with the Meridian account.', location: 'Zoom', category: 'meeting', invitees: [{ email: 'priya@harbor.co', status: 'accepted' }, { email: 'meridian@example.com', status: 'pending' }] },
+  {
+    id: 'ev-standup',
+    title: 'Team standup',
+    date: atOffset(0),
+    allDay: false,
+    start: '09:00',
+    end: '09:30',
+    description: 'Daily sync — blockers and priorities.',
+    location: 'Hangouts',
+    category: 'work',
+    invitees: [
+      { email: 'alex@harbor.co', status: 'accepted' },
+      { email: 'jonas@harbor.co', status: 'accepted' },
+    ],
+  },
+  {
+    id: 'ev-review',
+    title: 'Design review',
+    date: atOffset(0),
+    allDay: false,
+    start: '14:00',
+    end: '15:00',
+    description: 'Walk through the onboarding flows.',
+    location: 'Conference Room B',
+    category: 'meeting',
+    invitees: [{ email: 'nora@harbor.co', status: 'pending' }],
+  },
+  {
+    id: 'ev-sync',
+    title: 'Product sync',
+    date: atOffset(1),
+    allDay: false,
+    start: '10:00',
+    end: '10:45',
+    description: 'Progress and open questions for the quarter.',
+    location: 'Meet — product',
+    category: 'work',
+    invitees: [],
+  },
+  {
+    id: 'ev-lunch',
+    title: 'Lunch with Priya',
+    date: atOffset(2),
+    allDay: false,
+    start: '12:30',
+    end: '13:30',
+    description: '',
+    location: 'The Blue Anchor',
+    category: 'personal',
+    invitees: [{ email: 'priya@harbor.co', status: 'accepted' }],
+  },
+  {
+    id: 'ev-rehearsal',
+    title: 'Q3 launch rehearsal',
+    date: atOffset(-1),
+    allDay: false,
+    start: '16:00',
+    end: '17:00',
+    description: 'Dry run of the launch demo.',
+    location: 'Auditorium',
+    category: 'meeting',
+    invitees: [],
+  },
+  {
+    id: 'ev-invoice',
+    title: 'Submit monthly invoice',
+    date: atOffset(3),
+    allDay: true,
+    start: '',
+    end: '',
+    description: 'Due before the end of the week.',
+    location: '',
+    category: 'reminder',
+    invitees: [],
+  },
+  {
+    id: 'ev-flight',
+    title: 'Flight to Berlin',
+    date: atOffset(6),
+    allDay: false,
+    start: '08:30',
+    end: '11:30',
+    description: 'TXL check-in two hours before.',
+    location: 'Tegel Airport',
+    category: 'personal',
+    invitees: [],
+  },
+  {
+    id: 'ev-kickoff',
+    title: 'Client kickoff',
+    date: atOffset(9),
+    allDay: false,
+    start: '11:00',
+    end: '12:00',
+    description: 'First session with the Meridian account.',
+    location: 'Zoom',
+    category: 'meeting',
+    invitees: [
+      { email: 'priya@harbor.co', status: 'accepted' },
+      { email: 'meridian@example.com', status: 'pending' },
+    ],
+  },
 ]
 
 export const calendarApi = {
@@ -76,17 +170,19 @@ export const calendarApi = {
     return next
   },
   update(id: string, patch: Omit<CalendarEvent, 'id'>) {
-    const next = this.list().map(event => (event.id === id ? { ...patch, id } : event))
+    const next = this.list().map((event) => (event.id === id ? { ...patch, id } : event))
     this.save(next)
     return next
   },
   remove(id: string) {
-    const next = this.list().filter(event => event.id !== id)
+    const next = this.list().filter((event) => event.id !== id)
     this.save(next)
     return next
   },
   listOn(date: string) {
-    return this.list().filter(event => event.date === date).sort((a, b) => (a.allDay ? 0 : timeMinutes(a.start)) - (b.allDay ? 0 : timeMinutes(b.start)))
+    return this.list()
+      .filter((event) => event.date === date)
+      .sort((a, b) => (a.allDay ? 0 : timeMinutes(a.start)) - (b.allDay ? 0 : timeMinutes(b.start)))
   },
   createFromMail(mail: Mail): CalendarEvent {
     const event: CalendarEvent = {
@@ -107,8 +203,16 @@ export const calendarApi = {
   },
   icsExport(event: CalendarEvent): string {
     const fmt = (value: string) => value.replace(/-/g, '')
-    const dateLine = (kind: 'START' | 'END', allDay: boolean, time: string) => (allDay ? `DT${kind};VALUE=DATE:${fmt(event.date)}` : `DT${kind}:${fmt(event.date)}T${time.replace(':', '')}00`)
-    const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
+    const dateLine = (kind: 'START' | 'END', allDay: boolean, time: string) =>
+      allDay
+        ? `DT${kind};VALUE=DATE:${fmt(event.date)}`
+        : `DT${kind}:${fmt(event.date)}T${time.replace(':', '')}00`
+    const escape = (value: string) =>
+      value
+        .replace(/\\/g, '\\\\')
+        .replace(/;/g, '\\;')
+        .replace(/,/g, '\\,')
+        .replace(/\r?\n/g, '\\n')
     const stamp = localDate(new Date()).replace(/-/g, '')
     return [
       'BEGIN:VCALENDAR',
@@ -125,7 +229,9 @@ export const calendarApi = {
       'END:VEVENT',
       'END:VCALENDAR',
       '',
-    ].filter(line => line !== '').join('\r\n')
+    ]
+      .filter((line) => line !== '')
+      .join('\r\n')
   },
   icsImport(content: string): CalendarEvent[] {
     const lines = content.replace(/\r/g, '').split('\n')
@@ -148,7 +254,11 @@ export const calendarApi = {
       }
       current = null
     }
-    const unescape = (value: string) => value.replace(/\\\\/g, '\\').replace(/\\n/g, '\n').replace(/\\(;|,)/g, '$1')
+    const unescape = (value: string) =>
+      value
+        .replace(/\\\\/g, '\\')
+        .replace(/\\n/g, '\n')
+        .replace(/\\(;|,)/g, '$1')
     for (const line of lines) {
       if (line.startsWith('END:VEVENT')) clear()
       if (line.startsWith('BEGIN:VEVENT')) current = {}

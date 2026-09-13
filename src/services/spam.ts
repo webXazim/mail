@@ -23,21 +23,35 @@ export const spamApi = {
   block(address: string) {
     const target = normalize(address)
     if (!target) return this.load()
-    const next = { ...this.load(), blocked: [...this.load().blocked, target], allowed: this.load().allowed.filter(item => item !== target) }
+    const next = {
+      ...this.load(),
+      blocked: [...this.load().blocked, target],
+      allowed: this.load().allowed.filter((item) => item !== target),
+    }
     return this.save(next)
   },
   allow(address: string) {
     const target = normalize(address)
     if (!target) return this.load()
-    const next = { ...this.load(), allowed: [...this.load().allowed, target], blocked: this.load().blocked.filter(item => item !== target) }
+    const next = {
+      ...this.load(),
+      allowed: [...this.load().allowed, target],
+      blocked: this.load().blocked.filter((item) => item !== target),
+    }
     return this.save(next)
   },
   removeBlocked(address: string) {
-    const next = { ...this.load(), blocked: this.load().blocked.filter(item => item !== normalize(address)) }
+    const next = {
+      ...this.load(),
+      blocked: this.load().blocked.filter((item) => item !== normalize(address)),
+    }
     return this.save(next)
   },
   removeAllowed(address: string) {
-    const next = { ...this.load(), allowed: this.load().allowed.filter(item => item !== normalize(address)) }
+    const next = {
+      ...this.load(),
+      allowed: this.load().allowed.filter((item) => item !== normalize(address)),
+    }
     return this.save(next)
   },
 }

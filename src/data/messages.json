@@ -11,6 +11,7 @@
     "color": "purple",
     "unread": true,
     "starred": true,
+    "receiptRequested": true,
     "folder": "Inbox"
   },
   {

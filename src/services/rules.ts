@@ -4,7 +4,11 @@ export type RuleCondition =
   | { field: 'subject'; value: string }
   | { field: 'hasAttachment' }
   | { field: 'size'; op: 'larger' | 'smaller'; size: number }
-  | { field: 'date'; op: 'before' | 'after' | 'on' | 'not-on' | 'on-or-before' | 'on-or-after'; value: string }
+  | {
+      field: 'date'
+      op: 'before' | 'after' | 'on' | 'not-on' | 'on-or-before' | 'on-or-after'
+      value: string
+    }
 
 export type RuleAction =
   | { kind: 'label'; value: string }
@@ -55,12 +59,12 @@ export const rulesApi = {
     return this.save([rule, ...this.list()])
   },
   update(rule: FilterRule) {
-    return this.save(this.list().map(item => (item.id === rule.id ? rule : item)))
+    return this.save(this.list().map((item) => (item.id === rule.id ? rule : item)))
   },
   remove(id: string) {
-    return this.save(this.list().filter(rule => rule.id !== id))
+    return this.save(this.list().filter((rule) => rule.id !== id))
   },
   toggle(id: string, enabled: boolean) {
-    return this.save(this.list().map(rule => (rule.id === id ? { ...rule, enabled } : rule)))
+    return this.save(this.list().map((rule) => (rule.id === id ? { ...rule, enabled } : rule)))
   },
 }

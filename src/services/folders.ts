@@ -27,19 +27,21 @@ export const foldersApi = {
   rename(id: string, name: string) {
     const trimmed = name.trim()
     if (!trimmed) return this.list()
-    const next = this.list().map(folder => (folder.id === id ? { ...folder, name: trimmed } : folder))
+    const next = this.list().map((folder) =>
+      folder.id === id ? { ...folder, name: trimmed } : folder,
+    )
     persist(next)
     return next
   },
   remove(id: string) {
-    const next = this.list().filter(folder => folder.id !== id)
+    const next = this.list().filter((folder) => folder.id !== id)
     persist(next)
     return next
   },
   byId(id: string) {
-    return this.list().find(folder => folder.id === id)
+    return this.list().find((folder) => folder.id === id)
   },
   byName(name: string) {
-    return this.list().find(folder => folder.name.toLowerCase() === name.toLowerCase())
+    return this.list().find((folder) => folder.name.toLowerCase() === name.toLowerCase())
   },
 }

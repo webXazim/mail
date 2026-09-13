@@ -10,7 +10,8 @@ export type VacationSettings = {
 export const defaultVacation: VacationSettings = {
   enabled: false,
   subject: 'Out of office',
-  message: "Thanks for your email. I'm currently out of office and will get back to you as soon as I can.",
+  message:
+    "Thanks for your email. I'm currently out of office and will get back to you as soon as I can.",
   onlyContacts: true,
   startsAt: '',
   endsAt: '',

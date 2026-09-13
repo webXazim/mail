@@ -2,7 +2,11 @@ import type { Mail } from '../types'
 
 const safeColors = new Set(['coral', 'teal', 'purple', 'orange', 'blue', 'green'])
 
-const escapeFromLines = (body: string) => body.split('\n').map(line => line.startsWith('From ') ? `>${line}` : line).join('\n')
+const escapeFromLines = (body: string) =>
+  body
+    .split('\n')
+    .map((line) => (line.startsWith('From ') ? `>${line}` : line))
+    .join('\n')
 
 const headerBlock = (mail: Mail): string => {
   const headerLines = [
@@ -25,18 +29,22 @@ const headerBlock = (mail: Mail): string => {
     mail.attachmentName ? `X-Harbor-Attachment-Name: ${mail.attachmentName}` : '',
     mail.snoozedUntil ? `X-Harbor-Snoozed-Until: ${mail.snoozedUntil}` : '',
   ]
-  return `${headerLines.filter(line => line !== '').join('\n')}\n\n${escapeFromLines(mail.preview)}`
+  return `${headerLines.filter((line) => line !== '').join('\n')}\n\n${escapeFromLines(mail.preview)}`
 }
 
 export const exportToMbox = (mails: Mail[]): string => mails.map(headerBlock).join('\n\n')
 
 const readHeader = (headers: string, header: string): string => {
-  const line = headers.split('\n').find(candidate => candidate.toLowerCase().startsWith(`${header.toLowerCase()}:`))
+  const line = headers
+    .split('\n')
+    .find((candidate) => candidate.toLowerCase().startsWith(`${header.toLowerCase()}:`))
   return line ? line.slice(line.indexOf(':') + 1).trim() : ''
 }
 
 export const importFromMbox = (content: string): Mail[] => {
-  const blocks = content.split(/\n(?=From )/).map(block => block.trim().replace(/^From [^\n]*\n/, ''))
+  const blocks = content
+    .split(/\n(?=From )/)
+    .map((block) => block.trim().replace(/^From [^\n]*\n/, ''))
   const mails: Mail[] = []
   for (const block of blocks) {
     const [headers = '', ...bodyParts] = block.split('\n\n')
@@ -61,8 +69,18 @@ export const importFromMbox = (content: string): Mail[] => {
       attachment: readHeader(headers, 'X-Harbor-Attachment') === 'yes',
       attachmentName: readHeader(headers, 'X-Harbor-Attachment-Name') || undefined,
       snoozedUntil: readHeader(headers, 'X-Harbor-Snoozed-Until') || undefined,
-      to: toRaw ? toRaw.split(',').map(part => part.trim()).filter(Boolean) : undefined,
-      cc: ccRaw ? ccRaw.split(',').map(part => part.trim()).filter(Boolean) : undefined,
+      to: toRaw
+        ? toRaw
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : undefined,
+      cc: ccRaw
+        ? ccRaw
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : undefined,
     })
   }
   return mails

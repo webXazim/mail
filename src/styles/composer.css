@@ -1,0 +1,381 @@
+.compose-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: calc(var(--a2t-header-h) + 10px) 24px 24px;
+  background: rgba(6, 9, 11, 0.62);
+  backdrop-filter: blur(4px);
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: calc(100vh - var(--a2t-header-h) - 40px);
+  border: 1px solid var(--a2t-line-strong);
+  border-radius: 0;
+  background: var(--a2t-panel-raised);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.composer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--a2t-line-soft);
+}
+.composer > header strong {
+  color: var(--a2t-white);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.composer > header span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.composer > header small {
+  color: var(--a2t-copy-soft);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+.composer form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.composer form > label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--a2t-line-soft);
+  color: var(--a2t-copy-soft);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.composer form > label > input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--a2t-silver);
+  font-family: var(--a2t-sans);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 3px 0;
+}
+.composer form > label > input::placeholder {
+  color: var(--a2t-copy-soft);
+}
+.composer form > label > select {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--a2t-silver);
+  font-family: var(--a2t-sans);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 3px 0;
+}
+.composer form > label > select:focus {
+  color: var(--a2t-white);
+}
+.composer-error {
+  margin: 0;
+  padding: 7px 18px 9px;
+  border-bottom: 1px solid var(--a2t-line-soft);
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--a2t-danger);
+  font-size: 11px;
+}
+.field-link {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--a2t-accent);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.field-link:hover {
+  color: var(--a2t-accent-hover);
+}
+.composer-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 240px;
+}
+.formatting {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--a2t-line-soft);
+}
+.formatting button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--a2t-copy-soft);
+}
+.formatting button:hover {
+  color: var(--a2t-white);
+  background: var(--a2t-panel);
+}
+.formatting button strong,
+.formatting button em,
+.formatting button u {
+  font-size: 12px;
+}
+.composer-signature-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 12px;
+  border-left: 1px solid var(--a2t-line-soft);
+  color: var(--a2t-copy-soft);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.composer-signature-toggle input {
+  accent-color: var(--a2t-accent);
+}
+.composer-editor__body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 18px;
+  outline: 0;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--a2t-silver);
+  font-family: var(--a2t-sans);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.composer-editor__body:empty::before {
+  content: 'Write a message...';
+  color: var(--a2t-copy-soft);
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  margin: 4px 18px 10px;
+  padding: 5px 9px;
+  border: 1px solid var(--a2t-line);
+  border-radius: 0;
+  background: var(--a2t-panel);
+  color: var(--a2t-copy);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+.move-select {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--a2t-line);
+  border-radius: 0;
+  background: var(--a2t-panel);
+  color: var(--a2t-copy);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.move-select:hover,
+.move-select:focus {
+  border-color: var(--a2t-accent);
+}
+.toolbar-pop {
+  position: relative;
+}
+.toolbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--a2t-line-strong);
+  border-radius: 0;
+  background: var(--a2t-panel-raised);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.toolbar-menu button {
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--a2t-silver);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.toolbar-menu button:hover {
+  background: var(--a2t-panel);
+  color: var(--a2t-accent);
+}
+.toolbar-menu--right {
+  right: 0;
+  left: auto;
+}
+.toolbar-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--a2t-copy-soft);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.toolbar-text-button:hover,
+.toolbar-text-button[aria-expanded='true'] {
+  border-color: var(--a2t-control-line);
+  color: var(--a2t-accent);
+}
+.toolbar-count {
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background: var(--a2t-accent);
+  color: var(--a2t-ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.settings-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--a2t-copy-soft);
+  font-size: 10px;
+}
+.settings-panel > div {
+  padding: 4px 26px;
+}
+.settings-section select {
+  padding: 9px 12px;
+  border: 1px solid var(--a2t-control-line);
+  border-radius: 0;
+  outline: 0;
+  background: var(--a2t-ink-2);
+  color: var(--a2t-white);
+  font-family: var(--a2t-sans);
+  font-size: 12.5px;
+}
+.settings-section select:focus {
+  border-color: var(--a2t-accent);
+  box-shadow: var(--a2t-focus);
+}
+.settings-notice {
+  margin: 0 0 12px;
+  color: var(--a2t-copy-soft);
+  font-size: 11px;
+}
+.settings-notice--ok {
+  color: var(--a2t-accent);
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.labels-body {
+  padding: 4px 26px;
+}
+.labels-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.labels-row--add {
+  grid-template-columns: 1fr auto auto;
+}
+.labels-row select {
+  padding: 7px 8px;
+  border: 1px solid var(--a2t-control-line);
+  border-radius: 0;
+  outline: 0;
+  background: var(--a2t-ink-2);
+  color: var(--a2t-white);
+  font-family: var(--a2t-sans);
+  font-size: 12px;
+}
+.labels-row select:focus {
+  border-color: var(--a2t-accent);
+  box-shadow: var(--a2t-focus);
+}
+.labels-row input {
+  min-width: 0;
+}
+
+.composer-editor--drag {
+  outline: 1px dashed var(--a2t-accent);
+  outline-offset: -3px;
+  background: color-mix(in srgb, var(--a2t-accent) 6%, transparent);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 18px 12px;
+}
+.attachment-chip button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--a2t-copy-soft);
+}
+.attachment-chip button:hover {
+  color: var(--a2t-accent);
+}
+
+button.compose-send {
+  align-self: flex-end;
+  padding: 8px 18px;
+}
+.scheduled-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--a2t-accent);
+  font-size: 11px;
+}

@@ -1,7 +1,7 @@
 import { Archive, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock3, CornerDownRight, Download, Mail as MailIcon, Paperclip, Printer, ShieldAlert, ShieldCheck, Send, Star, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { buildThread, snoozeAt, snoozeOptions } from '../lib/mail'
-import { getLocalAttachment, getRemoteAttachmentUrl } from '../services/attachments'
+import { getLocalAttachment } from '../services/attachments'
 import { foldersApi } from '../services/folders'
 import { useSettings } from '../services/settings'
 import type { Mail } from '../types'
@@ -123,13 +123,6 @@ export function Reader({ mail, onReply, onReplyAll, onForward, onToggleStar, onT
 
   const downloadAttachment = async () => {
     const name = mail.attachmentName ?? 'attachment'
-    const remoteUrl = getRemoteAttachmentUrl(name)
-    if (remoteUrl) {
-      try {
-        const response = await fetch(remoteUrl, { credentials: 'include' })
-        if (response.ok) { downloadBlob(await response.blob(), name); return }
-      } catch { /* fall through to local or generated download */ }
-    }
     const local = await getLocalAttachment(name)
     if (local) { downloadBlob(local, name); return }
     if (/\.pdf$/i.test(name)) { downloadBlob(makePdf(mail, name), name); return }

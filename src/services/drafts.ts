@@ -6,7 +6,12 @@ export const draftsApi = {
   load(): Draft | null {
     try {
       const saved = JSON.parse(localStorage.getItem(draftKey) || '{}') as Partial<Draft>
-      return saved.to || saved.subject || saved.body || (Array.isArray(saved.attachments) && saved.attachments.length > 0) ? saved as Draft : null
+      return saved.to ||
+        saved.subject ||
+        saved.body ||
+        (Array.isArray(saved.attachments) && saved.attachments.length > 0)
+        ? (saved as Draft)
+        : null
     } catch {
       return null
     }

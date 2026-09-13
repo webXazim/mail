@@ -35,17 +35,17 @@ export const labelsApi = {
   rename(id: string, name: string) {
     const trimmed = name.trim()
     if (!trimmed) return this.list()
-    const next = this.list().map(label => (label.id === id ? { ...label, name: trimmed } : label))
+    const next = this.list().map((label) => (label.id === id ? { ...label, name: trimmed } : label))
     persist(next)
     return next
   },
   recolor(id: string, color: string) {
-    const next = this.list().map(label => (label.id === id ? { ...label, color } : label))
+    const next = this.list().map((label) => (label.id === id ? { ...label, color } : label))
     persist(next)
     return next
   },
   remove(id: string) {
-    const next = this.list().filter(label => label.id !== id)
+    const next = this.list().filter((label) => label.id !== id)
     persist(next)
     return next.length ? next : defaults
   },

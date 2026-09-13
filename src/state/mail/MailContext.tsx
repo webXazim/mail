@@ -1,4 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { buildSentMail, parseAddresses } from '../../lib/mail'
 import { applyFaviconBadge } from '../../lib/favicon'
 import { buildReplyMail } from '../../lib/delivery'
@@ -9,10 +19,16 @@ import { notificationsApi } from '../../services/notifications'
 import { contactsService } from '../../services/contacts'
 import { scheduleApi } from '../../services/schedule'
 import { settingsApi } from '../../services/settings'
+import { receiptRequestsApi } from '../../services/receipts'
 import type { Draft, Mail } from '../../types'
 import { initialMailState, mailboxReducer, type MailActionKind } from './mailboxReducer'
 
-export type MailToast = { id: number; message: string; canUndoAction: boolean; canUndoSend: boolean }
+export type MailToast = {
+  id: number
+  message: string
+  canUndoAction: boolean
+  canUndoSend: boolean
+}
 
 const playAlertBeep = () => {
   try {
@@ -32,7 +48,9 @@ const playAlertBeep = () => {
   }
 }
 
-const chime = () => { if (settingsApi.load().alertSound) playAlertBeep() }
+const chime = () => {
+  if (settingsApi.load().alertSound) playAlertBeep()
+}
 
 export type MailContextValue = {
   mailbox: Mail[]
@@ -93,13 +111,25 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const loadMailbox = useCallback(async () => {
     try {
       const primary = await mailboxApi.list()
-      const secondaryAccounts = accountsApi.list().filter(account => account.id !== primaryAccountId)
-      const secondary = (await Promise.all(secondaryAccounts.map(account => mailboxApi.listFor(account.id)))).flat()
+      const secondaryAccounts = accountsApi
+        .list()
+        .filter((account) => account.id !== primaryAccountId)
+      const secondary = (
+        await Promise.all(secondaryAccounts.map((account) => mailboxApi.listFor(account.id)))
+      ).flat()
       const combined = secondary.length ? [...primary, ...secondary] : primary
       const applied = applyIncomingFilters(combined)
       dispatch({ type: 'hydrated', mailbox: applied.mailbox })
       if (applied.report.forwarded.length) {
-        dispatch({ type: 'notice', message: applied.report.forwarded.map(item => `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`).join(' · ') })
+        dispatch({
+          type: 'notice',
+          message: applied.report.forwarded
+            .map(
+              (item) =>
+                `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`,
+            )
+            .join(' · '),
+        })
       }
     } catch {
       dispatch({ type: 'load-failed' })
@@ -119,8 +149,11 @@ export function MailProvider({ children }: { children: ReactNode }) {
     if (state.loading) return
     const fireScheduled = () => {
       dispatch({ type: 'unsnooze' })
-      scheduleApi.dueItems().forEach(item => {
-        const time = new Date(item.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      scheduleApi.dueItems().forEach((item) => {
+        const time = new Date(item.at).toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        })
         dispatch({ type: 'sent', mail: buildSentMail(item.draft, time) })
         scheduleApi.remove(item.id)
         chime()
@@ -137,43 +170,75 @@ export function MailProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       const all = state.mailbox
       void mailboxApi
-        .replace(all.filter(mail => (mail.accountId ?? primaryAccountId) === primaryAccountId))
+        .replace(all.filter((mail) => (mail.accountId ?? primaryAccountId) === primaryAccountId))
         .catch(() => dispatch({ type: 'notice', message: 'Unable to save mailbox changes' }))
-      accountsApi.list().filter(account => account.id !== primaryAccountId).forEach(account => {
-        void mailboxApi.replaceFor(account.id, all.filter(mail => mail.accountId === account.id)).catch(() => { /* best effort */ })
-      })
+      accountsApi
+        .list()
+        .filter((account) => account.id !== primaryAccountId)
+        .forEach((account) => {
+          void mailboxApi
+            .replaceFor(
+              account.id,
+              all.filter((mail) => mail.accountId === account.id),
+            )
+            .catch(() => {
+              /* best effort */
+            })
+        })
     }, 400)
     return () => window.clearTimeout(timer)
   }, [state.mailbox, state.loading])
 
-  useEffect(() => () => {
-    timersRef.current.forEach(window.clearTimeout)
-    if (replyTimerRef.current !== null) window.clearTimeout(replyTimerRef.current)
-  }, [])
+  useEffect(
+    () => () => {
+      timersRef.current.forEach(window.clearTimeout)
+      if (replyTimerRef.current !== null) window.clearTimeout(replyTimerRef.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     const settings = settingsApi.load()
-    const unread = state.mailbox.filter(mail => mail.unread && mail.folder !== 'Trash').length
+    const unread = state.mailbox.filter((mail) => mail.unread && mail.folder !== 'Trash').length
     document.title = settings.unreadBadge && unread ? `(${unread}) Harbor Mail` : 'Harbor Mail'
     applyFaviconBadge(settings.unreadBadge ? unread : 0)
   }, [state.mailbox])
 
   useEffect(() => {
     if (!undoSendActive) return
-    const interval = window.setInterval(() => setUndoSendSecondsLeft(current => Math.max(0, current - 1)), 1000)
+    const interval = window.setInterval(
+      () => setUndoSendSecondsLeft((current) => Math.max(0, current - 1)),
+      1000,
+    )
     return () => window.clearInterval(interval)
   }, [undoSendActive])
 
   useEffect(() => {
     if (state.notice && state.notice !== prevNoticeRef.current) {
       const id = ++toastSeqRef.current
-      setToasts(current => [...current, { id, message: state.notice, canUndoAction: state.undo !== null, canUndoSend: undoSendActive }])
-      timersRef.current.push(window.setTimeout(() => setToasts(current => current.filter(toast => toast.id !== id)), 7000))
+      setToasts((current) => [
+        ...current,
+        {
+          id,
+          message: state.notice,
+          canUndoAction: state.undo !== null,
+          canUndoSend: undoSendActive,
+        },
+      ])
+      timersRef.current.push(
+        window.setTimeout(
+          () => setToasts((current) => current.filter((toast) => toast.id !== id)),
+          7000,
+        ),
+      )
     }
     prevNoticeRef.current = state.notice
   }, [state.notice, state.undo, undoSendActive])
 
-  const dismissToast = useCallback((id: number) => setToasts(current => current.filter(toast => toast.id !== id)), [])
+  const dismissToast = useCallback(
+    (id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)),
+    [],
+  )
   const notify = useCallback((message: string) => dispatch({ type: 'notice', message }), [])
 
   const pushDesktopNotification = useCallback((title: string, body: string) => {
@@ -187,41 +252,63 @@ export function MailProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const arrive = useCallback((mail: Mail) => {
-    const { mailbox: processedMail, report } = applyIncomingFilters([mail])
-    const processed = processedMail[0] ?? mail
-    dispatch({ type: 'receive', mail: processed })
-    if (report.forwarded.length) {
-      const item = report.forwarded[0]
-      dispatch({ type: 'notice', message: `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}` })
-    } else if (processed.folder === 'Trash') {
-      dispatch({ type: 'notice', message: `Discarded an unwanted message from ${mail.sender}` })
-    } else {
-      dispatch({ type: 'notice', message: `New mail from ${mail.sender} — ${mail.subject}` })
-    }
-    if (processed.folder === 'Trash') return
-    chime()
-    pushDesktopNotification(mail.sender, mail.subject)
-    notificationsApi.add({ icon: 'mail', title: `New mail from ${mail.sender}`, detail: mail.subject })
-    if (mail.email && !mail.email.toLowerCase().endsWith('@harbor.co')) {
-      contactsService.upsert({ name: mail.sender, email: mail.email.toLowerCase() })
-    }
-  }, [pushDesktopNotification])
+  const arrive = useCallback(
+    (mail: Mail) => {
+      const { mailbox: processedMail, report } = applyIncomingFilters([mail])
+      const processed = processedMail[0] ?? mail
+      dispatch({ type: 'receive', mail: processed })
+      if (report.forwarded.length) {
+        const item = report.forwarded[0]
+        dispatch({
+          type: 'notice',
+          message: `Forwarded ${item.count} ${item.count === 1 ? 'message' : 'messages'} to ${item.address}`,
+        })
+      } else if (processed.folder === 'Trash') {
+        dispatch({ type: 'notice', message: `Discarded an unwanted message from ${mail.sender}` })
+      } else {
+        dispatch({ type: 'notice', message: `New mail from ${mail.sender} — ${mail.subject}` })
+      }
+      if (processed.folder === 'Trash') return
+      chime()
+      pushDesktopNotification(mail.sender, mail.subject)
+      notificationsApi.add({
+        icon: 'mail',
+        title: `New mail from ${mail.sender}`,
+        detail: mail.subject,
+      })
+      if (mail.email && !mail.email.toLowerCase().endsWith('@harbor.co')) {
+        contactsService.upsert({ name: mail.sender, email: mail.email.toLowerCase() })
+      }
+    },
+    [pushDesktopNotification],
+  )
 
   const openCompose = useCallback((initial?: Partial<Draft>) => {
     setComposerInitial(initial ?? null)
     setComposeOpen(true)
   }, [])
-  const closeCompose = useCallback(() => { setComposeOpen(false); setComposerInitial(null) }, [])
+  const closeCompose = useCallback(() => {
+    setComposeOpen(false)
+    setComposerInitial(null)
+  }, [])
 
   const markRead = useCallback((id: string) => dispatch({ type: 'mark-read', ids: [id] }), [])
   const markUnread = useCallback((ids: string[]) => dispatch({ type: 'mark-unread', ids }), [])
   const markAllRead = useCallback((ids: string[]) => dispatch({ type: 'mark-all-read', ids }), [])
   const toggleStar = useCallback((ids: string[]) => dispatch({ type: 'toggle-star', ids }), [])
-  const toggleLabel = useCallback((ids: string[], label: string) => dispatch({ type: 'toggle-label', ids, label }), [])
-  const moveToFolder = useCallback((ids: string[], folder: string) => dispatch({ type: 'move-to', ids, folder }), [])
+  const toggleLabel = useCallback(
+    (ids: string[], label: string) => dispatch({ type: 'toggle-label', ids, label }),
+    [],
+  )
+  const moveToFolder = useCallback(
+    (ids: string[], folder: string) => dispatch({ type: 'move-to', ids, folder }),
+    [],
+  )
   const emptyTrash = useCallback(() => dispatch({ type: 'empty-trash' }), [])
-  const snooze = useCallback((ids: string[], until: string) => dispatch({ type: 'snooze', ids, until }), [])
+  const snooze = useCallback(
+    (ids: string[], until: string) => dispatch({ type: 'snooze', ids, until }),
+    [],
+  )
   const removeScheduled = useCallback((id: string) => {
     scheduleApi.remove(id)
     setScheduledCount(scheduleApi.list().length)
@@ -230,10 +317,12 @@ export function MailProvider({ children }: { children: ReactNode }) {
 
   const applyAction = useCallback((action: MailActionKind, ids: string[]) => {
     dispatch({ type: 'apply', ids, action })
-    timersRef.current.push(window.setTimeout(() => {
-      dispatch({ type: 'clear-notice' })
-      dispatch({ type: 'too-late' })
-    }, 5000))
+    timersRef.current.push(
+      window.setTimeout(() => {
+        dispatch({ type: 'clear-notice' })
+        dispatch({ type: 'too-late' })
+      }, 5000),
+    )
   }, [])
 
   const undoAction = useCallback(() => {
@@ -241,42 +330,63 @@ export function MailProvider({ children }: { children: ReactNode }) {
     timersRef.current.push(window.setTimeout(() => dispatch({ type: 'clear-notice' }), 1800))
   }, [])
 
-  const handleSent = useCallback((draft: Draft) => {
-    if (draft.scheduledAt) {
-      const at = new Date(draft.scheduledAt)
-      if (Number.isNaN(at.getTime())) { dispatch({ type: 'notice', message: 'Choose a valid date and time to schedule' }); return }
-      scheduleApi.enqueue({ id: `scheduled-${Date.now()}`, draft, at: at.toISOString() })
-      setScheduledCount(scheduleApi.list().length)
-      dispatch({ type: 'notice', message: `Scheduled for ${at.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` })
-      return
-    }
-    const mail = buildSentMail(draft)
-    dispatch({ type: 'sent', mail })
-    chime()
-    sentIdRef.current = mail.id
-    setUndoSendActive(true)
-    setUndoSendSecondsLeft(5)
-    timersRef.current.push(window.setTimeout(() => {
-      sentIdRef.current = null
-      setUndoSendActive(false)
-    }, 5000))
-    const inboxRecipients = (draft.to + ',' + draft.cc).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []
-    const firstRecipient = inboxRecipients[0]?.toLowerCase()
-    if (firstRecipient && !firstRecipient.endsWith('@harbor.co')) {
-      const contact = contactsService.list().find(item => item.email.toLowerCase() === firstRecipient)
-      replyTimerRef.current = window.setTimeout(() => arrive(buildReplyMail(draft, contact?.name)), 8000)
-    }
-    parseAddresses(draft.to + ',' + draft.cc).forEach(part => {
-      const displayName = part.match(/^([^<@]+?)\s*<[^>]+>$/)?.[1]?.trim()
-      const email = part.includes('<') ? (part.match(/<([^>]+)>/)?.[1] ?? part).toLowerCase() : part.toLowerCase()
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        contactsService.upsert({ name: displayName || email.split('@')[0], email })
+  const handleSent = useCallback(
+    (draft: Draft) => {
+      if (draft.scheduledAt) {
+        const at = new Date(draft.scheduledAt)
+        if (Number.isNaN(at.getTime())) {
+          dispatch({ type: 'notice', message: 'Choose a valid date and time to schedule' })
+          return
+        }
+        scheduleApi.enqueue({ id: `scheduled-${Date.now()}`, draft, at: at.toISOString() })
+        setScheduledCount(scheduleApi.list().length)
+        dispatch({
+          type: 'notice',
+          message: `Scheduled for ${at.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
+        })
+        return
       }
-    })
-  }, [arrive])
+      const mail = buildSentMail(draft)
+      dispatch({ type: 'sent', mail })
+      chime()
+      sentIdRef.current = mail.id
+      setUndoSendActive(true)
+      setUndoSendSecondsLeft(5)
+      timersRef.current.push(
+        window.setTimeout(() => {
+          sentIdRef.current = null
+          setUndoSendActive(false)
+        }, 5000),
+      )
+      const inboxRecipients =
+        (draft.to + ',' + draft.cc).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []
+      const firstRecipient = inboxRecipients[0]?.toLowerCase()
+      if (draft.receiptRequested && firstRecipient)
+        receiptRequestsApi.request(mail.id, firstRecipient)
+      if (firstRecipient && !firstRecipient.endsWith('@harbor.co')) {
+        const contact = contactsService
+          .list()
+          .find((item) => item.email.toLowerCase() === firstRecipient)
+        replyTimerRef.current = window.setTimeout(
+          () => arrive(buildReplyMail(draft, contact?.name)),
+          8000,
+        )
+      }
+      parseAddresses(draft.to + ',' + draft.cc).forEach((part) => {
+        const displayName = part.match(/^([^<@]+?)\s*<[^>]+>$/)?.[1]?.trim()
+        const email = part.includes('<')
+          ? (part.match(/<([^>]+)>/)?.[1] ?? part).toLowerCase()
+          : part.toLowerCase()
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          contactsService.upsert({ name: displayName || email.split('@')[0], email })
+        }
+      })
+    },
+    [arrive],
+  )
 
   const importMails = useCallback((mails: Mail[]) => {
-    mails.forEach(mail => dispatch({ type: 'receive', mail }))
+    mails.forEach((mail) => dispatch({ type: 'receive', mail }))
   }, [])
 
   const unsend = useCallback(() => {
@@ -291,7 +401,10 @@ export function MailProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const mailbox = useMemo(
-    () => (activeAccount === unifiedViewId ? state.mailbox : state.mailbox.filter(mail => (mail.accountId ?? primaryAccountId) === activeAccount)),
+    () =>
+      activeAccount === unifiedViewId
+        ? state.mailbox
+        : state.mailbox.filter((mail) => (mail.accountId ?? primaryAccountId) === activeAccount),
     [state.mailbox, activeAccount],
   )
 
@@ -308,52 +421,94 @@ export function MailProvider({ children }: { children: ReactNode }) {
     return result.account
   }, [])
 
-  const removeAccount = useCallback((accountId: string) => {
-    accountsApi.remove(accountId)
-    setAccounts(accountsApi.list())
-    if (activeAccount === accountId) setActiveAccountState(unifiedViewId)
-    dispatch({ type: 'drop-account', accountId })
-    dispatch({ type: 'notice', message: 'Account removed' })
-  }, [activeAccount])
+  const removeAccount = useCallback(
+    (accountId: string) => {
+      accountsApi.remove(accountId)
+      setAccounts(accountsApi.list())
+      if (activeAccount === accountId) setActiveAccountState(unifiedViewId)
+      dispatch({ type: 'drop-account', accountId })
+      dispatch({ type: 'notice', message: 'Account removed' })
+    },
+    [activeAccount],
+  )
 
-  const value = useMemo<MailContextValue>(() => ({
-    mailbox,
-    accounts,
-    activeAccount,
-    setActiveAccount,
-    addAccount,
-    removeAccount,
-    loading: state.loading,
-    loadError: state.loadError,
-    notice: state.notice,
-    undoActive: state.undo !== null,
-    undoSendActive,
-    undoSecondsLeft,
-    toasts,
-    composeOpen,
-    composerInitial,
-    scheduledCount,
-    openCompose,
-    closeCompose,
-    markRead,
-    markUnread,
-    markAllRead,
-    toggleStar,
-    toggleLabel,
-    applyAction,
-    moveToFolder,
+  const value = useMemo<MailContextValue>(
+    () => ({
+      mailbox,
+      accounts,
+      activeAccount,
+      setActiveAccount,
+      addAccount,
+      removeAccount,
+      loading: state.loading,
+      loadError: state.loadError,
+      notice: state.notice,
+      undoActive: state.undo !== null,
+      undoSendActive,
+      undoSecondsLeft,
+      toasts,
+      composeOpen,
+      composerInitial,
+      scheduledCount,
+      openCompose,
+      closeCompose,
+      markRead,
+      markUnread,
+      markAllRead,
+      toggleStar,
+      toggleLabel,
+      applyAction,
+      moveToFolder,
 
-    emptyTrash,
-    snooze,
-    removeScheduled,
-    undoAction,
-    unsend,
-    dismissToast,
-    handleSent,
-    importMails,
-    notify,
-    reload,
-  }), [mailbox, accounts, activeAccount, setActiveAccount, addAccount, removeAccount, state.loading, state.loadError, state.notice, state.undo, undoSendActive, undoSecondsLeft, toasts, composeOpen, composerInitial, scheduledCount, openCompose, closeCompose, markRead, markUnread, markAllRead, toggleStar, toggleLabel, applyAction, moveToFolder, emptyTrash, snooze, removeScheduled, undoAction, unsend, dismissToast, handleSent, importMails, notify, reload])
+      emptyTrash,
+      snooze,
+      removeScheduled,
+      undoAction,
+      unsend,
+      dismissToast,
+      handleSent,
+      importMails,
+      notify,
+      reload,
+    }),
+    [
+      mailbox,
+      accounts,
+      activeAccount,
+      setActiveAccount,
+      addAccount,
+      removeAccount,
+      state.loading,
+      state.loadError,
+      state.notice,
+      state.undo,
+      undoSendActive,
+      undoSecondsLeft,
+      toasts,
+      composeOpen,
+      composerInitial,
+      scheduledCount,
+      openCompose,
+      closeCompose,
+      markRead,
+      markUnread,
+      markAllRead,
+      toggleStar,
+      toggleLabel,
+      applyAction,
+      moveToFolder,
+      emptyTrash,
+      snooze,
+      removeScheduled,
+      undoAction,
+      unsend,
+      dismissToast,
+      handleSent,
+      importMails,
+      notify,
+      reload,
+    ],
+  )
 
   return <MailContext.Provider value={value}>{children}</MailContext.Provider>
 }

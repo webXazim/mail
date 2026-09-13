@@ -17,9 +17,12 @@ export const scheduleApi = {
     return message
   },
   remove(id: string) {
-    localStorage.setItem(scheduleKey, JSON.stringify(this.list().filter(message => message.id !== id)))
+    localStorage.setItem(
+      scheduleKey,
+      JSON.stringify(this.list().filter((message) => message.id !== id)),
+    )
   },
   dueItems(now = Date.now()): ScheduledMessage[] {
-    return this.list().filter(message => new Date(message.at).getTime() <= now)
+    return this.list().filter((message) => new Date(message.at).getTime() <= now)
   },
 }

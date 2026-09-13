@@ -37,7 +37,13 @@ export type MailboxAction =
   | { type: 'notice'; message: string }
   | { type: 'clear-notice' }
 
-export const initialMailState: MailState = { mailbox: [], loading: true, loadError: false, notice: '', undo: null }
+export const initialMailState: MailState = {
+  mailbox: [],
+  loading: true,
+  loadError: false,
+  notice: '',
+  undo: null,
+}
 
 export const applyNotice: Record<MailActionKind, string> = {
   archive: 'Archived',
@@ -46,7 +52,7 @@ export const applyNotice: Record<MailActionKind, string> = {
 }
 
 const applyKind = (mailbox: Mail[], ids: string[], action: MailActionKind): Mail[] =>
-  mailbox.map(mail => {
+  mailbox.map((mail) => {
     if (!ids.includes(mail.id)) return mail
     if (action === 'read') return { ...mail, unread: false }
     return { ...mail, folder: action === 'trash' ? 'Trash' : 'Archive' }
@@ -63,12 +69,19 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
     case 'retry':
       return { ...state, loading: true, loadError: false, notice: '' }
     case 'mark-read':
-      return { ...state, mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, unread: false } : mail) }
+      return {
+        ...state,
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail) ? { ...mail, unread: false } : mail,
+        ),
+      }
     case 'mark-unread':
       if (!action.ids.length) return { ...state, notice: 'Select at least one message first' }
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, unread: true } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail) ? { ...mail, unread: true } : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: 'Marked as unread',
       }
@@ -76,7 +89,9 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       if (!action.ids.length) return { ...state, notice: 'Nothing to mark read' }
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, unread: false } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail) ? { ...mail, unread: false } : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: 'Marked all as read',
       }
@@ -84,7 +99,9 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       if (!action.ids.length) return state
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, starred: !mail.starred } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail) ? { ...mail, starred: !mail.starred } : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: 'Updated star',
       }
@@ -92,7 +109,11 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       if (!action.ids.length) return { ...state, notice: 'Select at least one message first' }
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, label: mail.label === action.label ? '' : action.label } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail)
+            ? { ...mail, label: mail.label === action.label ? '' : action.label }
+            : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: 'Updated label',
       }
@@ -108,31 +129,45 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       if (!action.ids.length) return { ...state, notice: 'Select at least one message first' }
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, folder: action.folder } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail) ? { ...mail, folder: action.folder } : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: `Moved to ${action.folder}`,
       }
     case 'empty-trash':
-      return { ...state, mailbox: state.mailbox.filter(mail => mail.folder !== 'Trash'), notice: 'Trash emptied' }
+      return {
+        ...state,
+        mailbox: state.mailbox.filter((mail) => mail.folder !== 'Trash'),
+        notice: 'Trash emptied',
+      }
     case 'snooze':
       if (!action.ids.length) return { ...state, notice: 'Select at least one message first' }
       return {
         ...state,
-        mailbox: state.mailbox.map(mail => atIds(action.ids, mail) ? { ...mail, folder: 'Snoozed', snoozedUntil: action.until } : mail),
+        mailbox: state.mailbox.map((mail) =>
+          atIds(action.ids, mail)
+            ? { ...mail, folder: 'Snoozed', snoozedUntil: action.until }
+            : mail,
+        ),
         undo: { previous: state.mailbox, ids: action.ids },
         notice: `Snoozed until ${new Date(action.until).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
       }
     case 'unsnooze':
       return {
         ...state,
-        mailbox: state.mailbox.map(mail =>
-          mail.folder === 'Snoozed' && mail.snoozedUntil && new Date(mail.snoozedUntil).getTime() <= Date.now()
+        mailbox: state.mailbox.map((mail) =>
+          mail.folder === 'Snoozed' &&
+          mail.snoozedUntil &&
+          new Date(mail.snoozedUntil).getTime() <= Date.now()
             ? { ...mail, folder: 'Inbox', snoozedUntil: undefined }
             : mail,
         ),
       }
     case 'undo':
-      return state.undo ? { ...state, mailbox: state.undo.previous, undo: null, notice: 'Action undone' } : state
+      return state.undo
+        ? { ...state, mailbox: state.undo.previous, undo: null, notice: 'Action undone' }
+        : state
     case 'too-late':
       return { ...state, undo: null }
     case 'sent':
@@ -142,9 +177,18 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
     case 'append':
       return { ...state, mailbox: [...state.mailbox, ...action.mails] }
     case 'drop-account':
-      return { ...state, mailbox: state.mailbox.filter(mail => (mail.accountId ?? primaryAccountId) !== action.accountId) }
+      return {
+        ...state,
+        mailbox: state.mailbox.filter(
+          (mail) => (mail.accountId ?? primaryAccountId) !== action.accountId,
+        ),
+      }
     case 'unsend-mail':
-      return { ...state, mailbox: state.mailbox.filter(mail => mail.id !== action.id), notice: 'Send undone' }
+      return {
+        ...state,
+        mailbox: state.mailbox.filter((mail) => mail.id !== action.id),
+        notice: 'Send undone',
+      }
     case 'notice':
       return { ...state, notice: action.message }
     case 'clear-notice':

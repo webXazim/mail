@@ -42,12 +42,3 @@ pnpm-debug.log*
 
 # Misc
 .cache/
-
-# Playwright
-test-results/
-playwright-report/
-playwright/.cache/
-
-# Demo server runtime data
-server/data/
-```

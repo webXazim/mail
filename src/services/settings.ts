@@ -3,6 +3,8 @@ import { useState } from 'react'
 export type UserSettings = {
   displayName: string
   signature: string
+  theme: 'dark' | 'light'
+  density: 'compact' | 'cozy' | 'comfortable'
   desktopNotifications: boolean
   conversations: boolean
   markReadOnOpen: boolean
@@ -17,6 +19,8 @@ export type UserSettings = {
 export const defaultSettings: UserSettings = {
   displayName: 'Alex Morgan',
   signature: '',
+  theme: 'dark',
+  density: 'comfortable',
   desktopNotifications: true,
   conversations: true,
   markReadOnOpen: true,
@@ -30,6 +34,14 @@ export const defaultSettings: UserSettings = {
 
 const settingsKey = 'harbor-mail:settings'
 
+export const applyTheme = (theme: UserSettings['theme']) => {
+  document.documentElement.dataset.theme = theme
+}
+
+export const applyDensity = (density: UserSettings['density']) => {
+  document.documentElement.dataset.density = density
+}
+
 export const settingsApi = {
   load(): UserSettings {
     try {
@@ -40,15 +52,18 @@ export const settingsApi = {
   },
   save(next: UserSettings) {
     localStorage.setItem(settingsKey, JSON.stringify(next))
+    applyTheme(next.theme)
+    applyDensity(next.density)
   },
 }
 
 export function useSettings() {
   const [settings, setSettings] = useState<UserSettings>(() => settingsApi.load())
-  const update = (patch: Partial<UserSettings>) => setSettings(current => {
-    const next = { ...current, ...patch }
-    settingsApi.save(next)
-    return next
-  })
+  const update = (patch: Partial<UserSettings>) =>
+    setSettings((current) => {
+      const next = { ...current, ...patch }
+      settingsApi.save(next)
+      return next
+    })
   return { ...settings, update }
 }
