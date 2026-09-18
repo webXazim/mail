@@ -64,8 +64,13 @@ services:
       HARBOR_JWT_SECRET: ${HARBOR_JWT_SECRET:?set HARBOR_JWT_SECRET in .env}
       HARBOR_JWT_ACCESS_TTL_SECS: 900
       HARBOR_JWT_REFRESH_TTL_SECS: 2592000
+      # Smoke tests (WS8.4) and staging deploys can relax verification / point
+      # at a real bridge without editing this file.
+      HARBOR_REQUIRE_VERIFICATION: ${HARBOR_REQUIRE_VERIFICATION:-true}
       # Mail provisioning bridge (WS2): create a mailbox for every signup.
-      HARBOR_MAIL_ADMIN_URL: http://mail:8080/
+      # Empty value (CI smoke tests) disables the bridge; `-` keeps the default
+      # only when unset so an explicitly-empty override actually lands.
+      HARBOR_MAIL_ADMIN_URL: ${HARBOR_MAIL_ADMIN_URL-http://mail:8080/}
       HARBOR_MAIL_ADMIN_USERNAME: admin
       HARBOR_MAIL_ADMIN_SECRET: ${HARBOR_MAIL_ADMIN_PASSWORD:-HarborDevMail!1}
       HARBOR_MAIL_DEFAULT_DOMAIN: ${HARBOR_MAIL_DEFAULT_DOMAIN:-crescentsphere.com}

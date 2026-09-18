@@ -107,3 +107,57 @@ jobs:
         run: |
           npm ci
           npm audit --audit-level=high
+
+  # WS8.3: image scan (trivy) + SBOM. Blocks on critical-only findings;
+  # ignore-unfixed so an OS CVE with no upstream patch isn't a hard gate.
+  image:
+    name: Backend image (trivy scan + SBOM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t harbor-api:ci ./backend
+      - name: Scan image (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: image
+          image-ref: harbor-api:ci
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: image
+          image-ref: harbor-api:ci
+          format: cyclonedx
+          output: sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: |
+            trivy.sarif
+            sbom.cdx.json
+
+  # WS8.4: post-deploy smoke (health -> register -> login -> refresh -> use the
+  # rotated token). Boots api + db only (no Stalwart needed) with verification
+  # relaxed and the provisioning bridge off.
+  smoke:
+    name: Post-deploy smoke (health/register/login/refresh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot api + db
+        env:
+          HARBOR_JWT_SECRET: ci-only-secret-XXXXXXXXXXXXXXXXXXXXXXXXXX
+          HARBOR_REQUIRE_VERIFICATION: 'false'
+          HARBOR_MAIL_ADMIN_URL: ''
+          HARBOR_CORS_ORIGINS: http://localhost:5174
+        run: |
+          docker compose up -d db
+          docker compose up -d --no-deps api
+      - name: Run smoke test
+        shell: pwsh
+        run: ./deploy/smoke-test.ps1 -BaseUrl http://127.0.0.1:8080
