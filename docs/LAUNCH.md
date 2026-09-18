@@ -150,6 +150,7 @@ Today most services are localStorage-backed and auth silently falls back to an a
 | 8.4 | ✅ Smoke test after deploy: `/api/health` → register/login/refresh round trip, rotated token re-used via `/api/profile`; wired as a CI job booting api+db with the provisioning bridge off | `deploy/smoke-test.ps1`, `ci.yml` (smoke job) | S | auto-fail on bad deploy |
 | 8.5 | ✅ Backend tests: 55 unit (auth/quota/validators/suppression/send-limit) + 4 end-to-end integration against real Postgres (auth register/login/refresh surface, contacts CRUD, calendar CRUD, admin role gate, metrics scrape, manual-payment billing flow, admin create-user/password-reset/delete). Integration suite skips without `TEST_DATABASE_URL`; CI runs an ephemeral `postgres:16` service | `backend/tests/api_flows.rs`, `.github/workflows/ci.yml` | M | `cargo test` covers core flows |
 | 8.6 | ✅ Frontend tests (vitest 5 + RTL): `apiFetch` (auth header, error mapping, refresh retry), admin API mapping, LoginPage (sign-in + audit + navigation, error path, password reveal), AdminPage remote mode (overview domain, mailboxes, aliases, security blocked senders, audit log, Stalwart-managed hints). Found + fixed a live URL bug: `request()` double-prefixed `/api` (`/api/api/...`) breaking every real API call; non-JSON error bodies now map to `ApiError` instead of throwing `SyntaxError`. Wired as `npm run test` in CI | `frontend/src/**/*.test.ts*`, `.github/workflows/ci.yml` | M | 20 tests, critical flows covered |
+| 8.7 | ✅ Session hardening (WS1.4/WS1.5, closes the WS3.2 live token-storage row): refresh no longer returns in any JSON body (register/verify/login auto-login emit `{access,user}` only); the session cookie is the only way to refresh, with rotation + replay-detection that revokes the whole user family. Live + integration-test proven: login sets HttpOnly/SameSite=Lax cookie (no body refresh), cookie-only refresh rotates + returns `{access}`, replayed cookie → 401 + family revoked, forged-Origin refresh → 403 (CSRF probe), body-token refresh → 401. Frontend: `AuthResponse.refresh` now optional (nothing reads it) | `backend/src/handlers/auth.rs`, `backend/src/middleware/auth.rs`, `backend/tests/api_flows.rs` (`session_cookie_csrf_and_refresh_rotation`), `deploy/smoke-test.ps1`, `frontend/src/services/auth.ts` | M | CSRF probe fails; tokens not readable by JS |
 
 ---
 
@@ -178,7 +179,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 - [ ] A new signup receives a verified mailbox and can send/receive a real email.
 - [ ] SPF, DKIM, DMARC, and rDNS pass; `mail-tester` ≥ 9/10.
 - [x] Auth endpoints rate-limited; brute force lockout verified (5 fails → lock).
-- [ ] Tokens are HttpOnly cookies; CSRF probe fails (WS1.4).
+- [X] Tokens are HttpOnly cookies; CSRF probe fails (WS1.4).
 - [ ] `VITE`/`.env` contain zero weak or committed secrets; `HARBOR_JWT_SECRET` ≥32 bytes on the server.
 - [ ] Container runs unprivileged; only Caddy is publicly reachable.
 - [ ] Admin can onboard users, set quotas, view/export audit logs.
@@ -193,8 +194,11 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 
 ## 6. First three moves (recommended next)
 
-1. **Finish WS8.2: commit `Cargo.lock`** — the CI workflow (WS8.1) now generates it, but committing it makes builds reproducible and lets `cargo audit` scan a pinned graph; then flip the audit job to blocking once `sqlx` is upgraded to 0.8.
-2. **WS3.2 cookie-based API client (no token storage)** — aligns the frontend with the "HttpOnly cookies / no local token" launch gate.
-3. **WS3.6 admin real endpoints** — grow `handlers/admin.rs` (users, quotas, aliases, audit export) behind the new `AdminUser` gate.
+1. ✅ (done) **Commit `Cargo.lock`** — landed with WS8.2; builds are reproducible and `cargo audit` scans a pinned graph.
+2. ✅ (done) **WS3.2 cookie-based API client** — frontend no longer stores tokens; refresh is cookie-only with rotation + replay/CSRF-protection live-verified (see WS1.4/WS1.5).
+3. **WS3.6 admin real endpoints** — grow the admin mailboxes/aliases/audit-export surface behind the new `AdminUser` gate; live-verify audit CSV export (a hard launch-gate row at 3.4/8.3).
+
+4. **WS2.x mail works end-to-end (M3 chain)** — land the "new signup receives a verified mailbox and can send/receive a real email" gate on the live stack: two real accounts on the same Stalwart domain, SMTP send → JMAP/IMAP receive round trip. Depends only on the mailbox bridge + SMTP (no external DNS), so it's the fastest remaining critical chain to true mail.
+5. **WS6.2 backups + restore drill** — automate `pg_dump` (covers `users`, `sessions`, audit, statistics, billing) with retention + a restore-into-throwaway drill whose final step asserts data freshness (a hard launch-gate row at 3. Houston after M3).
 
 Everything marked ☐ is a gap; nothing below M3 needs to be perfect to start — scope-freeze discipline at M8 matters more.

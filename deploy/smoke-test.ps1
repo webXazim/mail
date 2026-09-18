@@ -56,32 +56,51 @@ try {
 if (-not $registered) { Fail "register failed for $email" }
 Write-Host "ok: register $email" -ForegroundColor Green
 
-# 3. Login round trip.
+# 3. Login round trip via the HttpOnly session cookie.
 $login = $null
+$sess = $null
+$setCookie = $null
 try {
-    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl/api/auth/login" -ContentType 'application/json' -Body $body -TimeoutSec 15
+    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl/api/auth/login" -ContentType 'application/json' -Body $body -TimeoutSec 15 -SessionVariable sess
     $login = $r.Content | ConvertFrom-Json
+    $setCookie = $r.Headers['Set-Cookie']
 } catch { }
-if ($null -eq $login -or [string]::IsNullOrEmpty($login.access) -or [string]::IsNullOrEmpty($login.refresh)) {
-    Fail 'login did not return access + refresh tokens (is the api running with HARBOR_REQUIRE_VERIFICATION=0?)'
+if ($null -eq $login -or [string]::IsNullOrEmpty($login.access)) {
+    Fail 'login did not return an access token (is the api running with HARBOR_REQUIRE_VERIFICATION=0?)'
 }
-Write-Host "ok: login -> access + refresh" -ForegroundColor Green
+if (-not ($setCookie -match 'harbor_session=')) { Fail 'login did not set a harbor_session cookie' }
+if ($setCookie -notmatch 'HttpOnly') { Fail 'session cookie is not HttpOnly' }
+if ($setCookie -notmatch 'SameSite=Lax') { Fail 'session cookie is not SameSite=Lax' }
+Write-Host "ok: login -> access + HttpOnly session cookie" -ForegroundColor Green
 
-# 4. Refresh rotation.
+# 4. Refresh rotates the cookie (no token in the request body).
 $rotated = $null
+$rotatedCookie = $null
 try {
-    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl/api/auth/refresh" -ContentType 'application/json' -Body (@{ token = $login.refresh } | ConvertTo-Json) -TimeoutSec 15
+    $r = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Post -Uri "$BaseUrl/api/auth/refresh" -ContentType 'application/json' -Body '{}' -WebSession $sess -TimeoutSec 15
     $rotated = $r.Content | ConvertFrom-Json
+    $rotatedCookie = $r.Headers['Set-Cookie']
 } catch { }
-if ($null -eq $rotated -or [string]::IsNullOrEmpty($rotated.access) -or [string]::IsNullOrEmpty($rotated.refresh)) {
-    Fail 'refresh did not rotate tokens'
+if ($null -eq $rotated -or [string]::IsNullOrEmpty($rotated.access)) {
+    Fail 'cookie-based refresh did not rotate tokens'
 }
-if ($rotated.refresh -eq $login.refresh) {
-    Fail 'refresh returned the same token (rotation broken)'
+$m1 = [regex]::Match($setCookie, 'harbor_session=([^;]+)').Groups[1].Value
+$m2 = [regex]::Match($rotatedCookie, 'harbor_session=([^;]+)').Groups[1].Value
+if ($m1 -eq $m2 -or [string]::IsNullOrEmpty($m2)) {
+    Fail 'refresh returned the same session cookie (rotation broken)'
 }
-Write-Host "ok: refresh rotated token" -ForegroundColor Green
+Write-Host "ok: refresh rotated the session cookie" -ForegroundColor Green
 
-# 5. The rotated access token must actually authenticate.
+# 5. CSRF probe: a cross-site POST carrying the cookie + forged Origin must be refused.
+$csrfStatus = $null
+try {
+    $r = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Post -Uri "$BaseUrl/api/auth/refresh" -ContentType 'application/json' -Body '{}' -WebSession $sess -Headers @{ Origin = 'https://evil.example' } -TimeoutSec 15
+    $csrfStatus = [int]$r.StatusCode
+} catch { }
+if ($csrfStatus -ne 403) { Fail "CSRF probe: expected 403, got $csrfStatus" }
+Write-Host "ok: cross-site refresh blocked (CSRF probe 403)" -ForegroundColor Green
+
+# 6. The rotated access token must actually authenticate.
 try {
     $S = @{ Authorization = "Bearer $($rotated.access)" }
     $prof = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/profile" -Headers $S -TimeoutSec 15

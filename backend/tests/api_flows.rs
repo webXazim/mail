@@ -103,6 +103,35 @@ async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
     (status, value)
 }
 
+/// Send a request and return (status, Set-Cookie header, body).
+async fn send_headers(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Value) {
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, set_cookie, value)
+}
+
+fn session_cookie(set_cookie: &str) -> String {
+    let first = set_cookie.split(';').next().unwrap_or("");
+    first
+        .strip_prefix("harbor_session=")
+        .expect("harbor_session cookie")
+        .to_string()
+}
+
+fn with_cookie(request: &mut Request<Body>, cookie_value: &str) {
+    let value = format!("harbor_session={cookie_value}");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, value.parse::<axum::http::HeaderValue>().unwrap());
+}
+
 /// Register a member and return `(access_token, user_id, email)`.
 async fn register(app: &Router) -> (String, String, String) {
     let email = unique_email();
@@ -664,4 +693,144 @@ async fn billing_manual_payment_flow() {
         .unwrap()
         .iter()
         .all(|p| p["code"] != reseller_code));
+}
+
+#[tokio::test]
+async fn session_cookie_csrf_and_refresh_rotation() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let email = unique_email();
+    let (status, body) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/register",
+            None,
+            Some(json!({ "name": "Cookie", "email": email.clone(), "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "register: {body}");
+    let access = body["access"].as_str().expect("access token").to_string();
+    let user_id = body["user"]["id"].as_str().expect("user id").to_string();
+    // The refresh half travels only in the HttpOnly cookie, never the body.
+    assert!(
+        body["refresh"].is_null(),
+        "refresh must not leak in the JSON body"
+    );
+
+    // Login sets an HttpOnly, SameSite=Lax session cookie.
+    let (status, set_cookie, login) = send_headers(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": email, "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "login: {login}");
+    assert_eq!(login["user"]["id"].as_str(), Some(user_id.as_str()));
+    assert!(login["refresh"].is_null(), "login must not expose refresh");
+    let cookie = set_cookie
+        .as_deref()
+        .expect("login must set a session cookie");
+    assert!(cookie.contains("HttpOnly"), "cookie must be HttpOnly");
+    assert!(
+        cookie.contains("SameSite=Lax"),
+        "cookie must be SameSite=Lax"
+    );
+    assert!(cookie.contains("Path=/"), "cookie must be Path=/");
+    let session = session_cookie(cookie);
+
+    // The session cookie is the only way to call refresh.
+    let (status, _) = send(&t.app, req("POST", "/api/auth/refresh", None, None)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "refresh without cookie must fail"
+    );
+
+    // Refresh with the cookie rotates both halves and never returns refresh.
+    let mut refresh_req = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut refresh_req, &session);
+    let (status, rotated_cookie, rotated) = send_headers(&t.app, refresh_req).await;
+    assert_eq!(status, StatusCode::OK, "cookie refresh: {rotated}");
+    assert!(rotated["refresh"].is_null());
+    assert!(rotated["access"].as_str().is_some());
+    let rotated_session = session_cookie(rotated_cookie.as_deref().expect("rotated cookie"));
+    assert_ne!(rotated_session, session, "refresh must rotate the cookie");
+
+    // A replayed (old) cookie is treated as theft: the session family dies.
+    let mut replay_req = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut replay_req, &session);
+    let (status, _) = send(&t.app, replay_req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "replay must be rejected");
+    // The new cookie survives replay detection untouched? No: reuse revokes the
+    // whole user family, so the rotated cookie is dead too.
+    let mut after_replay = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut after_replay, &rotated_session);
+    let (status, _) = send(&t.app, after_replay).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "family revoked after replay"
+    );
+
+    // CSRF probe: a cross-site POST carrying a valid cookie + forged Origin is
+    // blocked even though the cookie rides along.
+    let (status, login2, body2) = login_probe(&t.app, &email).await;
+    assert_eq!(status, StatusCode::OK, "login: {body2}");
+    let cookie2 = login2.as_deref().expect("login sets a cookie");
+    let session2 = session_cookie(cookie2);
+    let mut csrf = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut csrf, &session2);
+    csrf.headers_mut().insert(
+        header::ORIGIN,
+        "http://evil.example"
+            .parse::<axum::http::HeaderValue>()
+            .unwrap(),
+    );
+    let (status, _) = send(&t.app, csrf).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "cross-site refresh must be blocked"
+    );
+
+    // Logout clears the cookie and revokes remaining sessions.
+    let mut logout_req = req("POST", "/api/auth/logout", Some(&access), None);
+    with_cookie(&mut logout_req, &session2);
+    let (status, cleared, _) = send_headers(&t.app, logout_req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        cleared.as_deref().unwrap_or("").contains("Max-Age=0"),
+        "logout must clear the cookie"
+    );
+    let mut after_logout = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut after_logout, &session2);
+    let (status, _) = send(&t.app, after_logout).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "refresh after logout must fail"
+    );
+}
+
+/// Login a user and return (Set-Cookie header, body) for the cookie probes.
+async fn login_probe(app: &Router, email: &str) -> (StatusCode, Option<String>, Value) {
+    send_headers(
+        app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": email, "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await
 }

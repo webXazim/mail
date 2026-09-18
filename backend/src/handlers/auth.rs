@@ -64,13 +64,6 @@ pub struct LoginIn {
 }
 
 #[derive(Deserialize)]
-pub struct RefreshIn {
-    /// Optional legacy body token; new clients rely on the httpOnly cookie.
-    #[serde(default)]
-    token: String,
-}
-
-#[derive(Deserialize)]
 pub struct VerifyIn {
     token: String,
 }
@@ -263,7 +256,6 @@ pub async fn register(
         StatusCode::OK,
         Json(json!({
             "access": access,
-            "refresh": refresh,
             "user": user_json(user.0, &user.1, &user.2, "member", true)
         })),
     )
@@ -354,7 +346,6 @@ pub async fn login(
         StatusCode::OK,
         Json(json!({
             "access": access,
-            "refresh": refresh,
             "user": user_json(user_id, &email, &display_name, &role, verified)
         })),
     )
@@ -449,7 +440,6 @@ pub async fn verify(
         StatusCode::OK,
         Json(json!({
             "access": access,
-            "refresh": refresh,
             "user": user_json(user_id, &email, &display_name, &role, true)
         })),
     )
@@ -632,7 +622,6 @@ pub async fn reset_password(
 pub async fn refresh(
     headers: HeaderMap,
     State(state): State<AppState>,
-    Json(body): Json<RefreshIn>,
 ) -> Result<Response, ApiError> {
     use jsonwebtoken::{decode, DecodingKey, Validation};
 
@@ -640,12 +629,11 @@ pub async fn refresh(
         return Err(ApiError::forbidden("Cross-site request blocked"));
     }
 
-    // Prefer the cookie; fall back to a body token sent by older frontends.
-    let refresh_token = match cookie_token(&headers) {
-        Some(t) => t,
-        None if !body.token.is_empty() => body.token.clone(),
-        None => return Err(ApiError::unauthorized("No refresh token provided")),
-    };
+    // Cookie-only: the refresh token must never travel in a JSON body, where a
+    // script-stored copy could be exfiltrated. HttpOnly + SameSite=Lax + the
+    // origin check above keep the endpoint CSRF-safe.
+    let refresh_token = cookie_token(&headers)
+        .ok_or_else(|| ApiError::unauthorized("No refresh token provided"))?;
 
     let token_data = decode::<Claims>(
         &refresh_token,
@@ -709,14 +697,8 @@ pub async fn refresh(
 
     audit::record(&state, Some(user_id), "auth.refresh", json!({})).await;
 
-    let res = (
-        StatusCode::OK,
-        Json(json!({
-            "access": access,
-            "refresh": refresh
-        })),
-    )
-        .into_response();
+    // Access token in the body; rotated refresh only over the Set-Cookie.
+    let res = (StatusCode::OK, Json(json!({ "access": access }))).into_response();
     Ok(with_session_cookie(&state, res, &refresh))
 }
 

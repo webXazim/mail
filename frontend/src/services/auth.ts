@@ -22,7 +22,8 @@ export type AuthUser = {
 
 type AuthResponse = {
   access: string
-  refresh: string
+  /** Only present in demo mode; the live server sends refresh over HttpOnly cookie. */
+  refresh?: string
   user: AuthUser
 }
 
