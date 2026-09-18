@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   CreditCard,
+  Download as DownloadIcon,
   FileWarning,
   Globe,
   History as HistoryIcon,
@@ -1421,7 +1422,35 @@ export function AdminPage() {
 
       {tab === 'audit' && (
         <section className="settings-section">
-          <h2>Audit log</h2>
+          <div className="admin-page-head">
+            <h2>Audit log</h2>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                void remoteAdminApi
+                  .auditExport()
+                  .then((csv: string) => {
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+                    const url = URL.createObjectURL(blob)
+                    const link = document.createElement('a')
+                    link.href = url
+                    link.download = 'harbor-audit.csv'
+                    document.body.appendChild(link)
+                    link.click()
+                    link.remove()
+                    URL.revokeObjectURL(url)
+                    showNotice('Audit trail exported as CSV')
+                  })
+                  .catch((error: Error) =>
+                    showNotice(error.message || 'Failed to export audit log'),
+                  )
+              }}
+            >
+              <DownloadIcon size={14} />
+              Export CSV
+            </button>
+          </div>
           {audit.map((entry) => (
             <div className="billing-row" key={entry.id}>
               <div>

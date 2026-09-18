@@ -110,5 +110,36 @@ try {
 }
 Write-Host "ok: rotated token authenticates /api/profile" -ForegroundColor Green
 
+# 7. Admin gate: if admin credentials are supplied, download the audit trail as
+# CSV and verify RFC 4180 structure (a hard launch-gate row at WS5.5/8.3). The
+# hard gate itself is also enforced in CI by `cargo test` (api_flows.rs), so this
+# probe is belt-and-suspenders and skips when no HARBOR_SMOKE_ADMIN_* are set.
+$adminEmail = $env:HARBOR_SMOKE_ADMIN_EMAIL
+$adminPass = $env:HARBOR_SMOKE_ADMIN_PASSWORD
+if ([string]::IsNullOrEmpty($adminEmail) -or [string]::IsNullOrEmpty($adminPass)) {
+    Write-Host "skip: no HARBOR_SMOKE_ADMIN_EMAIL/PASSWORD set; audit CSV export probed by api_flows.rs in CI" -ForegroundColor Yellow
+} else {
+    $adminLogin = $null
+    try {
+        $B = @{ email = $adminEmail; password = $adminPass } | ConvertTo-Json
+        $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl/api/auth/login" -ContentType 'application/json' -Body $B -TimeoutSec 15
+        $adminLogin = $r.Content | ConvertFrom-Json
+    } catch { }
+    if ($null -eq $adminLogin -or [string]::IsNullOrEmpty($adminLogin.access)) { Fail "admin login failed for $adminEmail" }
+    $adminHeaders = @{ Authorization = "Bearer $($adminLogin.access)" }
+    $csv = $null
+    try {
+        $er = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Get -Uri "$BaseUrl/api/admin/audit/export" -Headers $adminHeaders -TimeoutSec 15
+        if ($er.StatusCode -eq 200) { $csv = $er.Content }
+    } catch { }
+    if ([string]::IsNullOrEmpty($csv)) { Fail 'audit CSV export returned an empty/non-200 body' }
+    if ($csv -notmatch 'text/csv') { Fail 'audit export is not served as text/csv' }
+    $firstLine = ($csv -split "`r?`n" | Where-Object { $_ -ne "" } | Select-Object -First 1)
+    if ($firstLine -ne 'id,time,actor,action,detail') {
+        Fail "audit CSV header row missing (got: $firstLine)"
+    }
+    Write-Host "ok: /api/admin/audit/export returns RFC 4180 CSV" -ForegroundColor Green
+}
+
 Write-Host "SMOKE PASS" -ForegroundColor Green
 exit 0

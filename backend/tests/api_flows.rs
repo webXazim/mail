@@ -103,6 +103,20 @@ async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
     (status, value)
 }
 
+/// Send a request and return (status, Content-Type header, raw body bytes) without
+/// JSON parsing — used for CSV-download endpoints whose bodies are not JSON.
+async fn send_raw(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Vec<u8>) {
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let bytes: Vec<u8> = response.into_body().collect().await.unwrap().to_bytes().to_vec();
+    (status, content_type, bytes)
+}
+
 /// Send a request and return (status, Set-Cookie header, body).
 async fn send_headers(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Value) {
     let response = app.clone().oneshot(request).await.unwrap();
@@ -489,6 +503,31 @@ async fn admin_provisions_and_resets_user() {
     assert!(actions.contains(&"admin.user.created"));
     assert!(actions.contains(&"admin.user.password_reset"));
     assert!(actions.contains(&"admin.user.erase"));
+
+    // Admin exports the audit trail as an RFC 4180 CSV stream (WS5.5 / gate 3.4).
+    let (status, content_type, csv) = send_raw(&t.app, req("GET", "/api/admin/audit/export", Some(&admin_token), None)).await;
+    assert_eq!(status, StatusCode::OK, "audit CSV export status");
+    assert_eq!(
+        content_type.as_deref(),
+        Some("text/csv; charset=utf-8"),
+        "audit CSV content-type"
+    );
+    let csv_text = String::from_utf8(csv).unwrap();
+    let lines: Vec<&str> = csv_text.split("\r\n").filter(|l| !l.is_empty()).collect();
+    assert_eq!(
+        lines[0],
+        "id,time,actor,action,detail",
+        "audit CSV header row (RFC 4180)"
+    );
+    assert!(lines.len() >= 4, "audit CSV should have header + >2 entries, got {}", lines.len());
+    assert!(
+        csv_text.contains(&"admin.user.erase"),
+        "audit CSV must include the erase action"
+    );
+    assert!(
+        csv_text.contains(&"admin.user.created"),
+        "audit CSV must include the create action"
+    );
 }
 
 #[tokio::test]

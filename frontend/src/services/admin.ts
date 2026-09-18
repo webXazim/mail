@@ -684,4 +684,9 @@ export const remoteAdminApi = {
     const data = await apiFetch<{ entries: BackendAudit[] }>('/api/admin/audit')
     return (data.entries ?? []).map(mapAudit)
   },
+
+  /** Download the full admin audit trail as an RFC 4180 CSV document. */
+  async auditExport(): Promise<string> {
+    return await apiFetch<string>('/api/admin/audit/export')
+  },
 }
