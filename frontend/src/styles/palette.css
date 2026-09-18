@@ -1,0 +1,102 @@
+.palette-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding: 14vh 24px 24px;
+  background: rgba(5, 8, 10, 0.7);
+  backdrop-filter: blur(4px);
+}
+.palette-panel {
+  width: min(560px, 100%);
+  border: 1px solid var(--a2t-line-strong);
+  border-radius: var(--a2t-radius);
+  background: var(--a2t-panel);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--a2t-line-soft);
+  color: var(--a2t-copy-soft);
+}
+.palette-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--a2t-white);
+  font-size: 13px;
+}
+.palette-results {
+  max-height: min(360px, 50vh);
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--a2t-silver);
+  font-size: 12px;
+}
+.palette-item__icon {
+  display: grid;
+  place-items: center;
+  color: var(--a2t-copy-soft);
+}
+.palette-item--active {
+  background: var(--a2t-panel-raised);
+  color: var(--a2t-white);
+}
+.palette-item--active .palette-item__icon {
+  color: var(--a2t-accent);
+}
+.palette-empty {
+  padding: 22px 14px;
+  color: var(--a2t-copy-soft);
+  font-size: 12px;
+  text-align: center;
+}
+.palette-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--a2t-line-soft);
+  color: var(--a2t-copy-soft);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.palette-foot kbd + kbd {
+  margin-left: 4px;
+}
+
+.palette-section {
+  padding: 8px 12px 4px;
+  color: var(--a2t-copy-soft);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.palette-item__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.palette-item__desc {
+  color: var(--a2t-copy-soft);
+  font-size: 10px;
+}

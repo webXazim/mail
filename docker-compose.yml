@@ -1,0 +1,100 @@
+name: harbor-mail
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: harbor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-harbor}
+      POSTGRES_DB: harbor
+    ports:
+      # Loopback only — Postgres is never exposed to the public network.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbor -d harbor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mail:
+    # Stalwart mail/collaboration server: IMAP, SMTP, JMAP store + admin API.
+    # First boot starts in HTTP bootstrap mode on :8080; run
+    #   deploy/stalwart-bootstrap.ps1
+    # once to write the config (hostname/domain/TLS/DKIM), then it restarts
+    # into normal operation and persists state in the named volumes below.
+    image: stalwartlabs/stalwart:latest
+    restart: unless-stopped
+    environment:
+      # Pins the initial admin account to `admin:<password>` on bootstrap so
+      # api-side provisioning has deterministic credentials. In production set
+      # HARBOR_MAIL_ADMIN_PASSWORD to a strong value.
+      STALWART_RECOVERY_ADMIN: admin:${HARBOR_MAIL_ADMIN_PASSWORD:-HarborDevMail!1}
+    ports:
+      # Loopback only — expose to the internet via the reverse proxy instead.
+      - "127.0.0.1:8081:8080" # HTTP: admin API + JMAP (dev, no TLS)
+      - "127.0.0.1:8143:143"  # IMAP
+      - "127.0.0.1:8587:587"  # SMTP submission (client send)
+      - "127.0.0.1:8025:25"   # SMTP relay (inbound)
+    volumes:
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      HARBOR_LISTEN_ADDR: 0.0.0.0:8080
+      HARBOR_PUBLIC_ORIGIN: ${HARBOR_PUBLIC_ORIGIN:-http://localhost:5174}
+      HARBOR_CORS_ORIGINS: ${HARBOR_CORS_ORIGINS:-http://localhost:5174}
+      HARBOR_DATABASE_URL: postgres://harbor:${POSTGRES_PASSWORD:-harbor}@db:5432/harbor
+      # No default: a known secret is a vulnerability. Set HARBOR_JWT_SECRET in
+      # .env on the server (32+ random bytes, e.g. `openssl rand -base64 48`).
+      HARBOR_JWT_SECRET: ${HARBOR_JWT_SECRET:?set HARBOR_JWT_SECRET in .env}
+      HARBOR_JWT_ACCESS_TTL_SECS: 900
+      HARBOR_JWT_REFRESH_TTL_SECS: 2592000
+      # Mail provisioning bridge (WS2): create a mailbox for every signup.
+      HARBOR_MAIL_ADMIN_URL: http://mail:8080/
+      HARBOR_MAIL_ADMIN_USERNAME: admin
+      HARBOR_MAIL_ADMIN_SECRET: ${HARBOR_MAIL_ADMIN_PASSWORD:-HarborDevMail!1}
+      HARBOR_MAIL_DEFAULT_DOMAIN: ${HARBOR_MAIL_DEFAULT_DOMAIN:-crescentsphere.com}
+      HARBOR_MAIL_ACCOUNT_QUOTA_BYTES: ${HARBOR_MAIL_ACCOUNT_QUOTA_BYTES:-2147483648}
+      # SMTP submission (WS2.3): the Stalwart relay on the internal network,
+      # plaintext in dev with no auth; HARBOR_SMTP_USERNAME/PASSWORD configure
+      # AUTH LOGIN when the stack gains an authenticated 587 listener.
+      HARBOR_SMTP_HOST: mail
+      HARBOR_SMTP_PORT: ${HARBOR_SMTP_PORT:-25}
+    ports:
+      # The public port for the reverse proxy on the host; never bind 0.0.0.0
+      # unless the proxy runs in its own container on the same network.
+      - "127.0.0.1:8080:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    cpus: "1.0"
+    depends_on:
+      db:
+        condition: service_healthy
+      mail:
+        condition: service_started
+
+volumes:
+  pgdata:
+  stalwart-etc:
+  stalwart-data:

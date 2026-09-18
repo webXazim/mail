@@ -1,0 +1,62 @@
+.onboard-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 62;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 8, 10, 0.78);
+  backdrop-filter: blur(5px);
+}
+.onboard-card {
+  width: min(430px, 100%);
+  padding: 26px;
+  border: 1px solid var(--a2t-line-strong);
+  border-radius: var(--a2t-radius);
+  background: var(--a2t-panel);
+  color: var(--a2t-silver);
+}
+.onboard-card h2 {
+  margin: 0;
+  color: var(--a2t-white);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.onboard-card header p:last-child {
+  margin: 8px 0 0;
+  color: var(--a2t-copy);
+  font-size: 12px;
+}
+.onboard-points {
+  display: grid;
+  gap: 10px;
+  margin: 22px 0;
+  padding: 0;
+  list-style: none;
+}
+.onboard-points li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--a2t-copy);
+  font-size: 12px;
+}
+.onboard-points li svg {
+  flex: none;
+  color: var(--a2t-accent);
+}
+.onboard-card footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.onboard-card form label {
+  display: grid;
+  gap: 6px;
+  color: var(--a2t-copy);
+  font-size: 12px;
+}
+.onboard-card form input {
+  width: 100%;
+}

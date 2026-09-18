@@ -9,6 +9,10 @@ dist-ssr/
 coverage/
 *.local
 
+# Rust
+target/
+.harbor-target/
+
 # Environment
 .env
 .env.*

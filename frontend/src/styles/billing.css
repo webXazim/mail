@@ -1,0 +1,153 @@
+.billing-row--quiet {
+  background: transparent;
+  border-color: var(--a2t-line-soft);
+}
+.billing-row--quiet strong {
+  color: var(--a2t-copy-soft);
+}
+
+/* ---- out-of-band payment instructions ---- */
+.billing-pay-instructions {
+  margin-top: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--a2t-line-soft);
+  border-left: 3px solid var(--a2t-accent);
+  border-radius: var(--a2t-radius);
+  background: var(--a2t-panel-soft);
+}
+.billing-pay-instructions strong {
+  display: block;
+  color: var(--a2t-white);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.billing-pay-instructions p {
+  margin: 0;
+  color: var(--a2t-copy-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+/* ---- admin plan form ---- */
+.plan-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px 16px;
+  margin-top: 4px;
+}
+.plan-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--a2t-silver);
+}
+.plan-form-grid textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+}
+
+/* ---- add payment method ---- */
+.payment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--a2t-line-soft);
+  border-radius: var(--a2t-radius);
+  background: var(--a2t-panel-soft);
+}
+.payment-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--a2t-silver);
+}
+.payment-form input {
+  width: 100%;
+}
+.payment-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ---- invoice / receipt ---- */
+.receipt-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--a2t-radius);
+  font-size: 12px;
+  font-weight: 600;
+}
+.receipt-status--paid {
+  background: rgba(200, 243, 79, 0.12);
+  color: var(--a2t-accent);
+}
+.receipt-status--pending {
+  background: rgba(255, 200, 50, 0.12);
+  color: #ffc832;
+}
+.receipt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  margin-top: 16px;
+  background: var(--a2t-line-soft);
+  border: 1px solid var(--a2t-line-soft);
+}
+.receipt-block {
+  padding: 16px;
+  background: var(--a2t-panel);
+}
+.receipt-block strong {
+  display: block;
+  color: var(--a2t-white);
+  font-size: 13px;
+  margin: 4px 0 2px;
+}
+.receipt-block small {
+  color: var(--a2t-copy-soft);
+  font-size: 11px;
+}
+.receipt-label {
+  display: block;
+  color: var(--a2t-copy-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.receipt-amount {
+  color: var(--a2t-accent) !important;
+}
+.receipt-line-amount {
+  color: var(--a2t-white);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.receipt-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--a2t-line-strong);
+  background: var(--a2t-panel-raised);
+}
+.receipt-total span {
+  color: var(--a2t-silver);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.receipt-total strong {
+  color: var(--a2t-white);
+  font-size: 18px;
+  font-weight: 800;
+}

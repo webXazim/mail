@@ -1,0 +1,17 @@
+pub mod account;
+pub mod admin;
+pub mod aliases;
+pub mod attachments;
+pub mod auth;
+pub mod billing;
+pub mod calendar;
+pub mod contacts;
+pub mod health;
+pub mod mailbox;
+pub mod metrics;
+pub mod profile;
+pub mod receipts;
+pub mod schedule;
+pub mod send;
+pub mod settings;
+pub mod unsubscribe;

@@ -1,0 +1,233 @@
+:root {
+  font-family: var(--a2t-sans);
+  color: var(--a2t-silver);
+  background: var(--a2t-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+body {
+  margin: 0;
+  background: var(--a2t-bg);
+  color: var(--a2t-silver);
+  font-size: 14px;
+  line-height: 1.5;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+a {
+  text-decoration: none;
+  color: inherit;
+}
+::selection {
+  background: var(--a2t-accent);
+  color: var(--a2t-ink);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--a2t-focus);
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--a2t-accent);
+  cursor: pointer;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--a2t-line);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--a2t-line-strong);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--a2t-radius);
+  background: transparent;
+  color: var(--a2t-copy);
+}
+.icon-button:hover {
+  color: var(--a2t-white);
+  background: var(--a2t-panel-raised);
+  border-color: var(--a2t-line-soft);
+}
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+  border-color: transparent;
+}
+.primary-button,
+.secondary-button,
+.compose-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--a2t-radius);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.primary-button {
+  background: var(--a2t-accent);
+  border: 1px solid var(--a2t-accent);
+  color: var(--a2t-ink);
+}
+.primary-button:hover {
+  background: var(--a2t-accent-hover);
+  border-color: var(--a2t-accent-hover);
+}
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.secondary-button {
+  background: transparent;
+  border: 1px solid var(--a2t-line);
+  color: var(--a2t-silver);
+}
+.secondary-button:hover {
+  color: var(--a2t-accent);
+  border-color: var(--a2t-accent);
+}
+.text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--a2t-accent);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.text-button:hover {
+  color: var(--a2t-accent-hover);
+}
+.eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--a2t-accent);
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--a2t-radius);
+  border: 1px solid var(--a2t-line);
+  font-family: var(--a2t-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.avatar--teal {
+  background: #143036;
+  border-color: rgba(127, 216, 200, 0.4);
+  color: #7fd8c8;
+}
+.avatar--purple {
+  background: #26203d;
+  border-color: rgba(183, 166, 255, 0.4);
+  color: #b7a6ff;
+}
+.avatar--orange {
+  background: #342a1f;
+  border-color: rgba(255, 180, 107, 0.4);
+  color: #ffb46b;
+}
+.avatar--blue {
+  background: #1d2a40;
+  border-color: rgba(143, 182, 255, 0.4);
+  color: #8fb6ff;
+}
+.avatar--coral {
+  background: #372220;
+  border-color: rgba(255, 143, 125, 0.4);
+  color: #ff8f7d;
+}
+.avatar--green {
+  background: #1c2f22;
+  border-color: rgba(159, 224, 160, 0.4);
+  color: #9fe0a0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.a2t-tooltip {
+  position: fixed;
+  z-index: 90;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 5px 9px;
+  border: 1px solid var(--a2t-line-strong);
+  background: var(--a2t-panel-raised);
+  box-shadow: var(--a2t-shadow-1);
+  color: var(--a2t-white);
+  font-family: var(--a2t-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+}
+.a2t-tooltip.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}

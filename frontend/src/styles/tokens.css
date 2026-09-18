@@ -1,0 +1,189 @@
+:root {
+  /* Coat. Neutral shell represented by dark, warm black. */
+  --a2t-ink: #0b0f12;
+  --a2t-ink-2: #12181c;
+  --a2t-panel: #111817;
+  --a2t-panel-raised: #151d1b;
+  --a2t-panel-soft: #0e1413;
+
+  /* Paper. Warm off-whites used sparingly as high-contrast text or light surfaces. */
+  --a2t-paper: #f2f1eb;
+  --a2t-warm: #e7e3d8;
+  --a2t-white: #f4f5f0;
+  --a2t-silver: #d9e0dc;
+
+  /* Copy. Primary gray-green text hierarchy. */
+  --a2t-copy: #9ca6a1;
+  --a2t-copy-soft: #7d8883;
+
+  /* Accent. Signal green — actions, active states, highlights. */
+  --a2t-accent: #c8f34f;
+  --a2t-accent-hover: #ddff7d;
+  --a2t-on-accent: #0b0f12;
+
+  /* Satellites. Semantic + supporting tones. */
+  --a2t-green: #1f5545;
+  --a2t-green-deep: #173d34;
+  --a2t-danger: #ff6f66;
+  --a2t-warning: #f3c45a;
+  --a2t-success: #a9d86d;
+
+  /* Lines. Hairlines over dark surfaces. */
+  --a2t-line: rgba(255, 255, 255, 0.14);
+  --a2t-line-soft: rgba(255, 255, 255, 0.085);
+  --a2t-line-strong: rgba(255, 255, 255, 0.25);
+  --a2t-control-line: #45504c;
+
+  /* Utilities. */
+  --a2t-focus: 0 0 0 3px rgba(200, 243, 79, 0.2);
+  --a2t-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --a2t-mono: 'DM Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --a2t-header-h: 70px;
+
+  /* Scale. Surface background (separate from ink, which doubles as text-on-accent). */
+  --a2t-bg: #0b0f12;
+  --a2t-bg-2: #0e1413;
+
+  /* Scale. Translucent shell for sticky bars over content. */
+  --a2t-shell: rgba(11, 15, 18, 0.72);
+
+  /* Scale. Spacing. */
+  --a2t-space-1: 4px;
+  --a2t-space-2: 8px;
+  --a2t-space-3: 12px;
+  --a2t-space-4: 16px;
+  --a2t-space-5: 24px;
+  --a2t-space-6: 32px;
+
+  /* Scale. Radius. */
+  --a2t-radius-sm: 4px;
+  --a2t-radius: 8px;
+  --a2t-radius-lg: 16px;
+  --a2t-radius-pill: 999px;
+
+  /* Scale. Elevation. */
+  --a2t-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.32);
+  --a2t-shadow-2: 0 10px 24px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --a2t-shadow-3: 0 24px 64px rgba(0, 0, 0, 0.55);
+
+  /* Scale. Motion. */
+  --a2t-motion-fast: 0.15s;
+  --a2t-motion: 0.2s;
+  --a2t-motion-slow: 0.3s;
+  --a2t-ease: cubic-bezier(0.33, 1, 0.68, 1);
+
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  /* Coat. Neutral shell — warm paper instead of warm black. */
+  --a2t-ink: #1a211d;
+  --a2t-ink-2: #141a16;
+  --a2t-panel: #fbfcf8;
+  --a2t-panel-raised: #ffffff;
+  --a2t-panel-soft: #eef0ea;
+
+  /* Paper. High-contrast text on the light coat. */
+  --a2t-paper: #141a16;
+  --a2t-warm: #232b27;
+  --a2t-white: #0b0f12;
+  --a2t-silver: #2c352f;
+
+  /* Copy. Primary gray-green text hierarchy. */
+  --a2t-copy: #4b5650;
+  --a2t-copy-soft: #79837d;
+
+  /* Accent. Signal green — deeper for contrast on light. */
+  --a2t-accent: #52770f;
+  --a2t-accent-hover: #46680d;
+  --a2t-on-accent: #f3f6ee;
+
+  /* Satellites. Semantic + supporting tones. */
+  --a2t-green: #dfefe3;
+  --a2t-green-deep: #cfe5d5;
+  --a2t-danger: #c93f36;
+  --a2t-warning: #a8751b;
+  --a2t-success: #5f9b31;
+
+  /* Lines. Hairlines over light surfaces. */
+  --a2t-line: rgba(20, 26, 22, 0.14);
+  --a2t-line-soft: rgba(20, 26, 22, 0.08);
+  --a2t-line-strong: rgba(20, 26, 22, 0.24);
+  --a2t-control-line: #c6cdc6;
+
+  /* Utilities. */
+  --a2t-focus: 0 0 0 3px rgba(82, 119, 15, 0.22);
+
+  /* Scale. Surface background. */
+  --a2t-bg: #f2f1eb;
+  --a2t-bg-2: #e7e6df;
+
+  /* Scale. Translucent shell for sticky bars over content. */
+  --a2t-shell: rgba(242, 241, 235, 0.82);
+
+  /* Scale. Elevation. */
+  --a2t-shadow-1: 0 1px 2px rgba(20, 30, 24, 0.08), 0 1px 4px rgba(20, 30, 24, 0.06);
+  --a2t-shadow-2: 0 10px 24px rgba(20, 30, 24, 0.12), 0 2px 8px rgba(20, 30, 24, 0.08);
+  --a2t-shadow-3: 0 24px 64px rgba(20, 30, 24, 0.18);
+
+  color-scheme: light;
+}
+
+/* Appearance presets: corner radius (appearance → radius). Map the scale to the
+   singular --a2t-radius so every surface that declared `border-radius: 0` can be
+   re-skinned in one place. The radius scale tokens keep their pinned values for
+   components that opt into a finer grain. */
+:root[data-radius='sharp'] {
+  --a2t-radius: 0;
+  --a2t-radius-sm: 0;
+  --a2t-radius-lg: 0;
+}
+:root[data-radius='subtle'] {
+  --a2t-radius: 6px;
+  --a2t-radius-sm: 4px;
+  --a2t-radius-lg: 12px;
+}
+:root[data-radius='rounded'] {
+  --a2t-radius: 13px;
+  --a2t-radius-sm: 9px;
+  --a2t-radius-lg: 18px;
+}
+
+/* Appearance presets: accent (appearance → accent). Re-skins signals driven by the
+   accent tokens, plus the tint/glow companions used for badges, focus rings and
+   ambient surfaces. */
+:root[data-accent='lime'] {
+  --a2t-accent: #c8f34f;
+  --a2t-accent-hover: #ddff7d;
+  --a2t-on-accent: #0b0f12;
+  --a2t-accent-tint: rgba(200, 243, 79, 0.14);
+  --a2t-accent-ring: rgba(200, 243, 79, 0.22);
+}
+:root[data-accent='mint'] {
+  --a2t-accent: #7fd8c8;
+  --a2t-accent-hover: #9be6d8;
+  --a2t-on-accent: #0b1412;
+  --a2t-accent-tint: rgba(127, 216, 200, 0.14);
+  --a2t-accent-ring: rgba(127, 216, 200, 0.22);
+}
+:root[data-accent='aqua'] {
+  --a2t-accent: #7fc7e8;
+  --a2t-accent-hover: #9bd9f2;
+  --a2t-on-accent: #0b1216;
+  --a2t-accent-tint: rgba(127, 199, 232, 0.14);
+  --a2t-accent-ring: rgba(127, 199, 232, 0.22);
+}
+:root[data-accent='violet'] {
+  --a2t-accent: #b7a6ff;
+  --a2t-accent-hover: #cdc0ff;
+  --a2t-on-accent: #0d0b16;
+  --a2t-accent-tint: rgba(183, 166, 255, 0.14);
+  --a2t-accent-ring: rgba(183, 166, 255, 0.22);
+}
+:root[data-accent='coral'] {
+  --a2t-accent: #ffb46b;
+  --a2t-accent-hover: #ffc894;
+  --a2t-on-accent: #160e06;
+  --a2t-accent-tint: rgba(255, 180, 107, 0.14);
+  --a2t-accent-ring: rgba(255, 180, 107, 0.22);
+}
