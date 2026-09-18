@@ -145,10 +145,10 @@ Today most services are localStorage-backed and auth silently falls back to an a
 | # | Task | Where | Effort | Done-when |
 |---|---|---|---|---|
 | 8.1 | 🟡 CI: frontend lint/typecheck/build; backend `fmt --check`/`clippy -D warnings`/`test`; `cargo audit` + `npm audit` | `.github/workflows/` | S | lint/typecheck/build + fmt/clippy/test block; **audit job non-blocking** until `rsa` RUSTSEC-2023-0071 (no fix) + `sqlx` 0.7→0.8 RUSTSEC-2024-0363 land |
-| 8.2 | 🟡 Commit `Cargo.lock` (exists, untracked) — still needs an explicit commit. SQLx offline metadata N/A: all queries use the runtime `sqlx::query`/`query_as` API, not the compile-time `query!` macros | `backend/Cargo.lock` | S | CI SQL checked without live DB |
+| 8.2 | ✅ Commit `Cargo.lock` (committed in `34f678c`). SQLx offline metadata N/A: all queries use the runtime `sqlx::query`/`query_as` API, not the compile-time `query!` macros | `backend/Cargo.lock` | S | CI SQL checked without live DB |
 | 8.3 | ☐ Build + scan image (trivy), tag immutable, push registry | CI + `deploy/` | S | image has SBOM, no critical vulns |
 | 8.4 | ☐ Smoke test after deploy: `/api/health` → register/login/refresh round trip | CI/deploy script | S | auto-fail on bad deploy |
-| 8.5 | ✅ Backend tests: 55 unit (auth/quota/validators/suppression/send-limit) + 2 end-to-end integration against real Postgres (auth register/login/refresh surface, contacts CRUD, calendar CRUD, admin role gate, metrics scrape). Integration suite skips without `TEST_DATABASE_URL`; CI runs an ephemeral `postgres:16` service | `backend/tests/api_flows.rs`, `.github/workflows/ci.yml` | M | `cargo test` covers core flows |
+| 8.5 | ✅ Backend tests: 55 unit (auth/quota/validators/suppression/send-limit) + 3 end-to-end integration against real Postgres (auth register/login/refresh surface, contacts CRUD, calendar CRUD, admin role gate, metrics scrape, manual-payment billing flow). Integration suite skips without `TEST_DATABASE_URL`; CI runs an ephemeral `postgres:16` service | `backend/tests/api_flows.rs`, `.github/workflows/ci.yml` | M | `cargo test` covers core flows |
 | 8.6 | ☐ Frontend tests (vitest + RTL): auth, mailbox reducer, sanitizer | `frontend/src/**/*.test.ts*` | M | critical flows covered |
 
 ---

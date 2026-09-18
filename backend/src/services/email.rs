@@ -1,9 +1,11 @@
+use axum::http::StatusCode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::audit;
 use crate::error::ApiError;
+use crate::services::{mime, smtp};
 use crate::state::AppState;
 
 const VERIFY_TTL_SECS: i64 = 24 * 3600;
@@ -45,8 +47,6 @@ async fn persist_token(
 
 /// Issue a verification token and deliver the email.
 /// Returns the click-through URL (to the SPA /verify-email route).
-/// TODO(WS2): replace the log-only delivery with real SMTP submission once the
-/// Stalwart bridge exists. `HARBOR_DEV_RETURN_TOKEN_LINKS` then goes away.
 pub async fn send_verification(
     state: &AppState,
     user_id: Uuid,
@@ -56,7 +56,12 @@ pub async fn send_verification(
     let token = random_token();
     persist_token(state, user_id, "verify", &token, VERIFY_TTL_SECS).await?;
     let link = format!("{}/verify-email?token={token}", state.public_origin);
-    deliver(state, "Verify your email", email, display_name, &link);
+    let subject = if display_name.is_empty() {
+        "Verify your email".into()
+    } else {
+        format!("Verify your email, {display_name}")
+    };
+    deliver(state, &subject, email, display_name, &link).await?;
     audit::record(state, Some(user_id), "auth.verify.token_issued", json!({})).await;
     Ok(link)
 }
@@ -70,7 +75,12 @@ pub async fn send_password_reset(
     let token = random_token();
     persist_token(state, user_id, "reset", &token, RESET_TTL_SECS).await?;
     let link = format!("{}/reset-password?token={token}", state.public_origin);
-    deliver(state, "Reset your password", email, display_name, &link);
+    let subject = if display_name.is_empty() {
+        "Reset your password".into()
+    } else {
+        format!("Reset your password, {display_name}")
+    };
+    deliver(state, &subject, email, display_name, &link).await?;
     audit::record(
         state,
         Some(user_id),
@@ -81,14 +91,72 @@ pub async fn send_password_reset(
     Ok(link)
 }
 
-fn deliver(_state: &AppState, subject: &str, email: &str, display_name: &str, link: &str) {
-    // Placeholder until SMTP is wired (WS2). Log at info so the URL is
-    // discoverable in development when the token isn't echoed back.
-    tracing::info!(
-        email = %email,
-        display_name = %display_name,
-        subject = %subject,
-        link = %link,
-        "auth email prepared (SMTP bridge not yet configured)"
-    );
+/// Build and submit a one-off transactional email via the configured SMTP
+/// relay (the Stalwart bridge files it into the recipient's mailbox).
+/// The envelope + header sender is the recipient's own (already provisioned)
+/// Stalwart account, so an unauthenticated relay accepts it as local->local
+/// delivery just like the regular send path.
+/// Delivery is best-effort in development (`return_token_links` echoes the
+/// link back to the client anyway) and load-bearing in production, where a
+/// failed submission surfaces a 502 so the client can retry.
+async fn deliver(
+    state: &AppState,
+    subject: &str,
+    to_email: &str,
+    display_name: &str,
+    link: &str,
+) -> Result<(), ApiError> {
+    let outgoing = mime::Outgoing {
+        from: mime::Address {
+            name: Some("Harbor Mail".to_string()),
+            email: to_email.to_string(),
+        },
+        to: vec![mime::Address {
+            name: (!display_name.is_empty()).then(|| display_name.to_string()),
+            email: to_email.to_string(),
+        }],
+        cc: vec![],
+        subject: subject.to_string(),
+        body_text: format!(
+            "Use this link to continue:\n\n{link}\n\nIf you did not request this, you can ignore this email.\n"
+        ),
+        body_html: Some(format!(
+            "<p>Use the button below to continue:</p>\
+             <p><a href=\"{link}\">{link}</a></p>\
+             <p>If you did not request this, you can ignore this email.</p>\n"
+        )),
+        attachments: vec![],
+        in_reply_to: None,
+        references: vec![],
+        list_unsubscribe: None,
+        message_id_local: Uuid::new_v4().as_simple().to_string(),
+        domain: state.mail.default_domain.clone(),
+    };
+    let bytes = outgoing
+        .build()
+        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
+
+    match smtp::send(&state.smtp, to_email, &[to_email.to_string()], &bytes).await {
+        Ok(reply) => {
+            tracing::info!(
+                email = %to_email,
+                subject = %subject,
+                reply = %reply,
+                "transactional email submitted via SMTP"
+            );
+            Ok(())
+        }
+        Err(e) if state.return_token_links => {
+            // Dev-only fallback: the link is echoed in the API response, so a
+            // missing relay must not block local flows. Log loudly instead.
+            tracing::warn!(email = %to_email, subject = %subject, error = %e,
+                "SMTP unavailable; transactional email skipped (development mode)");
+            Ok(())
+        }
+        Err(e) => Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "smtp_submission",
+            format!("Unable to deliver transactional email: {e}"),
+        )),
+    }
 }
