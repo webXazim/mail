@@ -1,3 +1,5 @@
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::Argon2;
 use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
@@ -7,8 +9,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::audit;
+use crate::domain;
 use crate::domain::quota;
 use crate::error::ApiError;
+use crate::handlers::auth::valid_email;
 use crate::middleware::auth::AdminUser;
 use crate::services::billing;
 use crate::services::imap;
@@ -134,6 +138,8 @@ pub struct UserPatch {
     plan: Option<String>,
     #[serde(default)]
     quota_bytes: Option<i64>,
+    #[serde(default)]
+    password: Option<String>,
 }
 
 /// `PATCH /api/admin/users/:id` — role, plan, quota and display name. Quota is
@@ -145,14 +151,15 @@ pub async fn update_user(
     Path(id): Path<Uuid>,
     Json(body): Json<UserPatch>,
 ) -> Result<Json<Value>, ApiError> {
-    let current: Option<(String, String, i64, Option<String>)> =
-        sqlx::query_as("SELECT role, plan, quota_bytes, mail_account_id FROM users WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let current: Option<(String, String, String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT role, plan, email, quota_bytes, mail_account_id FROM users WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let (role, _plan, quota_bytes, mail_account_id) =
+    let (role, _plan, email, quota_bytes, mail_account_id) =
         current.ok_or_else(|| ApiError::not_found("User not found"))?;
 
     if let Some(raw) = body.display_name {
@@ -252,6 +259,28 @@ pub async fn update_user(
         .await;
     }
 
+    if let Some(password) = body.password.as_deref() {
+        domain::password::validate_password(password, &email)?;
+        let salt = SaltString::encode_b64(uuid::Uuid::new_v4().as_bytes()).expect("base64 salt");
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .to_string();
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
+            .bind(hash)
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        audit::record(
+            &state,
+            Some(admin.0.user_id),
+            "admin.user.password_reset",
+            json!({ "user_id": id }),
+        )
+        .await;
+    }
+
     users(State(state), admin).await.map(|Json(v)| {
         let entry = v
             .get("users")
@@ -264,6 +293,121 @@ pub async fn update_user(
             .unwrap_or(Value::Null);
         Json(entry)
     })
+}
+
+/// Body for `POST /api/admin/users` — admin provisions an account directly,
+/// bypassing self-signup verification (an admin vouches for the user).
+#[derive(Deserialize)]
+pub struct UserCreate {
+    email: String,
+    display_name: String,
+    password: String,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    plan: Option<String>,
+    #[serde(default)]
+    quota_bytes: Option<i64>,
+}
+
+/// `POST /api/admin/users` — create a verified account + Stalwart mailbox,
+/// mirrored from the self-signup path but with admin-set role/plan/quota.
+pub async fn create_user(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(body): Json<UserCreate>,
+) -> Result<Json<Value>, ApiError> {
+    let email = body.email.trim().to_lowercase();
+    let display_name = body.display_name.trim();
+
+    if display_name.is_empty() {
+        return Err(ApiError::bad_request("Display name is required"));
+    }
+    if display_name.chars().count() > 80 {
+        return Err(ApiError::bad_request("Display name is too long"));
+    }
+    if !valid_email(&email) {
+        return Err(ApiError::bad_request("Invalid email address"));
+    }
+    domain::password::validate_password(&body.password, &email)?;
+
+    let role = body.role.unwrap_or_else(|| "member".into());
+    if !matches!(role.as_str(), "member" | "admin" | "billing") {
+        return Err(ApiError::bad_request(
+            "Role must be member, admin or billing",
+        ));
+    }
+
+    let plan = body.plan.unwrap_or_else(|| "solo".into());
+    if !billing::plan_exists(&state, &plan).await? {
+        return Err(ApiError::bad_request(format!("Unknown plan '{plan}'")));
+    }
+    let limits = billing::for_code(&state, &plan).await;
+    let quota_bytes = body
+        .quota_bytes
+        .unwrap_or(limits.mailbox_bytes as i64)
+        .max(1024 * 1024);
+
+    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE email = $1")
+        .bind(&email)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if exists.is_some() {
+        return Err(ApiError::conflict(
+            "An account with this email already exists",
+        ));
+    }
+
+    let salt = SaltString::encode_b64(Uuid::new_v4().as_bytes()).expect("base64 salt");
+    let hash = Argon2::default()
+        .hash_password(body.password.as_bytes(), &salt)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .to_string();
+
+    let user: (Uuid, String) = sqlx::query_as(
+        "INSERT INTO users (email, display_name, password_hash, role, plan, quota_bytes, email_verified_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())
+         RETURNING id, email",
+    )
+    .bind(&email)
+    .bind(display_name)
+    .bind(hash)
+    .bind(&role)
+    .bind(&plan)
+    .bind(quota_bytes)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    match state.mail.ensure_mailbox(&user.1, &body.password).await {
+        Ok(Some(account_id)) => {
+            let _ = sqlx::query("UPDATE users SET mail_account_id = $1 WHERE id = $2")
+                .bind(&account_id)
+                .bind(user.0)
+                .execute(&state.db)
+                .await;
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!(email = %user.1, "mailbox provisioning failed: {e}"),
+    }
+
+    audit::record(
+        &state,
+        Some(admin.0.user_id),
+        "admin.user.created",
+        json!({ "user_id": user.0, "email": user.1, "role": role, "plan": plan }),
+    )
+    .await;
+
+    Ok(Json(json!({
+        "ok": true,
+        "id": user.0,
+        "email": user.1,
+        "role": role,
+        "plan": plan,
+        "quota_bytes": quota_bytes,
+    })))
 }
 
 /// `DELETE /api/admin/users/:id` — irreversible erasure of another account

@@ -35,7 +35,7 @@ fn token_hash(token: &str) -> String {
 
 /// Lightweight structural email check: non-empty local part and a domain with
 /// at least a dot in it. Good enough to reject typos at the door.
-fn valid_email(email: &str) -> bool {
+pub(crate) fn valid_email(email: &str) -> bool {
     let mut parts = email.trim().splitn(2, '@');
     let Some(local) = parts.next() else {
         return false;

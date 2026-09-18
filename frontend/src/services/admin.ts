@@ -1,10 +1,11 @@
+import { apiFetch } from '../lib/api'
 import { mailboxApi } from './mailbox'
 import { primaryAccountId } from './accounts'
 import type { Mail } from '../types'
 
 export type MailboxStatus = 'active' | 'quarantine' | 'disabled'
 
-export type Role = 'owner' | 'admin' | 'member'
+export type Role = 'owner' | 'admin' | 'member' | 'billing'
 
 export type MailboxAccount = {
   id: string
@@ -508,5 +509,179 @@ export const adminApi = {
     ].slice(0, 50)
     write(auditKey, next)
     return next
+  },
+}
+
+const GB = 1024 * 1024 * 1024
+
+type BackendUser = {
+  id: string
+  email: string
+  display_name: string
+  role: 'admin' | 'member' | 'billing'
+  plan: string
+  quota_bytes: number
+  mail_account_id: string | null
+  onboarded: boolean
+  created_at: string
+  storage_used_bytes: number
+  storage_pct: number
+}
+
+type BackendAlias = {
+  id: string
+  address: string
+  domain: string
+  source: string
+  forwardTo: string
+}
+
+type BackendAudit = {
+  id: string
+  time: string
+  actor: string
+  action: string
+  detail: unknown
+}
+
+export type RemoteOverview = {
+  adminEmail: string
+  domain: string
+  userCount: number
+  adminCount: number
+  audit: AuditEntry[]
+}
+
+const remoteRole = (role: BackendUser['role']): Role =>
+  role === 'admin' ? 'admin' : role === 'billing' ? 'billing' : 'member'
+
+const mapUser = (user: BackendUser): MailboxAccount => ({
+  id: user.id,
+  email: user.email,
+  displayName: user.display_name,
+  status: 'active',
+  role: remoteRole(user.role),
+  storageUsedGB: (user.storage_used_bytes ?? 0) / GB,
+  quotaGB: Math.max(1, Math.round((user.quota_bytes ?? 0) / GB)),
+})
+
+const detailText = (detail: unknown): string => {
+  if (typeof detail === 'string') return detail
+  if (detail === null || detail === undefined) return ''
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return String(detail)
+  }
+}
+
+const mapAudit = (entry: BackendAudit): AuditEntry => ({
+  id: entry.id,
+  time: entry.time,
+  actor: entry.actor,
+  action: entry.action,
+  detail: detailText(entry.detail),
+})
+
+export type CreateUserInput = {
+  email: string
+  displayName: string
+  password: string
+  quotaGB?: number
+}
+
+/** Live /api/admin/* + /api/aliases + /api/admin/suppressions backing for the
+ * Admin center in remote (connected) mode. Demo mode keeps the localStorage
+ * mock above. Sections with no server counterpart (forwarders, DNS, catch-all,
+ * quarantine, SSO, spam/retention toggles) are marked unavailable in the UI. */
+export const remoteAdminApi = {
+  async overview(): Promise<RemoteOverview> {
+    const data = await apiFetch<{
+      admin: { id: string; email: string }
+      users: BackendUser[]
+      admins: BackendUser[]
+      audit_events: BackendAudit[]
+    }>('/api/admin/overview')
+    const domain = (data.admin.email.split('@')[1] ?? '').toLowerCase()
+    return {
+      adminEmail: data.admin.email,
+      domain,
+      userCount: data.users.length,
+      adminCount: data.admins.length,
+      audit: (data.audit_events ?? []).map(mapAudit),
+    }
+  },
+
+  async users(): Promise<MailboxAccount[]> {
+    const data = await apiFetch<{ users: BackendUser[] }>('/api/admin/users')
+    return (data.users ?? []).map(mapUser)
+  },
+
+  async createUser(input: CreateUserInput): Promise<void> {
+    await apiFetch('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: input.email,
+        display_name: input.displayName,
+        password: input.password,
+        role: 'member',
+        quota_bytes: input.quotaGB ? Math.round(input.quotaGB * GB) : undefined,
+      }),
+    })
+  },
+
+  async updateUser(
+    id: string,
+    patch: { display_name?: string; role?: string; quota_bytes?: number; password?: string },
+  ): Promise<void> {
+    await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  },
+
+  async deleteUser(id: string): Promise<void> {
+    await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async aliases(): Promise<Alias[]> {
+    const data = await apiFetch<{ aliases: BackendAlias[] }>('/api/admin/aliases')
+    return (data.aliases ?? []).map((alias) => ({
+      id: alias.id,
+      address: alias.address,
+      forwardTo: alias.forwardTo,
+    }))
+  },
+
+  async createAlias(local: string, forwardTo: string, domain: string): Promise<void> {
+    await apiFetch('/api/aliases', {
+      method: 'POST',
+      body: JSON.stringify({ domain, source: local, forwardTo }),
+    })
+  },
+
+  async deleteAlias(id: string): Promise<void> {
+    await apiFetch(`/api/aliases/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async blockedSenders(): Promise<string[]> {
+    const data = await apiFetch<{ suppressions: { email: string }[] }>('/api/admin/suppressions')
+    return (data.suppressions ?? []).map((entry) => entry.email)
+  },
+
+  async blockSender(email: string): Promise<void> {
+    await apiFetch('/api/admin/suppressions', {
+      method: 'POST',
+      body: JSON.stringify({ email, reason: 'Blocked by admin' }),
+    })
+  },
+
+  async unblockSender(email: string): Promise<void> {
+    await apiFetch(`/api/admin/suppressions/${encodeURIComponent(email)}`, { method: 'DELETE' })
+  },
+
+  async audit(): Promise<AuditEntry[]> {
+    const data = await apiFetch<{ entries: BackendAudit[] }>('/api/admin/audit')
+    return (data.entries ?? []).map(mapAudit)
   },
 }

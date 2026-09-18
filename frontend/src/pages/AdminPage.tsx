@@ -21,16 +21,19 @@ import {
 import {
   adminApi,
   dnsRecords,
+  remoteAdminApi,
   seedSso,
   ssoProviders,
   type Alias,
   type AuditEntry,
   type MailboxAccount,
   type QuarantinedMail,
+  type RemoteOverview,
   type SecuritySettings,
   type SsoSettings,
 } from '../services/admin'
 import { identitiesApi } from '../services/identities'
+import { isRemoteMail } from '../services/remote-mail'
 import { useMail } from '../state/mail/MailContext'
 
 type AdminTab =
@@ -66,27 +69,45 @@ const timeFmt = (iso: string) =>
 
 const retentionLabel = (days: number) => (days === 0 ? 'Forever' : `${days} days`)
 
+const genTempPassword = () => {
+  const chars = 'AbCdEfGhJkMnPqRstVwXyZ23456789!'
+  let password = 'Hap-'
+  for (let i = 0; i < 10; i += 1) {
+    password += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return password
+}
+
 const roleLabel: Record<MailboxAccount['role'], string> = {
   owner: 'Owner',
   admin: 'Admin',
   member: 'Member',
+  billing: 'Billing',
 }
 
 export function AdminPage() {
   const navigate = useNavigate()
   const { reload } = useMail()
+  const remote = isRemoteMail()
   const [tab, setTab] = useState<AdminTab>('overview')
   const [mailboxes, setMailboxes] = useState<MailboxAccount[]>(() => adminApi.listMailboxes())
   const [aliases, setAliases] = useState<Alias[]>(() => adminApi.listAliases())
   const [forwarders, setForwarders] = useState(() => adminApi.listForwarders())
   const [dns, setDns] = useState(() => adminApi.getDns())
-  const [domain, setDomain] = useState(() => adminApi.getDomainSettings())
+  const [domain, setDomain] = useState(() =>
+    remote ? { domain: '', catchAllEnabled: false, catchAll: '' } : adminApi.getDomainSettings(),
+  )
   const [security, setSecurity] = useState<SecuritySettings>(() => adminApi.getSecurity())
   const [sso, setSso] = useState<SsoSettings>(() => adminApi.getSso())
   const [quarantine, setQuarantine] = useState<QuarantinedMail[]>(() => adminApi.listQuarantine())
   const [audit, setAudit] = useState<AuditEntry[]>(() => adminApi.listAudit())
+  const [overview, setOverview] = useState<RemoteOverview | null>(null)
+  const [blockedSenders, setBlockedSenders] = useState<string[]>(() =>
+    remote ? [] : security.blockedSenders,
+  )
 
   const [mailboxForm, setMailboxForm] = useState({ email: '', displayName: '', quotaGB: 10 })
+  const [mailboxPassword, setMailboxPassword] = useState('')
   const [aliasForm, setAliasForm] = useState({ local: '', forwardTo: '' })
   const [forwarderForm, setForwarderForm] = useState({ from: mailboxes[0]?.email ?? '', to: '' })
   const [blockedForm, setBlockedForm] = useState('')
@@ -97,6 +118,40 @@ export function AdminPage() {
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState<string>('')
 
+  const showNotice = (message: string) => {
+    setNotice(message)
+    window.setTimeout(() => setNotice(''), 4000)
+  }
+
+  const reloadAdmin = () => {
+    void remoteAdminApi
+      .users()
+      .then(setMailboxes)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load mailboxes'))
+    void remoteAdminApi
+      .aliases()
+      .then(setAliases)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load aliases'))
+    void remoteAdminApi
+      .audit()
+      .then(setAudit)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load audit log'))
+    void remoteAdminApi
+      .blockedSenders()
+      .then(setBlockedSenders)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load blocked senders'))
+  }
+
+  useEffect(() => {
+    if (!remote) return
+    void remoteAdminApi
+      .overview()
+      .then(setOverview)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load admin overview'))
+    reloadAdmin()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') navigate('/mail/inbox')
@@ -105,11 +160,6 @@ export function AdminPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [navigate])
 
-  const showNotice = (message: string) => {
-    setNotice(message)
-    window.setTimeout(() => setNotice(''), 4000)
-  }
-
   const dnsVerified = dns.mx && dns.spf && dns.dkim && dns.dmarc
   const activeCount = mailboxes.filter((mailbox) => mailbox.status === 'active').length
   const totalUsed = mailboxes.reduce((sum, mailbox) => sum + mailbox.storageUsedGB, 0)
@@ -117,6 +167,7 @@ export function AdminPage() {
   const ownersCount = mailboxes.filter((mailbox) => mailbox.role === 'owner').length
   const adminsCount = mailboxes.filter((mailbox) => mailbox.role === 'admin').length
   const membersCount = mailboxes.filter((mailbox) => mailbox.role === 'member').length
+  const billingCount = mailboxes.filter((mailbox) => mailbox.role === 'billing').length
   const visibleMailboxes = mailboxes.filter((mailbox) => {
     const query = mailboxQuery.trim().toLowerCase()
     const matchesQuery =
@@ -124,10 +175,32 @@ export function AdminPage() {
     return matchesQuery && (mailboxStatusFilter === 'all' || mailbox.status === mailboxStatusFilter)
   })
 
-  const addMailbox = (event: FormEvent) => {
+  const addMailbox = async (event: FormEvent) => {
     event.preventDefault()
     const raw = mailboxForm.email.trim().toLowerCase()
     const full = raw.includes('@') ? raw : `${raw}@harbor.co`
+    if (remote) {
+      const email = raw.includes('@') ? raw : `${raw}@${domain.domain}`
+      const password = mailboxPassword || genTempPassword()
+      try {
+        await remoteAdminApi.createUser({
+          email,
+          displayName: mailboxForm.displayName,
+          password,
+          quotaGB: mailboxForm.quotaGB,
+        })
+        reloadAdmin()
+        identitiesApi.add({ email, displayName: mailboxForm.displayName })
+        setMailboxForm({ email: '', displayName: '', quotaGB: 10 })
+        setMailboxPassword('')
+        showNotice(`Mailbox ${email} created — temporary password: ${password}`)
+      } catch (error) {
+        showNotice(
+          error instanceof Error && error.message ? error.message : 'Failed to create mailbox',
+        )
+      }
+      return
+    }
     const current = adminApi.addMailbox({
       email: raw,
       displayName: mailboxForm.displayName,
@@ -143,7 +216,17 @@ export function AdminPage() {
     showNotice(`Mailbox ${full} created`)
   }
 
-  const removeMailbox = (id: string) => {
+  const removeMailbox = async (id: string) => {
+    if (remote) {
+      try {
+        await remoteAdminApi.deleteUser(id)
+        reloadAdmin()
+        showNotice('Mailbox removed')
+      } catch (error) {
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to remove mailbox')
+      }
+      return
+    }
     const target = mailboxes.find((mailbox) => mailbox.id === id)
     const next = adminApi.removeMailbox(id)
     if (next === mailboxes) {
@@ -160,16 +243,39 @@ export function AdminPage() {
   }
 
   const changeStatus = (id: string, status: string) => {
+    if (remote) {
+      showNotice('Mailbox status is managed in Stalwart in this deployment')
+      return
+    }
     const next = adminApi.setMailboxStatus(id, status as MailboxAccount['status'])
     setMailboxes(next)
     setAudit(adminApi.listAudit())
   }
 
-  const changeQuota = (id: string, value: string) => {
+  const changeQuota = async (id: string, value: string) => {
+    if (remote) {
+      try {
+        await remoteAdminApi.updateUser(id, { quota_bytes: Math.round((Number(value) || 1) * 1073741824) })
+        reloadAdmin()
+      } catch (error) {
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to update quota')
+      }
+      return
+    }
     setMailboxes(adminApi.setMailboxQuota(id, Number(value) || 1))
   }
 
-  const changeRole = (id: string, role: string) => {
+  const changeRole = async (id: string, role: string) => {
+    if (remote) {
+      try {
+        await remoteAdminApi.updateUser(id, { role })
+        reloadAdmin()
+        showNotice('Role updated')
+      } catch (error) {
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to update role')
+      }
+      return
+    }
     const next = adminApi.setRole(id, role as MailboxAccount['role'])
     if (next === mailboxes) {
       showNotice("That role can't be assigned here")
@@ -180,16 +286,40 @@ export function AdminPage() {
     showNotice('Role updated')
   }
 
-  const resetPassword = (id: string) => {
+  const resetPassword = async (id: string) => {
     const target = mailboxes.find((mailbox) => mailbox.id === id)
+    if (remote) {
+      const password = genTempPassword()
+      try {
+        await remoteAdminApi.updateUser(id, { password })
+        reloadAdmin()
+        showNotice(`Temporary password for ${target?.email ?? 'mailbox'} is ${password}`)
+      } catch (error) {
+        showNotice(
+          error instanceof Error && error.message ? error.message : 'Failed to reset password',
+        )
+      }
+      return
+    }
     const temp = adminApi.resetPassword(id)
     setAudit(adminApi.listAudit())
     showNotice(`Temporary password for ${target?.email} is ${temp}`)
   }
 
-  const addAlias = (event: FormEvent) => {
+  const addAlias = async (event: FormEvent) => {
     event.preventDefault()
     if (!aliasForm.forwardTo) return
+    if (remote) {
+      try {
+        await remoteAdminApi.createAlias(aliasForm.local, aliasForm.forwardTo, domain.domain)
+        void remoteAdminApi.aliases().then(setAliases)
+        setAliasForm({ local: '', forwardTo: '' })
+        showNotice(`Alias ${aliasForm.local.trim().toLowerCase()}@${domain.domain} created`)
+      } catch (error) {
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to create alias')
+      }
+      return
+    }
     const next = adminApi.addAlias(aliasForm.local, aliasForm.forwardTo, domain.domain)
     if (next === aliases) {
       showNotice('That alias already exists')
@@ -201,13 +331,26 @@ export function AdminPage() {
     showNotice(`Alias ${aliasForm.local.trim().toLowerCase()}@${domain.domain} created`)
   }
 
-  const removeAlias = (id: string) => {
+  const removeAlias = async (id: string) => {
+    if (remote) {
+      try {
+        await remoteAdminApi.deleteAlias(id)
+        void remoteAdminApi.aliases().then(setAliases)
+      } catch (error) {
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to remove alias')
+      }
+      return
+    }
     setAliases(adminApi.removeAlias(id))
     setAudit(adminApi.listAudit())
   }
 
   const addForwarder = (event: FormEvent) => {
     event.preventDefault()
+    if (remote) {
+      showNotice('External forwarding is configured in Stalwart in this deployment')
+      return
+    }
     const next = adminApi.addForwarder(forwarderForm.from, forwarderForm.to)
     if (next === forwarders) {
       showNotice('That forwarder already exists or the address is invalid')
@@ -220,15 +363,27 @@ export function AdminPage() {
   }
 
   const toggleForwarder = (id: string) => {
+    if (remote) {
+      showNotice('External forwarding is managed in Stalwart in this deployment')
+      return
+    }
     setForwarders(adminApi.toggleForwarder(id))
     setAudit(adminApi.listAudit())
   }
   const removeForwarder = (id: string) => {
+    if (remote) {
+      showNotice('External forwarding is managed in Stalwart in this deployment')
+      return
+    }
     setForwarders(adminApi.removeForwarder(id))
     setAudit(adminApi.listAudit())
   }
 
   const verifyRecords = () => {
+    if (remote) {
+      showNotice('DNS records are published at your DNS provider')
+      return
+    }
     setDns(adminApi.verifyAll())
     setAudit(adminApi.listAudit())
     showNotice('All records verified')
@@ -245,6 +400,10 @@ export function AdminPage() {
   }
 
   const setCatchAllEnabled = (enabled: boolean) => {
+    if (remote) {
+      showNotice('Catch-all routing is managed in Stalwart in this deployment')
+      return
+    }
     const next = {
       ...domain,
       catchAllEnabled: enabled,
@@ -257,6 +416,10 @@ export function AdminPage() {
   }
 
   const setCatchAllTarget = (target: string) => {
+    if (remote) {
+      showNotice('Catch-all routing is managed in Stalwart in this deployment')
+      return
+    }
     const next = { ...domain, catchAll: target, catchAllEnabled: true }
     setDomain(next)
     adminApi.saveDomainSettings(next)
@@ -265,6 +428,7 @@ export function AdminPage() {
   }
 
   const updateSecurity = (patch: Partial<SecuritySettings>) => {
+    if (remote) return security
     const next = { ...security, ...patch }
     setSecurity(next)
     adminApi.saveSecurity(next)
@@ -276,12 +440,14 @@ export function AdminPage() {
     action: string,
     detail: string,
   ) => {
+    if (remote) return
     updateSecurity(patch)
     adminApi.logAudit(action, detail)
     setAudit(adminApi.listAudit())
   }
 
   const updateSso = (patch: Partial<SsoSettings>) => {
+    if (remote) return sso
     const next = { ...sso, ...patch }
     setSso(next)
     adminApi.saveSso(next)
@@ -289,13 +455,27 @@ export function AdminPage() {
   }
 
   const updateSsoAndLog = (patch: Partial<SsoSettings>, action: string, detail: string) => {
+    if (remote) return
     updateSso(patch)
     adminApi.logAudit(action, detail)
     setAudit(adminApi.listAudit())
   }
 
-  const addBlockedSender = (event: FormEvent) => {
+  const addBlockedSender = async (event: FormEvent) => {
     event.preventDefault()
+    if (remote) {
+      try {
+        await remoteAdminApi.blockSender(blockedForm)
+        void remoteAdminApi.blockedSenders().then(setBlockedSenders)
+        setBlockedForm('')
+        showNotice('Sender blocked')
+      } catch (error) {
+        showNotice(
+          error instanceof Error && error.message ? error.message : 'Failed to block sender',
+        )
+      }
+      return
+    }
     const next = adminApi.addBlockedSender(blockedForm)
     if (next === security) {
       showNotice('That sender is already blocked')
@@ -307,12 +487,27 @@ export function AdminPage() {
     showNotice('Sender blocked')
   }
 
-  const removeBlockedSender = (email: string) => {
+  const removeBlockedSender = async (email: string) => {
+    if (remote) {
+      try {
+        await remoteAdminApi.unblockSender(email)
+        void remoteAdminApi.blockedSenders().then(setBlockedSenders)
+      } catch (error) {
+        showNotice(
+          error instanceof Error && error.message ? error.message : 'Failed to unblock sender',
+        )
+      }
+      return
+    }
     setSecurity(adminApi.removeBlockedSender(email))
     setAudit(adminApi.listAudit())
   }
 
   const releaseQuarantine = async (id: string) => {
+    if (remote) {
+      showNotice('Quarantine is managed in Stalwart (Junk Mail) in this deployment')
+      return
+    }
     const next = await adminApi.releaseQuarantine(id)
     setQuarantine(next)
     setAudit(adminApi.listAudit())
@@ -321,6 +516,10 @@ export function AdminPage() {
   }
 
   const removeQuarantine = (id: string) => {
+    if (remote) {
+      showNotice('Quarantine is managed in Stalwart (Junk Mail) in this deployment')
+      return
+    }
     setQuarantine(adminApi.deleteQuarantine(id))
     setAudit(adminApi.listAudit())
     showNotice('Quarantined message deleted')
@@ -381,11 +580,11 @@ export function AdminPage() {
               <small>Active mailboxes</small>
             </div>
             <div className="admin-stat">
-              <strong>{adminsCount + ownersCount}</strong>
-              <small>Owners &amp; admins</small>
+              <strong>{remote ? adminsCount : adminsCount + ownersCount}</strong>
+              <small>{remote ? 'Admins' : 'Owners &amp; admins'}</small>
             </div>
             <div className="admin-stat">
-              <strong>{quarantine.length}</strong>
+              <strong>{remote ? '—' : quarantine.length}</strong>
               <small>Quarantined messages</small>
             </div>
             <div className="admin-stat">
@@ -393,7 +592,7 @@ export function AdminPage() {
               <small>Aliases</small>
             </div>
             <div className="admin-stat">
-              <strong>{forwarders.length}</strong>
+              <strong>{remote ? '—' : forwarders.length}</strong>
               <small>Forwarders</small>
             </div>
             <div className="admin-stat">
@@ -403,7 +602,7 @@ export function AdminPage() {
               <small>Storage used</small>
             </div>
             <div className="admin-stat">
-              <strong>{sso.enabled ? 'On' : 'Off'}</strong>
+              <strong>{remote ? '—' : sso.enabled ? 'On' : 'Off'}</strong>
               <small>Single sign-on</small>
             </div>
           </div>
@@ -412,11 +611,13 @@ export function AdminPage() {
             <h2>Domain health</h2>
             <div className="billing-plan">
               <div>
-                <strong>{domain.domain}</strong>
+                <strong>{domain.domain || (overview?.domain ?? '—')}</strong>
                 <small>
-                  {dnsVerified
-                    ? 'All records verified — mail is flowing.'
-                    : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
+                  {remote
+                    ? 'DNS records and SMTP flow are managed at your provider and in Stalwart.'
+                    : dnsVerified
+                      ? 'All records verified — mail is flowing.'
+                      : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
                 </small>
               </div>
               <div className="admin-actions">
@@ -497,16 +698,18 @@ export function AdminPage() {
                   </small>
                 </div>
                 <div className="admin-actions">
-                  <select
-                    className="admin-status-select"
-                    value={mailbox.status}
-                    aria-label={`Status for ${mailbox.email}`}
-                    onChange={(event) => changeStatus(mailbox.id, event.target.value)}
-                  >
-                    <option value="active">Active</option>
-                    <option value="quarantine">Quarantine</option>
-                    <option value="disabled">Disabled</option>
-                  </select>
+                  {!remote && (
+                    <select
+                      className="admin-status-select"
+                      value={mailbox.status}
+                      aria-label={`Status for ${mailbox.email}`}
+                      onChange={(event) => changeStatus(mailbox.id, event.target.value)}
+                    >
+                      <option value="active">Active</option>
+                      <option value="quarantine">Quarantine</option>
+                      <option value="disabled">Disabled</option>
+                    </select>
+                  )}
                   <input
                     className="admin-quota-input"
                     type="number"
@@ -580,6 +783,17 @@ export function AdminPage() {
                 aria-label="Mailbox quota (GB)"
               />
             </label>
+            {remote && (
+              <label>
+                Temporary password
+                <input
+                  value={mailboxPassword}
+                  onChange={(event) => setMailboxPassword(event.target.value)}
+                  placeholder="Generated if left blank"
+                  aria-label="Temporary password"
+                />
+              </label>
+            )}
             <div className="row-actions">
               <button type="submit" className="primary-button">
                 <Mailbox size={15} />
@@ -596,13 +810,17 @@ export function AdminPage() {
             <div className="admin-section-head">
               <h2>Roles and permissions</h2>
               <span className="admin-section-count">
-                {ownersCount} owner · {adminsCount} admins · {membersCount} members
+                {remote
+                  ? `${adminsCount} admins · ${membersCount} members · ${billingCount} billing`
+                  : `${ownersCount} owner · ${adminsCount} admins · ${membersCount} members`}
               </span>
             </div>
-            <p className="settings-hint">
-              <strong>Owner</strong> — full control of the workspace. Always exactly one, and it
-              can't be reassigned.
-            </p>
+            {!remote && (
+              <p className="settings-hint">
+                <strong>Owner</strong> — full control of the workspace. Always exactly one, and it
+                can't be reassigned.
+              </p>
+            )}
             <p className="settings-hint">
               <strong>Admin</strong> — manages mailboxes, aliases, forwarders and security policy.
             </p>
@@ -623,9 +841,10 @@ export function AdminPage() {
                     disabled={mailbox.role === 'owner'}
                     onChange={(event) => changeRole(mailbox.id, event.target.value)}
                   >
-                    <option value="owner">Owner</option>
+                    {!remote && <option value="owner">Owner</option>}
                     <option value="admin">Admin</option>
                     <option value="member">Member</option>
+                    <option value="billing">Billing</option>
                   </select>
                 </div>
               </div>
@@ -702,8 +921,22 @@ export function AdminPage() {
 
       {tab === 'forwarders' && (
         <>
-          <section className="settings-section">
-            <h2>Forwarders</h2>
+          {remote ? (
+            <section className="settings-section">
+              <h2>Forwarders</h2>
+              <p className="settings-hint">
+                External forwarding rules are configured in <strong>Stalwart</strong> for this
+                deployment — there is no API surface for them in Harbor yet.
+              </p>
+              <p className="settings-hint">
+                To forward mail from a mail account, add an address alias or configure routing
+                rules on the mail server directly.
+              </p>
+            </section>
+          ) : (
+            <>
+              <section className="settings-section">
+                <h2>Forwarders</h2>
             {forwarders.map((forwarder) => (
               <div className="billing-row" key={forwarder.id}>
                 <div>
@@ -774,31 +1007,48 @@ export function AdminPage() {
                 Add forwarder
               </button>
             </div>
-          </form>
+              </form>
+            </>
+          )}
         </>
       )}
 
       {tab === 'domain' && (
         <>
-          <section className="settings-section">
-            <h2>{domain.domain}</h2>
-            <div className="billing-plan">
-              <div>
-                <strong>Domain status</strong>
-                <small>
-                  {dnsVerified
-                    ? 'All records verified — mail is flowing.'
-                    : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
-                </small>
-              </div>
-              <button type="button" className="secondary-button" onClick={verifyRecords}>
-                <RefreshCw size={14} />
-                Check DNS records
-              </button>
-            </div>
-          </section>
-          <section className="settings-section">
-            <h2>DNS records</h2>
+          {remote ? (
+            <section className="settings-section">
+              <h2>{domain.domain || (overview?.domain ?? 'Domain')}</h2>
+              <p className="settings-hint">
+                DNS records are published at your <strong>DNS provider</strong> and mail flow is
+                handled by Stalwart in this deployment.
+              </p>
+              <p className="settings-hint">
+                The required MX, SPF, DKIM and DMARC records for{' '}
+                <strong>{domain.domain || (overview?.domain ?? 'your domain')}</strong> are
+                documented in the deployment guide.
+              </p>
+            </section>
+          ) : (
+            <>
+              <section className="settings-section">
+                <h2>{domain.domain}</h2>
+                <div className="billing-plan">
+                  <div>
+                    <strong>Domain status</strong>
+                    <small>
+                      {dnsVerified
+                        ? 'All records verified — mail is flowing.'
+                        : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
+                    </small>
+                  </div>
+                  <button type="button" className="secondary-button" onClick={verifyRecords}>
+                    <RefreshCw size={14} />
+                    Check DNS records
+                  </button>
+                </div>
+              </section>
+              <section className="settings-section">
+                <h2>DNS records</h2>
             {dnsRecords.map((record) => (
               <div className="billing-row" key={record.id}>
                 <div>
@@ -848,14 +1098,32 @@ export function AdminPage() {
                 </select>
               </label>
             )}
-          </section>
+              </section>
+            </>
+          )}
         </>
       )}
 
       {tab === 'security' && (
         <>
-          <section className="settings-section">
-            <h2>Spam and deliverability</h2>
+          {remote && (
+            <section className="settings-section">
+              <h2>Mail filtering policy</h2>
+              <p className="settings-hint">
+                Spam scoring, TLS policy, attachment scanning, retention and single sign-on are
+                configured in <strong>Stalwart</strong> and at your identity provider — Harbor
+                exposes them once their management API lands here.
+              </p>
+              <p className="settings-hint">
+                Blocked senders below are enforced by the Harbor suppression list and are always
+                live.
+              </p>
+            </section>
+          )}
+          {!remote && (
+            <>
+              <section className="settings-section">
+                <h2>Spam and deliverability</h2>
             <label className="admin-range">
               <span>Spam sensitivity — {security.spamThreshold} / 10</span>
               <input
@@ -1061,10 +1329,12 @@ export function AdminPage() {
                 Password sign-in only. Connect an identity provider to enable single sign-on.
               </p>
             )}
-          </section>
+              </section>
+            </>
+          )}
           <section className="settings-section">
             <h2>Blocked senders</h2>
-            {security.blockedSenders.map((sender) => (
+            {(remote ? blockedSenders : security.blockedSenders).map((sender) => (
               <div className="billing-row" key={sender}>
                 <div>
                   <strong>{sender}</strong>
@@ -1080,7 +1350,7 @@ export function AdminPage() {
                 </button>
               </div>
             ))}
-            {security.blockedSenders.length === 0 && (
+            {(remote ? blockedSenders : security.blockedSenders).length === 0 && (
               <p className="settings-hint">No senders blocked — add one below.</p>
             )}
             <form className="admin-inline-form" onSubmit={addBlockedSender}>
@@ -1102,7 +1372,14 @@ export function AdminPage() {
       {tab === 'quarantine' && (
         <section className="settings-section">
           <h2>Quarantined messages</h2>
-          {quarantine.map((item) => (
+          {remote && (
+            <p className="settings-hint">
+              Quarantine is managed in <strong>Stalwart</strong> in this deployment — inspect the
+              Junk Mail folder or the mail server management UI to review and release quarantined
+              messages.
+            </p>
+          )}
+          {!remote && quarantine.map((item) => (
             <div className="billing-row" key={item.id}>
               <div>
                 <strong>{item.subject}</strong>
@@ -1131,7 +1408,7 @@ export function AdminPage() {
               </div>
             </div>
           ))}
-          {quarantine.length === 0 && (
+          {!remote && quarantine.length === 0 && (
             <p className="settings-hint">Nothing quarantined right now.</p>
           )}
         </section>

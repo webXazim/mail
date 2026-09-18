@@ -49,6 +49,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/overview", get(handlers::admin::overview))
         .route("/api/admin/users", get(handlers::admin::users))
         .route(
+            "/api/admin/users",
+            axum::routing::post(handlers::admin::create_user),
+        )
+        .route(
             "/api/admin/users/:id",
             axum::routing::patch(handlers::admin::update_user).delete(handlers::admin::delete_user),
         )

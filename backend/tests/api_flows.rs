@@ -324,6 +324,145 @@ async fn role_gate_and_metrics_scrape() {
 }
 
 #[tokio::test]
+async fn admin_provisions_and_resets_user() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (member_token, _id, admin_email) = register(&t.app).await;
+    sqlx::query("UPDATE users SET role = 'admin' WHERE email = $1")
+        .bind(&admin_email)
+        .execute(&t.db)
+        .await
+        .expect("promote to admin");
+
+    let login = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": admin_email, "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(login.0, StatusCode::OK);
+    let admin_token = login.1["access"].as_str().unwrap().to_string();
+
+    // A member is rejected from provisioning accounts.
+    let (status, _) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/admin/users",
+            Some(&member_token),
+            Some(json!({
+                "email": "provisioned@example.test",
+                "display_name": "Provisioned User",
+                "password": "Str0ng-Pass!23"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Admin creates a verified user with an explicit role/plan/quota.
+    let (status, created) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/admin/users",
+            Some(&admin_token),
+            Some(json!({
+                "email": "provisioned@example.test",
+                "display_name": "Provisioned User",
+                "password": "Str0ng-Pass!23",
+                "role": "admin",
+                "plan": "solo",
+                "quota_bytes": 4i64 * 1024 * 1024 * 1024
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "admin create user: {created}");
+    let user_id = created["id"].as_str().unwrap().to_string();
+
+    // Appears in the list with the admin-applied plan and quota.
+    let (status, users) = send(
+        &t.app,
+        req("GET", "/api/admin/users", Some(&admin_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let row = users["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["id"].as_str() == Some(&user_id))
+        .expect("provisioned user listed");
+    assert_eq!(row["role"], "admin");
+    assert_eq!(row["plan"], "solo");
+    assert_eq!(row["quota_bytes"], 4i64 * 1024 * 1024 * 1024);
+
+    // Admin resets the password; the new one signs in immediately.
+    let (status, patched) = send(
+        &t.app,
+        req(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            Some(&admin_token),
+            Some(json!({ "password": "Rotated-Pass!99" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "password reset: {patched}");
+    let (status, relogin) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": "provisioned@example.test", "password": "Rotated-Pass!99" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "relogin with rotated password: {relogin}"
+    );
+
+    // Admin erases the provisioned account; the audit trail records it.
+    let (status, _) = send(
+        &t.app,
+        req(
+            "DELETE",
+            &format!("/api/admin/users/{user_id}"),
+            Some(&admin_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, audit) = send(
+        &t.app,
+        req("GET", "/api/admin/audit", Some(&admin_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let actions: Vec<&str> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"admin.user.created"));
+    assert!(actions.contains(&"admin.user.password_reset"));
+    assert!(actions.contains(&"admin.user.erase"));
+}
+
+#[tokio::test]
 async fn billing_manual_payment_flow() {
     let Some(t) = test_app().await else {
         eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
