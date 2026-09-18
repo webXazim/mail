@@ -146,7 +146,12 @@ export function AdminPage() {
     if (!remote) return
     void remoteAdminApi
       .overview()
-      .then(setOverview)
+      .then((next) => {
+        setOverview(next)
+        if (next.domain) {
+          setDomain({ domain: next.domain, catchAllEnabled: false, catchAll: '' })
+        }
+      })
       .catch((error: Error) => showNotice(error.message || 'Failed to load admin overview'))
     reloadAdmin()
     // eslint-disable-next-line react-hooks/exhaustive-deps

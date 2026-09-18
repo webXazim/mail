@@ -40,7 +40,11 @@ type ApiResponse = {
 }
 
 async function request(path: string, options: RequestInit = {}): Promise<ApiResponse> {
-  const url = path.startsWith('http') ? path : `/api${path}`
+  const url = path.startsWith('http')
+    ? path
+    : path.startsWith('/api/')
+      ? path
+      : `/api${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers(options.headers)
   headers.set('Content-Type', 'application/json')
   const access = tokenStore.getAccess()
@@ -49,7 +53,13 @@ async function request(path: string, options: RequestInit = {}): Promise<ApiResp
   const response = await fetch(url, { ...options, headers, credentials: 'include' })
   let body: unknown = null
   const text = await response.text()
-  if (text) body = JSON.parse(text)
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = text
+    }
+  }
 
   return { status: response.status, body }
 }

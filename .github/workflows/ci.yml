@@ -57,7 +57,7 @@ jobs:
         run: cargo test --all-targets
 
   frontend:
-    name: Frontend (lint, typecheck, build)
+    name: Frontend (lint, typecheck, tests, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,6 +73,8 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Tests
+        run: npm run test
       - name: Typecheck
         run: npm run typecheck
       - name: Build
