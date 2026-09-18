@@ -198,7 +198,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 2. ✅ (done) **WS3.2 cookie-based API client** — frontend no longer stores tokens; refresh is cookie-only with rotation + replay/CSRF-protection live-verified (see WS1.4/WS1.5).
 3. **WS3.6 admin real endpoints** — grow the admin mailboxes/aliases/audit-export surface behind the new `AdminUser` gate; live-verify audit CSV export (a hard launch-gate row at 3.4/8.3).
 
-4. **WS2.x mail works end-to-end (M3 chain)** — land the "new signup receives a verified mailbox and can send/receive a real email" gate on the live stack: two real accounts on the same Stalwart domain, SMTP send → JMAP/IMAP receive round trip. Depends only on the mailbox bridge + SMTP (no external DNS), so it's the fastest remaining critical chain to true mail.
+4. ✅ (done) **WS2.x mail works end-to-end (M3 chain) — code-level PASS** — live `deploy/harbor-mail-e2e.ps1` (exit 0) on the local stack: two real verify-gated accounts on Stalwart domain `crescentsphere.com`, register → consume `dev.verify_link` token → `/api/auth/verify` both → login both → A→B real SMTP submission → B JMAP `/api/mail/search` read-back of the unique subject. Fully local (depends only on the mailbox bridge + SMTP; no external DNS). The 180/193 deliverability sub-gates move to the VPS + real-domain phase (after code completeness), per plan.
 5. **WS6.2 backups + restore drill** — automate `pg_dump` (covers `users`, `sessions`, audit, statistics, billing) with retention + a restore-into-throwaway drill whose final step asserts data freshness (a hard launch-gate row at 3. Houston after M3).
 
 Everything marked ☐ is a gap; nothing below M3 needs to be perfect to start — scope-freeze discipline at M8 matters more.
