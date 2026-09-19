@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { MailBodyFrame } from './MailBodyFrame'
 import { buildThread, snoozeAt, snoozeOptions } from '../lib/mail'
 import { getLocalAttachment, getRemoteAttachment } from '../services/attachments'
 import { foldersApi } from '../services/folders'
@@ -269,8 +270,9 @@ export function Reader({
 
   const renderCopy = (item: (typeof thread)[number]) => {
     if (isRealThreadItem(item)) {
-      if (item.bodyHtml) return <div dangerouslySetInnerHTML={{ __html: item.bodyHtml }} />
-      return item.copy
+      if (item.bodyHtml)
+        return <MailBodyFrame html={item.bodyHtml} subject={item.subject} />
+      return item.clearBody
         .split(/\n\n+/)
         .filter(Boolean)
         .map((paragraph) => <p key={paragraph.slice(0, 24)}>{paragraph}</p>)

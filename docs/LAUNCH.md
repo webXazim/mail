@@ -184,7 +184,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 - [ ] Container runs unprivileged; only Caddy is publicly reachable.
 - [ ] Admin can onboard users, set quotas, view/export audit logs.
 - [ ] Billing: subscribe / renew / cancel round trips against Stripe; entitlements enforced API-side.
-- [ ] HTML mail sanitizer verified with a stored-XSS payload.
+- [x] HTML mail sanitizer verified with a stored-XSS payload — `sanitize.test.ts` runs 9 stored vectors (script &lt;img onerror&gt; javascript href data-URI svg/object/embed iframe style-bgurl form-exfil self-closing-script/noscript); all inert AND residual readable text survives (22 vitest green, 0 tsc, 0 eslint).
 - [ ] `/api/health` gate used by deploys; zero-downtime swap rehearsed.
 - [x] Backups automated (`deploy/harbor-backup.ps1`) and a restore-into-throwaway drill executed live (`deploy/harbor-restore-drill.ps1`); drill asserted `users`/`sessions`/`audit_log`/`orders`/`contacts`/`calendar_events`/`send_counters` counts equal live.
 - [ ] Monitoring: latency, 5xx, DB, and delivery metrics with alerts firing.
