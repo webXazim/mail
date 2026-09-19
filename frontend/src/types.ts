@@ -48,7 +48,9 @@ export type ReaderThreadItem = {
   initials: string
   color: string
   copy: string
+  clearBody: string
   bodyHtml: string
+  subject: string
   time: string
   to?: string[]
   cc?: string[]

@@ -180,6 +180,7 @@ export default function App() {
         <Route path="/legal/privacy" element={<LegalPage docId="privacy" />} />
         <Route path="/legal/aup" element={<LegalPage docId="aup" />} />
         <Route path="/legal/security" element={<LegalPage docId="security" />} />
+        <Route path="/legal/abuse" element={<LegalPage docId="abuse" />} />
         <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
         <Route
           path="/mail"

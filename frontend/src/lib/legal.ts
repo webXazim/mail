@@ -338,11 +338,60 @@ const security: LegalDoc = {
   ],
 }
 
-export const legalDocs: Record<string, LegalDoc> = { terms, privacy, aup, security }
+const abuse: LegalDoc = {
+  id: 'abuse',
+  title: 'Abuse & DMCA Policy',
+  updated: '14 February 2026',
+  intro:
+    'Harbor Mail acts on reports of abuse, spam, and copyright infringement involving our network. This page tells you how to send us a report, what we need in it, and how we respond. We treat every report as time-sensitive and confidential.',
+  sections: [
+    {
+      id: 'scope',
+      heading: '1. What this policy covers',
+      body: [
+        'We investigate reports about accounts or mail that: send unsolicited bulk mail (spam), host phishing or malware, spread child sexual abuse material, or infringe copyright, trademark, or other rights. We also act on confirmed account compromise using this same channel.',
+        'Reports about material sent through a mailbox on our service should name the specific Harbor account (or the exact sender address) that you believe is involved.',
+      ],
+    },
+    {
+      id: 'how-to-report',
+      heading: '2. How to report',
+      body: [
+        'Send reports to abuse@harbor.co. For copyright claims, send the DMCA notice to that same address with the subject line prefixed "DMCA:". We reply to confirm receipt, usually within one business day.',
+        'Include: (a) the exact message subject and sender address (or account), (b) a screenshot or quoted excerpt of the offending content, (c) the date/time you received it, and (d) a return contact email. For DMCA claims, also include a statement of good-faith belief plus a declaration, under penalty of perjury, that the information is accurate and you are the rights owner or their agent.',
+      ],
+    },
+    {
+      id: 'response',
+      heading: '3. Response and takedown',
+      body: [
+        'We suspend the source account, quarantine the offending mailbox, and — where required — retain evidence for law enforcement. We apply a documented abuse and spam escalation path, and repeat offenders are permanently blocked.',
+        'We may share the minimum required details with law enforcement or the reporting party where the law requires it, and we always log the action to our audit trail.',
+      ],
+    },
+    {
+      id: 'data-deletion',
+      heading: '4. Data deletion and erasure',
+      body: [
+        'You may delete your Harbor Mail account and erase your data at any time from Settings, or by emailing privacy@harbor.co with the subject "Delete my account". Erasure destroys your mailbox in the mail store and removes your user record, along with every data row that belongs to it (sessions, contacts, calendar, aliases, and counters).',
+        'Audit-log entries retain a timestamped record of the erasure itself but no longer attribute it to a recoverable identity. Requests are processed within 30 days, and usually sooner.',
+      ],
+    },
+  ],
+}
+
+export const legalDocs: Record<string, LegalDoc> = {
+  terms,
+  privacy,
+  aup,
+  security,
+  abuse,
+}
 
 export const legalNav: { id: string; label: string }[] = [
   { id: 'terms', label: 'Terms of Service' },
   { id: 'privacy', label: 'Privacy Policy' },
   { id: 'aup', label: 'Acceptable Use' },
   { id: 'security', label: 'Security' },
+  { id: 'abuse', label: 'Abuse & DMCA' },
 ]

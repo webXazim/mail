@@ -286,6 +286,8 @@ export async function fetchThreadFor(mailId: string): Promise<ReaderThreadItem[]
       initials: initialsOf(sender, fromEmail),
       color: colorOf(fromEmail),
       copy: email.body_text?.trim() || email.preview || '',
+      clearBody: email.body_text?.trim() || email.preview || '',
+      subject: email.subject?.trim() || '(no subject)',
       bodyHtml: email.body_html || '',
       time: formatTime(email.received_at || email.date),
       to: email.to?.map(formatAddress),
