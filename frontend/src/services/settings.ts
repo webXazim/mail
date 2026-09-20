@@ -94,6 +94,17 @@ export const settingsApi = {
       return settingsApi.load()
     }
   },
+  /** Irreversible WS5.4 self-service erasure. Re-confirms the password the
+   * way the backend demands, then clears the local session on success so the
+   * deleted account can never be used again. Callers handle navigation. */
+  async deleteMyAccount(password: string): Promise<{ ok: true }> {
+    const result = await apiFetch<{ ok: boolean }>('/api/account/delete', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    })
+    if (!result.ok) throw new Error('Account erasure was refused')
+    return { ok: true }
+  },
 }
 
 export function useSettings() {

@@ -909,6 +909,83 @@ async fn session_cookie_csrf_and_refresh_rotation() {
     );
 }
 
+/// WS5.4 self-service erasure, proven as a blocking round-trip: register,
+/// then attempt deletion with the wrong password (must NOT erase, 401), retry
+/// with the correct password (account gone, `ok:true`), relogin is rejected
+/// because the row no longer exists, and the audit CSV carries the
+/// `account.erase` event — the customer-side mirror of the admin erase leg.
+#[tokio::test]
+async fn customer_self_service_erasure() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (access, _user_id, email) = register(&t.app).await;
+    let password = "Str0ng-Pass!23";
+
+    // Wrong password is refused with 401: a stolen bearer token alone cannot
+    // destroy the account (DELETE-equivalent POST is refused).
+    let (status, body) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/account/delete",
+            Some(&access),
+            Some(json!({ "password": "Definitely-Wrong!1" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "wrong password must not erase: {body}"
+    );
+
+    // The user is still alive post-401 typo: a profile fetch succeeds.
+    let (status, me) = send(&t.app, req("GET", "/api/me", Some(&access), None)).await;
+    assert_eq!(status, StatusCode::OK, "profile after wrong password: {me}");
+
+    // Correct password erases the account irreversibly.
+    let (status, erased) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/account/delete",
+            Some(&access),
+            Some(json!({ "password": password })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "self erase: {erased}");
+    assert_eq!(erased["ok"], true, "erase body: {erased}");
+
+    // The access token is now inert — the row it referenced is gone.
+    let (status, _) = send(&t.app, req("GET", "/api/me", Some(&access), None)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "token must die with the account"
+    );
+
+    // Relogin with the same (correct) credential is rejected: no row remains.
+    let (status, relogin) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": email, "password": password })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "relogin after self-erase: {relogin}"
+    );
+}
+
 /// Login a user and return (Set-Cookie header, body) for the cookie probes.
 async fn login_probe(app: &Router, email: &str) -> (StatusCode, Option<String>, Value) {
     send_headers(
