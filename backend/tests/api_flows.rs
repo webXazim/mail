@@ -673,6 +673,55 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(rejected["status"], "rejected");
 
+    // Customer withdraws an open order (cancel leg, WS4.4): a fresh Team order
+    // is opened, then cancelled before the admin acts. The approved plan is NOT
+    // touched — it stays ``team`` until the admin assigns another.
+    let (status, order3) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/billing/orders",
+            Some(&token),
+            Some(json!({ "plan_code": "team", "payment_method": "paypal", "customer_note": "" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "open order3: {order3}");
+    assert_eq!(order3["status"], "pending");
+    let order3_id = order3["id"].as_str().unwrap().to_string();
+
+    let (status, cancelled) = send(
+        &t.app,
+        req(
+            "POST",
+            &format!("/api/billing/orders/{order3_id}/cancel"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "cancel order3: {cancelled}");
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["plan_code"], "team");
+
+    // The approved plan survived the cancel: the member is still on ``team``.
+    let (status, profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(profile["plan"], "team", "cancel must not downgrade the approved plan");
+
+    // A cancelled (never-paid) order contributes no invoice.
+    let (status, invoices) = send(
+        &t.app,
+        req("GET", "/api/billing/invoices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        invoices["invoices"].as_array().unwrap().len(),
+        1,
+        "only the approved order invoices"
+    );
+
     // Admin plan CRUD: create, patch, deactivate. The code is unique per run
     // so the suite stays green against a database that keeps prior runs' rows.
     let reseller_code = format!("reseller-{}", Uuid::new_v4().simple());
