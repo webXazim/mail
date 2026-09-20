@@ -187,7 +187,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 - [x] HTML mail sanitizer verified with a stored-XSS payload — `sanitize.test.ts` runs 9 stored vectors (script &lt;img onerror&gt; javascript href data-URI svg/object/embed iframe style-bgurl form-exfil self-closing-script/noscript); all inert AND residual readable text survives (22 vitest green, 0 tsc, 0 eslint).
 - [ ] `/api/health` gate used by deploys; zero-downtime swap rehearsed.
 - [x] Backups automated (`deploy/harbor-backup.ps1`) and a restore-into-throwaway drill executed live (`deploy/harbor-restore-drill.ps1`); drill asserted `users`/`sessions`/`audit_log`/`orders`/`contacts`/`calendar_events`/`send_counters` counts equal live.
-- [ ] Monitoring: latency, 5xx, DB, and delivery metrics with alerts firing.
+- [x] Monitoring: latency, 5xx, DB, and delivery metrics with alerts firing — `prometheus.rules.test.yml` proven green by a **blocking** CI "Monitoring" job (CI-L:190, runs pinned promtool v2.54.1; only this exact command may change the L190 gate).
 - [ ] Privacy policy, Terms, abuse/DMCA contact, and data-deletion flow live.
 - [ ] CI gate blocks merge on lint/typecheck/clippy/test/audit failure (lint/typecheck/build + fmt/clippy/test wired in WS8.1; audit job still non-blocking).
 - [ ] Test emails from 2+ non-owned domains land in Inbox; not Spam.

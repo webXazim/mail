@@ -1,0 +1,199 @@
+# promtool test rules for deploy/monitoring/prometheus.rules.yml (L190 gate).
+#
+# Every input series below carries the REAL labels the backend /api/metrics
+# exporter emits (see backend/src/metrics.rs):
+#   - harbor_http_requests_total{path,status}
+#   - harbor_http_request_duration_seconds_bucket{path,le}
+#   - harbor_http_responses_5xx_total{path}
+#   - harbor_smtp_sends_total{result=ok|failed|suppressed|rate_limited}
+#   - harbor_db_pool_connections{state=open|idle}
+#
+# Each test feeds a synthetic series whose value profile provably trips its
+# rule's threshold, then asserts the REAL alertname from prometheus.rules.yml
+# as `active: true, firing: true` at the end of the `for:` window. A rule whose
+# expr references a metric/label the backend never exports (or an alertname
+# that drifted from the rules file) never fires -> the exp_alerts here fail ->
+# CI blocks. That is the memory-proof: a silent, dead alert<->test pair cannot
+# land. Prometheus version is pinned to the same tag deployed in compose and
+# CI (v2.54.1) so semantics are locked.
+#
+# Drafting a new alert: choose series so the condition is true continuously,
+# then eval_time >= `for` + the rate window; rate-based conditions become true
+# only once a rate(window) has a full window of data.
+#
+# Run:  promtool test rules deploy/monitoring/prometheus.rules.test.yml
+#       (same command is a blocking CI job, see ci.yml "Monitoring" job)
+
+rule_files:
+  - prometheus.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # L190-1: 5xx share >5% on /api/mail sustained 10m -> HarborHigh5xxRate fires.
+  # Series are constant 10/s (5xx) and 20/s (requests); the first computable
+  # rate() lands at t=5m, so for:10m means Firing at eval_time 15m.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_http_responses_5xx_total{path="/api/mail"}'
+        values: '0 600 1200 1800 2400 3000 3600 4200 4800 5400 6000 6600 7200 7800 8400 9000'
+      - series: 'harbor_http_requests_total{path="/api/mail",status="500"}'
+        values: '0 1200 2400 3600 4800 6000 7200 8400 9600 10800 12000 13200 14400 15600 16800 18000'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HarborHigh5xxRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              gate: l190
+              path: /api/mail
+            exp_annotations:
+              summary: "5xx rate >5% on /api/mail"
+              description: "/api/mail served 5xx at 50% of requests for 10m — check api logs, `docker compose logs api`."
+              runbook: "deploy/monitoring/RUNBOOK.md#5xx"
+
+  # L190-2: p95 latency breaches the 2s budget on /api/mail/search for 10m ->
+  # HarborSlowRoute fires. Bucket distribution: 1 fast, 98 mid (2-5s), 1 slow
+  # per 100 -> histogram_quantile(0.95) interpolates inside (2s,5s] (~4.88s).
+  - interval: 1m
+    input_series:
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="0.1"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="2"}'
+        values: '0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="5"}'
+        values: '0 99 198 297 396 495 594 693 792 891 990 1089 1188 1287 1386 1485'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="+Inf"}'
+        values: '0 100 200 300 400 500 600 700 800 900 1000 1100 1200 1300 1400 1500'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HarborSlowRoute
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: l190
+              path: /api/mail/search
+            exp_annotations:
+              summary: "p95 latency >2s on /api/mail/search"
+              description: "/api/mail/search p95 is 4.877551020408163s — check SQLx pool pressure and Stalwart round trips."
+              runbook: "deploy/monitoring/RUNBOOK.md#latency"
+
+  # L190-2b: same histogram but 99% fast -> p95 stays inside (0.1,2] (~1.92s)
+  # -> HarborSlowRoute does NOT fire. Proves the latency threshold has a real
+  # boundary instead of firing on any traffic.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="0.1"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="2"}'
+        values: '0 99 198 297 396 495 594 693 792 891 990 1089 1188 1287 1386 1485'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="5"}'
+        values: '0 100 200 300 400 500 600 700 800 900 1000 1100 1200 1300 1400 1500'
+      - series: 'harbor_http_request_duration_seconds_bucket{path="/api/mail/search",le="+Inf"}'
+        values: '0 100 200 300 400 500 600 700 800 900 1000 1100 1200 1300 1400 1500'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HarborSlowRoute
+        exp_alerts: []
+
+  # L190-3: SMTP delivery outcomes. failed/rate_limited stream at 24/min
+  # (0.4/s > the 0.02 threshold), suppressed at 6/min (0.1/s > 0.005). Each
+  # rule's rate() becomes computable at t=15m, so for:15m -> Firing at 30m.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_smtp_sends_total{result="failed"}'
+        values: '0 24 48 72 96 120 144 168 192 216 240 264 288 312 336 360 384 408 432 456 480 504 528 552 576 600 624 648 672 696 720'
+      - series: 'harbor_smtp_sends_total{result="rate_limited"}'
+        values: '0 24 48 72 96 120 144 168 192 216 240 264 288 312 336 360 384 408 432 456 480 504 528 552 576 600 624 648 672 696 720'
+      - series: 'harbor_smtp_sends_total{result="suppressed"}'
+        values: '0 6 12 18 24 30 36 42 48 54 60 66 72 78 84 90 96 102 108 114 120 126 132 138 144 150 156 162 168 174 180'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HarborSmtpFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: l190
+              result: failed
+            exp_annotations:
+              summary: "SMTP delivery failures climbing"
+              description: "failed deliveries at 400m send/min — check `docker compose logs smtp` + Stalwart."
+      - eval_time: 30m
+        alertname: HarborSmtpRateLimited
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: l190
+              result: rate_limited
+            exp_annotations:
+              summary: "Mail rate-limited — send caps being hit"
+              description: "rate_limited at 400m /min — users near plan caps or warmup ramp."
+              runbook: "deploy/monitoring/RUNBOOK.md#rate-limited"
+      - eval_time: 30m
+        alertname: HarborSmtpSuppressed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: l190
+              result: suppressed
+            exp_annotations:
+              summary: "Mail suppressed (bounce/FBL)"
+              description: "suppressed address drops at 100m /min — check suppression list + DSN ingests."
+
+  # L190-4: SQLx pool starves to zero idle connections for 5m ->
+  # HarborDbPoolExhausted fires (gauge rule; no rate window).
+  - interval: 1m
+    input_series:
+      - series: 'harbor_db_pool_connections{state="idle"}'
+        values: '4 4 0 0 0 0 0 0 0 0 0'
+      - series: 'harbor_db_pool_connections{state="open"}'
+        values: '8 8 8 8 8 8 8 8 8 8 8'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HarborDbPoolExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              gate: l190
+              state: idle
+            exp_annotations:
+              summary: "DB pool has zero idle connections"
+              description: "All SQLx pool connections busy for 5m — lookup/inserts queuing; likely a leaking query or locked table."
+
+  # L190-5: the whole DB gauge vanishes for 5m -> HarborDbPoolGone fires
+  # (absent()). A separate block: any test block supplying the gauge would
+  # satisfy absent()'s "no series" premise.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_http_requests_total{path="/api/health",status="200"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HarborDbPoolGone
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              gate: l190
+            exp_annotations:
+              summary: "DB pool metric absent"
+              description: "`harbor_db_pool_connections` stopped appearing — api metrics endpoint unreachable or DB layer dead."
+
+  # L190-6: error budget (2% 5xx share over 1h) burning for 30m ->
+  # HarborErrorBudgetBurning fires. Uses interval 5m with eval_time 90m so the
+  # 1h rate() has data at t=60m and for:30m resolves at t=90m.
+  - interval: 5m
+    input_series:
+      - series: 'harbor_http_responses_5xx_total{path="/api/mail"}'
+        values: '0 1500 3000 4500 6000 7500 9000 10500 12000 13500 15000 16500 18000 19500 21000 22500 24000 25500 27000'
+      - series: 'harbor_http_requests_total{path="/api/mail",status="500"}'
+        values: '0 3000 6000 9000 12000 15000 18000 21000 24000 27000 30000 33000 36000 39000 42000 45000 48000 51000 54000'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: HarborErrorBudgetBurning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: l190
+            exp_annotations:
+              summary: "Error budget burning (2% 5xx over 1h)"
+              description: "Cross-route 5xx share reached 50% over the last hour."

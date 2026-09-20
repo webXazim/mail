@@ -163,3 +163,22 @@ jobs:
       - name: Run smoke test
         shell: pwsh
         run: ./deploy/smoke-test.ps1 -BaseUrl http://127.0.0.1:8080
+
+  # WS8.5 / LAUNCH L190: Monitoring gate — BLOCKING. Runs the exact promtool
+  # (v2.54.1, the same tag compose deploys) against the alert-rule unit tests.
+  # This is the memory-proof for "alerts firing": promtool.test.yml pins every
+  # rule's real alertname/labels/gate, so a rule whose expr references a metric
+  # the backend never exports (or an alertname that drifts from the rules file)
+  # never fires -> the exp_alerts fail -> CI blocks. A silent, dead alert->
+  # <->test pair cannot land. Header comment in prometheus.rules.test.yml is
+  # the room's memory of this contract.
+  monitoring:
+    name: Monitoring (promtool test rules — blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate alert rules + unit tests (promtool)
+        run: |
+          docker run --rm --entrypoint promtool -w /rules \
+            -v "$PWD/deploy/monitoring:/rules" \
+            prom/prometheus:v2.54.1 test rules prometheus.rules.test.yml

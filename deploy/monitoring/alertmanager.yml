@@ -1,0 +1,34 @@
+# Harbor Alertmanager config (compose: docker-compose.yml::alertmanager, L190
+# gate, `docker compose --profile monitoring up -d prometheus alertmanager`).
+#
+# Routing lives in deploy/monitoring/alertmanager.yml (this file) and the
+# notification receiver contract is verified as part of the LAUNCH L190 gate:
+# each alert's `runbook:` annotation points at a real anchor in
+# deploy/monitoring/RUNBOOK.md, and the blocking CI "Monitoring" job re-checks
+# that the rules + test stay in sync (see .github/workflows/ci.yml).
+route:
+  group_by: ['alertname']
+  # Group a few minutes of related fires into one notification instead of
+  # paging per-series; long enough to collate a burst, short enough to stay
+  # fresh.
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  # Deliver everything to a single receiver that records alerts in a local
+  # queue + sends to the ops channel. All Harbor alerts are ops-facing: DO NOT
+  # send any of them straight to a user-facing endpoint.
+  receiver: harbor-ops
+
+receivers:
+  - name: harbor-ops
+    webhook_configs:
+      # Ops intake stub — a real webhook URL is provisioned per deployment via
+      # the compose env (HARBOR_ALERT_WEBHOOK). Kept localhost-default so the
+      # monitoring profile boots standalone in dev without an external service.
+      - url: 'http://127.0.0.1:9099/harbor-alerts'
+        send_resolved: true
+
+# No inhibit rules needed yet: the alert rules are deliberately independent
+# (latency / 5xx / DB pool / SMTP delivery fire on their own series), so
+# mutual suppression would hide real root causes.

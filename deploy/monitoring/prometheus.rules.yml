@@ -1,0 +1,123 @@
+# Harbor alert rules — must reference the REAL metric names/labels exported by
+# `/api/metrics` (see backend/src/metrics.rs). If an `expr` here drifts from a
+# name or label the API actually emits, the rule is dead-on-arrival and the
+# gate is silently unverified. Proven by `prometheus.rules.test.yml` via
+# `promtool test rules` (a blocking CI job — L190).
+groups:
+  - name: harbor_availability
+    rules:
+      - alert: HarborHigh5xxRate
+        expr: |
+          sum by (path) (
+            rate(harbor_http_responses_5xx_total{path=~".+"}[5m])
+          )
+          / on (path)
+          sum by (path) (
+            rate(harbor_http_requests_total{path=~".+"}[5m])
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          gate: l190
+        annotations:
+          summary: "5xx rate >5% on {{ $labels.path }}"
+          description: "{{ $labels.path }} served 5xx at {{ $value | humanizePercentage }} of requests for 10m — check api logs, `docker compose logs api`."
+          runbook: "deploy/monitoring/RUNBOOK.md#5xx"
+
+      - alert: HarborErrorBudgetBurning
+        expr: |
+          sum(rate(harbor_http_responses_5xx_total{path=~".+"}[1h]))
+          / sum(rate(harbor_http_requests_total{path=~".+"}[1h]))
+          > 0.02
+        for: 30m
+        labels:
+          severity: warning
+          gate: l190
+        annotations:
+          summary: "Error budget burning (2% 5xx over 1h)"
+          description: "Cross-route 5xx share reached {{ $value | humanizePercentage }} over the last hour."
+
+  - name: harbor_latency
+    rules:
+      - alert: HarborSlowRoute
+        # NOTE: no `sum by (le)` continuation is allowed here — any aggregation
+        # that does not carry `le` forward destroys the histogram boundaries and
+        # histogram_quantile silently returns nothing (a dead rule). With a
+        # single api target, no grouping is needed; path rides through as a
+        # label. Proven fireable by prometheus.rules.test.yml (L190-2).
+        expr: |
+          histogram_quantile(
+            0.95,
+            rate(harbor_http_request_duration_seconds_bucket{path=~".+"}[5m])
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          gate: l190
+        annotations:
+          summary: "p95 latency >2s on {{ $labels.path }}"
+          description: "{{ $labels.path }} p95 is {{ $value }}s — check SQLx pool pressure and Stalwart round trips."
+          runbook: "deploy/monitoring/RUNBOOK.md#latency"
+
+  - name: harbor_data
+    rules:
+      # Dead SQLx pool = do-not-deploy condition (WS6.5 gate also keys off /api/health).
+      - alert: HarborDbPoolExhausted
+        expr: |
+          harbor_db_pool_connections{state="idle"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          gate: l190
+        annotations:
+          summary: "DB pool has zero idle connections"
+          description: "All SQLx pool connections busy for 5m — lookup/inserts queuing; likely a leaking query or locked table."
+
+      - alert: HarborDbPoolGone
+        expr: absent(harbor_db_pool_connections)
+        for: 5m
+        labels:
+          severity: critical
+          gate: l190
+        annotations:
+          summary: "DB pool metric absent"
+          description: "`harbor_db_pool_connections` stopped appearing — api metrics endpoint unreachable or DB layer dead."
+
+  - name: harbor_delivery
+    rules:
+      - alert: HarborSmtpFailures
+        expr: |
+          sum by (result) (rate(harbor_smtp_sends_total{result="failed"}[15m]))
+          > 0.02
+        for: 10m
+        labels:
+          severity: warning
+          gate: l190
+        annotations:
+          summary: "SMTP delivery failures climbing"
+          description: "failed deliveries at {{ $value | humanize }} send/min — check `docker compose logs smtp` + Stalwart."
+
+      - alert: HarborSmtpRateLimited
+        expr: |
+          sum by (result) (rate(harbor_smtp_sends_total{result="rate_limited"}[15m]))
+          > 0.02
+        for: 15m
+        labels:
+          severity: warning
+          gate: l190
+        annotations:
+          summary: "Mail rate-limited — send caps being hit"
+          description: "{{ $labels.result }} at {{ $value | humanize }} /min — users near plan caps or warmup ramp."
+          runbook: "deploy/monitoring/RUNBOOK.md#rate-limited"
+
+      - alert: HarborSmtpSuppressed
+        expr: |
+          sum by (result) (rate(harbor_smtp_sends_total{result="suppressed"}[15m]))
+          > 0.005
+        for: 15m
+        labels:
+          severity: warning
+          gate: l190
+        annotations:
+          summary: "Mail suppressed (bounce/FBL)"
+          description: "suppressed address drops at {{ $value | humanize }} /min — check suppression list + DSN ingests."
