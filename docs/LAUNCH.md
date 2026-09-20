@@ -182,7 +182,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 - [X] Tokens are HttpOnly cookies; CSRF probe fails (WS1.4).
 - [ ] `VITE`/`.env` contain zero weak or committed secrets; `HARBOR_JWT_SECRET` ≥32 bytes on the server.
 - [ ] Container runs unprivileged; only Caddy is publicly reachable.
-- [ ] Admin can onboard users, set quotas, view/export audit logs.
+- [x] Admin can onboard users, set quotas, view/export audit logs — proven by blocking `backend/tests/api_flows.rs` `admin_provisions_and_resets_user` (CI backend job, real Postgres, L190-companion gate 8.3): create→quota-in-list→password-reset+relogin→audit trail w/ `admin.user.created`/`admin.user.erase`→**RFC 4180 CSV export** (`text/csv`, header `id,time,actor,action,detail`) with exporter emitting `admin.user.*` + suppressions + plan/role gates; Stalwart quota mirror asserted via `x:Account/set`.
 - [ ] Billing: subscribe / renew / cancel round trips against Stripe; entitlements enforced API-side.
 - [x] HTML mail sanitizer verified with a stored-XSS payload — `sanitize.test.ts` runs 9 stored vectors (script &lt;img onerror&gt; javascript href data-URI svg/object/embed iframe style-bgurl form-exfil self-closing-script/noscript); all inert AND residual readable text survives (22 vitest green, 0 tsc, 0 eslint).
 - [ ] `/api/health` gate used by deploys; zero-downtime swap rehearsed.
