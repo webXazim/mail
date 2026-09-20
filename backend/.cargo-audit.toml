@@ -1,0 +1,23 @@
+# cargo-audit configuration for the Harbor backend.
+#
+# This file is the ONLY place dependency-audit exceptions live. It is reviewed
+# as part of the security gate (docs/LAUNCH.md:192): the audit CI job (now
+# blocking) refuses to merge on ANY advisory that is not listed here, so every
+# entry below is a consciously-documented accepted risk, not a blind --ignore.
+
+# RUSTSEC-2023-0071 — rsa: "Marvin Attack: potential key recovery through
+# timing sidechannels" (CVSS 5.9, MEDIUM).
+#   Advisory states: `patched = []` — NO fixed version exists (still affected
+#   as of rsa 0.9.10 / 0.10.0-rc.18, confirmed 2026-09-12). The advisory's own
+#   workaround is: "Local use on a non-compromised computer is fine" — the
+#   attack requires an attacker able to observe RSA timing **over the network**.
+#   Our deployment satisfies that mitigation by construction (docs/LAUNCH.md:184):
+#   every container binds 127.0.0.1 loopback only, no service is publicly
+#   reachable, and Caddy/TLS ingress is deferred until the proxy plan exists
+#   (docs/LAUNCH.md:39). The RSA keys are JWT signing keys used only by the
+#   backend on the host itself, never exposed to remote timing observation.
+#   Accepting this single advisory is therefore the correct, still-audited
+#   decision: remove this entry the moment rsa ships constant-time padding
+#   (RustCrypto/RSA#702); everything else must stay unignored and blocking.
+[ignore]
+RUSTSEC-2023-0071 = { reason = "no patched version exists; advisory's own workaround (local-only use) is satisfied by loopback-only deployment (LAUNCH:184); re-evaluate on rsa>0.9.10" }

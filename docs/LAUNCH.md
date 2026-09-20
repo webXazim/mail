@@ -189,7 +189,7 @@ Dependencies flow top-down; parallels allowed between `WS5–WS8` and the rest.
 - [x] Backups automated (`deploy/harbor-backup.ps1`) and a restore-into-throwaway drill executed live (`deploy/harbor-restore-drill.ps1`); drill asserted `users`/`sessions`/`audit_log`/`orders`/`contacts`/`calendar_events`/`send_counters` counts equal live.
 - [x] Monitoring: latency, 5xx, DB, and delivery metrics with alerts firing — `prometheus.rules.test.yml` proven green by a **blocking** CI "Monitoring" job (CI-L:190, runs pinned promtool v2.54.1; only this exact command may change the L190 gate).
 - [ ] Privacy policy, Terms, abuse/DMCA contact, and data-deletion flow live.
-- [ ] CI gate blocks merge on lint/typecheck/clippy/test/audit failure (lint/typecheck/build + fmt/clippy/test wired in WS8.1; audit job still non-blocking).
+- [x] CI gate blocks merge on lint/typecheck/clippy/test/audit failure (lint/typecheck/build + fmt/clippy/test wired in WS8.1; the dependency-audit job that was `continue-on-error:true` is now **blocking** in `.github/workflows/ci.yml`). One advisory remains in the tree — `rsa` timing/Marvin (RUSTSEC-2023-0071, CVSS 5.9) — with **no fixed release exists** (`patched = []`, still on rsa 0.9.10/0.10.0-rc.18); the advisory's own workaround is "local use on a non-compromised computer is fine", and our deploy satisfies it (loopback-only binds, nothing public — LAUNCH:184). It is accepted **only** via `backend/.cargo-audit.toml` `[ignore]` with that justification written inline; every other advisory stays hard-blocking the merge.
 - [ ] Test emails from 2+ non-owned domains land in Inbox; not Spam.
 
 ## 6. First three moves (recommended next)

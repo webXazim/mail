@@ -85,9 +85,8 @@ jobs:
   # upgrade (RUSTSEC-2024-0363). Do not make this blocking until those land, or
   # every PR fails. See docs/LAUNCH.md.
   audit:
-    name: Dependency audit (non-blocking)
+    name: Dependency audit (blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
