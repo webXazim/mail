@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { bootstrapSession } from './lib/api'
 import { isDemoAllowed } from './services/auth'
+import { isLocalAdminOrigin } from './lib/admin-origin'
 import { profileApi, useRole } from './services/profile'
+import { capabilitiesApi } from './services/capabilities'
 
 const LoginPage = lazy(() =>
   import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })),
@@ -67,6 +69,9 @@ const AdminPage = lazy(() =>
 const AdminBillingPage = lazy(() =>
   import('./pages/AdminBillingPage').then((module) => ({ default: module.AdminBillingPage })),
 )
+const AdminControlPlanePage = lazy(() =>
+  import('./pages/AdminControlPlanePage').then((module) => ({ default: module.AdminControlPlanePage })),
+)
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
 )
@@ -91,6 +96,12 @@ const AuditLogPage = lazy(() =>
 const PricingPage = lazy(() =>
   import('./pages/PricingPage').then((module) => ({ default: module.PricingPage })),
 )
+const BusinessPage = lazy(() =>
+  import('./pages/BusinessPage').then((module) => ({ default: module.BusinessPage })),
+)
+const BusinessInvitePage = lazy(() =>
+  import('./pages/BusinessInvitePage').then((module) => ({ default: module.BusinessInvitePage })),
+)
 const LegalPage = lazy(() =>
   import('./pages/LegalPage').then((module) => ({ default: module.LegalPage })),
 )
@@ -98,7 +109,7 @@ const NotFoundPage = lazy(() =>
   import('./pages/NotFoundPage').then((module) => ({ default: module.NotFoundPage })),
 )
 
-const sessionKey = 'harbor-mail:demo'
+const sessionKey = 'cs-mail:demo'
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation()
@@ -107,7 +118,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const demo = isDemoAllowed() && localStorage.getItem(sessionKey) === 'true'
   useEffect(() => {
     let alive = true
-    bootstrapSession().then((v) => {
+    Promise.all([bootstrapSession(), capabilitiesApi.load().catch(() => null)]).then(([v]) => {
       if (alive) {
         setOk(v)
         setReady(true)
@@ -123,7 +134,35 @@ function RequireAuth({ children }: { children: ReactNode }) {
         <div className="loading-spinner" />
       </div>
     )
-  if (!ok && !demo) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!ok && !demo) {
+    const returnTo = `${location.pathname}${location.search}`
+    sessionStorage.setItem('cs-mail:return-to', returnTo)
+    return <Navigate to="/login" replace state={{ from: returnTo }} />
+  }
+  return children
+}
+
+
+function RequireMailbox({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const [checked, setChecked] = useState(false)
+  const [hasMailbox, setHasMailbox] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    profileApi.refresh()
+      .then((profile) => {
+        if (!alive) return
+        setHasMailbox(profile?.has_mailbox ?? true)
+        setChecked(true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setChecked(true)
+      })
+    return () => { alive = false }
+  }, [])
+  if (!checked) return <div className="route-loader"><div className="loading-spinner" /></div>
+  if (hasMailbox === false) return <Navigate to="/mail/business" replace state={{ from: `${location.pathname}${location.search}` }} />
   return children
 }
 
@@ -147,8 +186,13 @@ function RequireRole({ roles, children }: { roles: string[]; children: ReactNode
         <div className="loading-spinner" />
       </div>
     )
-  if (!role) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!role) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />
   if (!roles.includes(role)) return <Navigate to="/mail/inbox" replace />
+  return children
+}
+
+function RequireLocalAdminOrigin({ children }: { children: ReactNode }) {
+  if (!isLocalAdminOrigin()) return <Navigate to="/mail/inbox" replace />
   return children
 }
 
@@ -183,6 +227,14 @@ export default function App() {
         <Route path="/legal/abuse" element={<LegalPage docId="abuse" />} />
         <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
         <Route
+          path="/business-invite"
+          element={
+            <RequireAuth>
+              <BusinessInvitePage />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/mail"
           element={
             <RequireAuth>
@@ -195,19 +247,34 @@ export default function App() {
           <Route
             path="admin"
             element={
-              <RequireRole roles={['admin']}>
-                <AdminPage />
-              </RequireRole>
+              <RequireLocalAdminOrigin>
+                <RequireRole roles={['admin']}>
+                  <AdminPage />
+                </RequireRole>
+              </RequireLocalAdminOrigin>
+            }
+          />
+          <Route
+            path="admin/control-plane"
+            element={
+              <RequireLocalAdminOrigin>
+                <RequireRole roles={['admin']}>
+                  <AdminControlPlanePage />
+                </RequireRole>
+              </RequireLocalAdminOrigin>
             }
           />
           <Route
             path="admin/billing"
             element={
-              <RequireRole roles={['admin']}>
-                <AdminBillingPage />
-              </RequireRole>
+              <RequireLocalAdminOrigin>
+                <RequireRole roles={['admin']}>
+                  <AdminBillingPage />
+                </RequireRole>
+              </RequireLocalAdminOrigin>
             }
           />
+          <Route path="business" element={<BusinessPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="labels" element={<LabelsPage />} />
@@ -216,11 +283,11 @@ export default function App() {
           <Route path="billing/invoices/:invoiceId" element={<InvoicePage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="pricing" element={<PricingPage />} />
-          <Route path="search" element={<SearchPage />} />
-          <Route path=":folder" element={<MailListPage />} />
-          <Route path=":folder/thread/:mailId" element={<ThreadPage />} />
-          <Route path="folders/:folderId" element={<MailListPage />} />
-          <Route path="folders/:folderId/thread/:mailId" element={<ThreadPage />} />
+          <Route path="search" element={<RequireMailbox><SearchPage /></RequireMailbox>} />
+          <Route path=":folder" element={<RequireMailbox><MailListPage /></RequireMailbox>} />
+          <Route path=":folder/thread/:mailId" element={<RequireMailbox><ThreadPage /></RequireMailbox>} />
+          <Route path="folders/:folderId" element={<RequireMailbox><MailListPage /></RequireMailbox>} />
+          <Route path="folders/:folderId/thread/:mailId" element={<RequireMailbox><ThreadPage /></RequireMailbox>} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage full />} />

@@ -6,6 +6,8 @@ import { foldersApi, type ManagedFolder } from '../services/folders'
 export function ManageFolders({ close }: { close: () => void }) {
   const [list, setList] = useState<ManagedFolder[]>(() => foldersApi.list())
   const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const panelRef = useRef<HTMLElement>(null)
   useFocusTrap(panelRef)
   useEffect(() => {
@@ -18,11 +20,24 @@ export function ManageFolders({ close }: { close: () => void }) {
 
   const sync = (next: ManagedFolder[]) => setList(next)
 
-  const add = () => {
-    sync(foldersApi.add(name))
-    setName('')
+  const run = async (work: () => Promise<ManagedFolder[]>) => {
+    setBusy(true)
+    setError('')
+    try {
+      sync(await work())
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Folder update failed')
+      return false
+    } finally {
+      setBusy(false)
+    }
   }
-  const remove = (id: string) => sync(foldersApi.remove(id))
+  const add = async () => {
+    const ok = await run(() => foldersApi.add(name))
+    if (ok) setName('')
+  }
+  const remove = (id: string) => void run(() => foldersApi.remove(id))
 
   return (
     <div className="settings-layer" role="presentation">
@@ -35,7 +50,7 @@ export function ManageFolders({ close }: { close: () => void }) {
       >
         <header>
           <div>
-            <p className="eyebrow">Harbor Mail</p>
+            <p className="eyebrow">CS Mail</p>
             <h2 id="folders-title">Manage folders</h2>
           </div>
           <button type="button" className="icon-button" aria-label="Close folders" onClick={close}>
@@ -52,19 +67,27 @@ export function ManageFolders({ close }: { close: () => void }) {
                   value={customFolder.name}
                   aria-label={`Rename ${customFolder.name}`}
                   onChange={(event) => {
-                    sync(foldersApi.rename(customFolder.id, event.target.value))
+                    const nextName = event.target.value
+                    setList((current) =>
+                      current.map((folder) =>
+                        folder.id === customFolder.id ? { ...folder, name: nextName } : folder,
+                      ),
+                    )
                   }}
+                  onBlur={(event) => void run(() => foldersApi.rename(customFolder.id, event.target.value))}
                 />
                 <button
                   type="button"
                   className="icon-button"
                   aria-label={`Delete ${customFolder.name}`}
+                  disabled={busy}
                   onClick={() => remove(customFolder.id)}
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
             ))}
+            {error && <p className="settings-hint" role="alert">{error}</p>}
             {list.length === 0 && (
               <p className="settings-hint">No custom folders yet — add one below.</p>
             )}
@@ -84,11 +107,11 @@ export function ManageFolders({ close }: { close: () => void }) {
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault()
-                    add()
+                    void add()
                   }
                 }}
               />
-              <button type="button" className="primary-button" onClick={add}>
+              <button type="button" className="primary-button" disabled={busy} onClick={() => void add()}>
                 <Plus size={15} />
                 Add
               </button>

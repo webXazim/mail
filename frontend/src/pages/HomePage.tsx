@@ -23,7 +23,7 @@ export function HomePage() {
   return (
     <div className="home">
       <section className="home-hero">
-        <p className="eyebrow">Harbor Mail · Business email that respects your focus</p>
+        <p className="eyebrow">CS Mail · Business email that respects your focus</p>
         <h1>
           Calm, focused email
           <br />
@@ -41,10 +41,10 @@ export function HomePage() {
             See pricing
           </Link>
         </div>
-        <p className="home-hero__note">Free Solo plan · No credit card · 30-second setup</p>
+        <p className="home-hero__note">Business email from SAR 25/month · Custom domain · Web + IMAP/SMTP</p>
       </section>
 
-      <section className="home-value" aria-label="Why Harbor Mail">
+      <section className="home-value" aria-label="Why CS Mail">
         {values.map((item) => {
           const Icon = item.icon
           return (

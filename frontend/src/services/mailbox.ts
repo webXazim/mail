@@ -2,10 +2,9 @@ import { messages } from '../data'
 import type { Mail } from '../types'
 import { primaryAccountId } from './accounts'
 
-const mailboxKey = 'harbor-mail:mailbox'
-const draftKey = 'harbor-mail:compose-draft'
+const mailboxKey = 'cs-mail:mailbox'
 const mailboxKeyFor = (accountId: string) =>
-  accountId === primaryAccountId ? mailboxKey : `harbor-mail:mailbox:${accountId}`
+  accountId === primaryAccountId ? mailboxKey : `cs-mail:mailbox:${accountId}`
 const delay = (value: Mail[] | null) =>
   new Promise<Mail[]>((resolve) => window.setTimeout(() => resolve(value || messages), 120))
 const delayList = (value: Mail[] | null) =>
@@ -35,12 +34,5 @@ export const mailboxApi = {
   async replaceFor(accountId: string, next: Mail[]) {
     localStorage.setItem(mailboxKeyFor(accountId), JSON.stringify(next))
     return next
-  },
-  async saveDraft<T extends object>(draft: T) {
-    localStorage.setItem(draftKey, JSON.stringify(draft))
-    return draft
-  },
-  async clearDraft() {
-    localStorage.removeItem(draftKey)
   },
 }

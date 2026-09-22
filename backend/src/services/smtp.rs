@@ -45,18 +45,18 @@ fn env_non_empty(key: &str) -> String {
 impl SmtpConfig {
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        let host = env_non_empty("HARBOR_SMTP_HOST");
+        let host = env_non_empty("CS_MAIL_SMTP_HOST");
         if !host.is_empty() {
             cfg.host = host;
         }
-        if let Ok(port) = std::env::var("HARBOR_SMTP_PORT") {
+        if let Ok(port) = std::env::var("CS_MAIL_SMTP_PORT") {
             if let Ok(p) = port.trim().parse() {
                 cfg.port = p;
             }
         }
-        cfg.username = env_non_empty("HARBOR_SMTP_USERNAME");
-        cfg.password = env_non_empty("HARBOR_SMTP_PASSWORD");
-        if let Ok(secs) = std::env::var("HARBOR_SMTP_TIMEOUT_SECS") {
+        cfg.username = env_non_empty("CS_MAIL_SMTP_USERNAME");
+        cfg.password = env_non_empty("CS_MAIL_SMTP_PASSWORD");
+        if let Ok(secs) = std::env::var("CS_MAIL_SMTP_TIMEOUT_SECS") {
             if let Ok(t) = secs.trim().parse::<u64>() {
                 cfg.timeout = Duration::from_secs(t);
             }

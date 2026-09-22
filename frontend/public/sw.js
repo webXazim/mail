@@ -1,4 +1,4 @@
-const CACHE = 'harbor-mail-v1'
+const CACHE = 'cs-mail-v1'
 const SHELL = ['/', '/index.html']
 
 self.addEventListener('install', (event) => {

@@ -36,6 +36,7 @@ pub struct Outgoing {
     pub from: Address,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
+    pub reply_to: Option<Address>,
     pub subject: String,
     pub body_text: String,
     pub body_html: Option<String>,
@@ -66,6 +67,9 @@ impl Outgoing {
 
         if !self.cc.is_empty() {
             out.push_str(&format!("Cc: {}\r\n", format_address_list(&self.cc)));
+        }
+        if let Some(reply_to) = &self.reply_to {
+            out.push_str(&format!("Reply-To: {}\r\n", format_address(reply_to)));
         }
         out.push_str(&format!("Subject: {}\r\n", encode_subject(&self.subject)));
         out.push_str(&format!("Date: {}\r\n", Utc::now().to_rfc2822()));
@@ -196,7 +200,7 @@ fn crlf(s: &str) -> String {
 }
 
 fn fresh_boundary() -> String {
-    format!("harbor{}", Uuid::new_v4().as_simple())
+    format!("csmail{}", Uuid::new_v4().as_simple())
 }
 
 fn format_address_list(addrs: &[Address]) -> String {
@@ -262,6 +266,7 @@ mod tests {
             from: Address::new("alice@example.com"),
             to: vec![Address::new("bob@example.com")],
             cc: Vec::new(),
+            reply_to: None,
             subject: "hello".into(),
             body_text: "line one\nline two".into(), // bare \n on purpose
             body_html: None,
@@ -351,6 +356,14 @@ mod tests {
         // The control characters force RFC 2047 encoding, so the name is an
         // encoded-word on one line, not extra headers.
         assert!(msg.contains("From: =?utf-8?B?"));
+    }
+
+    #[test]
+    fn reply_to_is_emitted_from_authoritative_identity() {
+        let mut m = sample();
+        m.reply_to = Some(Address::new("replies@example.net"));
+        let text = String::from_utf8(m.build().unwrap()).unwrap();
+        assert!(text.contains("Reply-To: replies@example.net\r\n"));
     }
 
     #[test]

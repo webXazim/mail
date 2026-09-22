@@ -4,7 +4,7 @@ export type SpamSettings = { blocked: string[]; allowed: string[]; spamLevel: Sp
 
 export const defaultSpam: SpamSettings = { blocked: [], allowed: [], spamLevel: 'medium' }
 
-const spamKey = 'harbor-mail:spam'
+const spamKey = 'cs-mail:spam'
 
 const normalize = (address: string) => address.trim().toLowerCase()
 

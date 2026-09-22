@@ -1,137 +1,110 @@
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, RefreshCw } from 'lucide-react'
+import { publicApi, type PublicStatus, type PublicStatusComponent } from '../services/public'
 
-const components = [
-  { name: 'Email delivery', latency: '34 ms', uptime: '99.99%', status: 'operational' as const },
-  { name: 'API & sync', latency: '52 ms', uptime: '99.98%', status: 'operational' as const },
-  {
-    name: 'Calendar & scheduling',
-    latency: '28 ms',
-    uptime: '100.00%',
-    status: 'operational' as const,
-  },
-  {
-    name: 'Attachments & storage',
-    latency: '41 ms',
-    uptime: '99.97%',
-    status: 'operational' as const,
-  },
-  { name: 'Billing', latency: '39 ms', uptime: '100.00%', status: 'operational' as const },
-  {
-    name: 'Sign-in & identity',
-    latency: '46 ms',
-    uptime: '99.99%',
-    status: 'operational' as const,
-  },
-]
-
-const incidents = [
-  {
-    date: 'August 21, 2026',
-    title: 'Intermittent API latency in US-EAST',
-    duration: '42 min',
-    root: 'Upstream database failover',
-  },
-  {
-    date: 'July 10, 2026',
-    title: 'Calendar sync delay',
-    duration: '1 hour 12 min',
-    root: 'ICAL feed provider outage',
-  },
-  {
-    date: 'June 3, 2026',
-    title: 'Attachment downloads slow',
-    duration: '28 min',
-    root: 'CDN cache invalidation backlog',
-  },
-]
-
-const statusBadge = (status: 'operational' | 'degraded' | 'incident') => {
-  if (status === 'operational')
-    return (
-      <span className="status-pill status-pill--ok">
-        <CheckCircle2 size={13} />
-        Operational
-      </span>
-    )
-  if (status === 'degraded')
-    return (
-      <span className="status-pill status-pill--warn">
-        <AlertTriangle size={13} />
-        Degraded
-      </span>
-    )
-  return (
-    <span className="status-pill status-pill--error">
-      <AlertTriangle size={13} />
-      Incident
-    </span>
-  )
+const statusBadge = (status: PublicStatusComponent['status']) => {
+  if (status === 'operational') {
+    return <span className="status-pill status-pill--ok"><CheckCircle2 size={13} />Operational</span>
+  }
+  if (status === 'degraded') {
+    return <span className="status-pill status-pill--warn"><AlertTriangle size={13} />Degraded</span>
+  }
+  return <span className="status-pill status-pill--error"><AlertTriangle size={13} />Outage</span>
 }
 
+const timeFmt = (iso: string) =>
+  new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+
 export function StatusPage() {
+  const [data, setData] = useState<PublicStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setData(await publicApi.status())
+    } catch (reason) {
+      setData(null)
+      setError(reason instanceof Error ? reason.message : 'Live status is temporarily unavailable')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const operational = data?.status === 'operational'
+  const headline = data?.status === 'major_outage' ? 'Service interruption' : data?.status === 'degraded' ? 'Some systems degraded' : 'All systems operational'
+
   return (
     <div className="site-page">
       <section className="site-page__head site-page__head--center">
         <p className="eyebrow">Service status</p>
-        <h1>
-          All systems <span>operational</span>
-        </h1>
+        <h1>{data ? headline : 'Live system status'}</h1>
         <p className="site-page__intro">
-          30-day uptime 99.99% · Last updated September 11, 2026 at 12:00 PM UTC.
+          {data ? `Last checked ${timeFmt(data.updated_at)}.` : 'Status is read directly from CS Mail service health and incident records.'}
         </p>
+        <button type="button" className="secondary-button" onClick={() => void load()} disabled={loading}>
+          <RefreshCw size={14} /> {loading ? 'Checking…' : 'Refresh'}
+        </button>
       </section>
 
-      <div className="status-summary">
-        <span className="status-icon status-icon--ok">
-          <CheckCircle2 size={24} />
-        </span>
-        <strong>No active incidents</strong>
-        <span>Our team monitors performance around the clock.</span>
-      </div>
-
-      <section className="site-section">
-        <h2>Components</h2>
-        <div className="status-grid">
-          {components.map((component) => (
-            <div className="status-row" key={component.name}>
-              <div>
-                <strong>{component.name}</strong>
-                <small>
-                  {component.latency} · 30-day uptime {component.uptime}
-                </small>
-              </div>
-              {statusBadge(component.status)}
-            </div>
-          ))}
+      {error && (
+        <div className="status-summary">
+          <span className="status-icon status-icon--warn"><AlertTriangle size={24} /></span>
+          <strong>Status unavailable</strong>
+          <span>{error}. We are not assuming the service is operational while health data is unavailable.</span>
         </div>
-      </section>
+      )}
 
-      <section className="site-section">
-        <h2>Past incidents</h2>
-        {incidents.map((incident) => (
-          <div className="status-incident" key={incident.title}>
-            <div>
-              <strong>{incident.title}</strong>
-              <small>
-                {incident.duration} · Resolved · {incident.root}
-              </small>
-            </div>
-            <span className="status-incident__date">{incident.date}</span>
+      {data && (
+        <>
+          <div className="status-summary">
+            <span className={`status-icon ${operational ? 'status-icon--ok' : 'status-icon--warn'}`}>
+              {operational ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
+            </span>
+            <strong>{headline}</strong>
+            <span>{data.active_incidents === 0 ? 'No active incidents.' : `${data.active_incidents} active incident${data.active_incidents === 1 ? '' : 's'}.`}</span>
           </div>
-        ))}
-      </section>
+
+          <section className="site-section">
+            <h2>Components</h2>
+            <div className="status-grid">
+              {data.components.map((component) => (
+                <div className="status-row" key={component.key}>
+                  <div><strong>{component.name}</strong><small>Live dependency health</small></div>
+                  {statusBadge(component.status)}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="site-section">
+            <h2>Incident history</h2>
+            {data.incidents.length ? data.incidents.map((incident) => (
+              <div className="status-incident" key={incident.id}>
+                <div>
+                  <strong>{incident.title}</strong>
+                  <small>{incident.status} · {incident.impact}{incident.message ? ` · ${incident.message}` : ''}</small>
+                </div>
+                <span className="status-incident__date">{timeFmt(incident.started_at)}</span>
+              </div>
+            )) : <p className="settings-hint">No incidents have been recorded in the current history window.</p>}
+          </section>
+        </>
+      )}
 
       <section className="home-band">
         <div>
-          <p className="eyebrow">Incidents are rare</p>
-          <h2>
-            When they happen, we <span>tell you</span> — honestly and fast.
-          </h2>
+          <p className="eyebrow">Need help?</p>
+          <h2>Report a problem to <span>CS Mail support</span>.</h2>
         </div>
-        <Link to="/contact" className="secondary-button">
-          Report an issue <ArrowRight size={14} />
-        </Link>
+        <Link to="/contact" className="secondary-button">Report an issue <ArrowRight size={14} /></Link>
       </section>
     </div>
   )

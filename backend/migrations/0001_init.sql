@@ -1,4 +1,4 @@
--- Harbor Mail: business mailbox metadata (NOT the mail store; Stalwart holds that).
+-- CS Mailer: business mailbox metadata (NOT the mail store; Stalwart holds that).
 -- One row per business user. Passwords are argon2 hashes, never plaintext.
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

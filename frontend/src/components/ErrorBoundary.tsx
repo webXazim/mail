@@ -6,14 +6,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
     return { failed: true }
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Harbor Mail render error', error, info)
+    console.error('CS Mail render error', error, info)
   }
   render() {
     if (!this.state.failed) return this.props.children
     return (
       <main className="error-page">
         <section className="error-page__card" role="alert">
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>Something went wrong</h1>
           <p>An unexpected error interrupted this view. Reload to continue, or try again now.</p>
           <div className="error-page__actions">

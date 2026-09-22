@@ -1,4 +1,7 @@
-export type AccountAuditCategory = 'sign-in' | 'security' | 'billing' | 'general'
+import { apiFetch } from '../lib/api'
+import { isRemoteMail } from './remote-mail'
+
+export type AccountAuditCategory = 'sign-in' | 'security' | 'billing' | 'mail' | 'general'
 
 export type AccountAuditEntry = {
   id: string
@@ -8,67 +11,69 @@ export type AccountAuditEntry = {
   detail: string
 }
 
-const key = 'harbor-mail:account-audit'
+type ActivityPage = {
+  entries: AccountAuditEntry[]
+  has_more: boolean
+  next_before: string | null
+}
 
-const seed: AccountAuditEntry[] = [
+const key = 'cs-mail:account-audit'
+
+const demoEntries: AccountAuditEntry[] = [
   {
-    id: 'aud-1',
-    time: '2026-09-11T14:32:00.000Z',
+    id: 'demo-audit-1',
+    time: new Date().toISOString(),
     category: 'sign-in',
     action: 'Signed in',
-    detail: 'Chrome on macOS',
-  },
-  {
-    id: 'aud-2',
-    time: '2026-09-10T09:05:00.000Z',
-    category: 'security',
-    action: 'Email verified',
-    detail: 'You confirmed alex@harbor.co',
-  },
-  {
-    id: 'aud-3',
-    time: '2026-09-04T18:20:00.000Z',
-    category: 'billing',
-    action: 'Payment method updated',
-    detail: 'Added Visa ending in 4049',
-  },
-  {
-    id: 'aud-4',
-    time: '2026-08-28T11:47:00.000Z',
-    category: 'security',
-    action: 'Password changed',
-    detail: 'Changed from the security settings',
-  },
-  {
-    id: 'aud-5',
-    time: '2026-08-01T02:00:00.000Z',
-    category: 'billing',
-    action: 'Plan charged',
-    detail: 'INV-2026-033 · $8.00',
+    detail: 'Demo browser session',
   },
 ]
 
+const demoList = (): AccountAuditEntry[] => {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) return JSON.parse(raw) as AccountAuditEntry[]
+  } catch {
+    /* ignore demo cache errors */
+  }
+  return demoEntries
+}
+
 export const auditApi = {
   list(): AccountAuditEntry[] {
-    try {
-      const raw = localStorage.getItem(key)
-      if (raw) return JSON.parse(raw) as AccountAuditEntry[]
-    } catch {
-      /* ignore corrupt cache */
-    }
-    return seed
+    return isRemoteMail() ? [] : demoList()
   },
+
+  async page(category: 'all' | AccountAuditCategory = 'all', before?: string | null) {
+    if (!isRemoteMail()) {
+      const entries = demoList().filter((entry) => category === 'all' || entry.category === category)
+      return { entries, hasMore: false, nextBefore: null }
+    }
+    const query = new URLSearchParams({ limit: '50' })
+    if (category !== 'all') query.set('category', category)
+    if (before) query.set('before', before)
+    const page = await apiFetch<ActivityPage>(`/api/account/activity?${query}`)
+    return {
+      entries: page.entries ?? [],
+      hasMore: Boolean(page.has_more),
+      nextBefore: page.next_before ?? null,
+    }
+  },
+
+  /** Demo-only projection; authenticated activity is already recorded by the server. */
   add(category: AccountAuditCategory, action: string, detail: string) {
+    if (isRemoteMail()) return
     const entry: AccountAuditEntry = {
-      id: `aud-${Date.now()}`,
+      id: `demo-aud-${Date.now()}`,
       time: new Date().toISOString(),
       category,
       action,
       detail,
     }
-    localStorage.setItem(key, JSON.stringify([entry, ...this.list()].slice(0, 50)))
-  },
-  clear() {
-    localStorage.setItem(key, JSON.stringify([]))
+    try {
+      localStorage.setItem(key, JSON.stringify([entry, ...demoList()].slice(0, 50)))
+    } catch {
+      /* ignore demo cache errors */
+    }
   },
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run CS Mail production backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+RandomizedDelaySec=900
+Unit=cs-mail-backup.service
+
+[Install]
+WantedBy=timers.target

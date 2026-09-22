@@ -559,7 +559,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "harbor-api"
+name = "cs-mail-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -568,9 +568,16 @@ dependencies = [
  "base64",
  "chrono",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "jsonwebtoken",
+ "qrcode",
  "reqwest",
+ "data-encoding",
+ "hmac",
+ "idna",
+ "rand 0.8.8",
+ "sha1",
  "serde",
  "serde_json",
  "sha2",
@@ -1351,6 +1358,12 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "rand"

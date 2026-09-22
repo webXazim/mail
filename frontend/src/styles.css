@@ -1,5 +1,5 @@
 /* ================================================================== */
-/* Harbor Mail — stylesheet entry point                               */
+/* CS Mail — stylesheet entry point                               */
 /*                                                                    */
 /* Each screen owns its own stylesheet under src/styles/.             */
 /* Order below mirrors the original cascade (later wins).             */
@@ -23,6 +23,7 @@
 @import './styles/search.css';
 @import './styles/billing.css';
 @import './styles/public.css';
+@import './styles/business.css';
 /* ------------------------------------------------------------------ */
 /* Responsive (global) */
 /* ------------------------------------------------------------------ */
@@ -213,8 +214,8 @@
   }
   .reader-back__label {
     display: inline;
-    color: var(--a2t-copy);
-    font-family: var(--a2t-mono);
+    color: var(--cs-mail-copy);
+    font-family: var(--cs-mail-mono);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.14em;

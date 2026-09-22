@@ -49,18 +49,32 @@ export const scheduleLabel = (at: string): string =>
     minute: '2-digit',
   })
 
-export const buildScheduledMail = (entry: { id: string; draft: Draft; at: string }): Mail => ({
+export const buildScheduledMail = (entry: {
+  id: string
+  draft: Draft
+  at: string
+  status?: 'pending' | 'processing' | 'retry' | 'dead'
+  error?: string
+  attemptCount?: number
+  nextAttemptAt?: string
+}): Mail => ({
   id: entry.id,
   initials: 'AM',
   sender: 'You',
   email: entry.draft.to || 'Add recipients to send',
   subject: entry.draft.subject || '(no subject)',
   preview:
-    entry.draft.body.slice(0, 120) ||
-    (entry.draft.attachments.length ? 'Scheduled draft with attachment' : 'Blank scheduled draft'),
+    entry.status === 'dead'
+      ? `Delivery failed — ${entry.error || 'review and retry this scheduled message'}`
+      : entry.status === 'retry'
+        ? `Retrying delivery — ${entry.error || 'temporary delivery problem'}`
+        : entry.status === 'processing'
+          ? 'Sending now…'
+          : entry.draft.body.slice(0, 120) ||
+            (entry.draft.attachments.length ? 'Scheduled draft with attachment' : 'Blank scheduled draft'),
   time: scheduleLabel(entry.at),
-  label: 'Scheduled',
-  color: 'teal',
+  label: entry.status === 'dead' ? 'Failed' : entry.status === 'retry' ? 'Retrying' : 'Scheduled',
+  color: entry.status === 'dead' ? 'coral' : 'teal',
   unread: false,
   folder: 'Scheduled',
   to: entry.draft.to
@@ -79,7 +93,7 @@ const toneColors = ['coral', 'purple', 'blue', 'green', 'orange']
 export function buildReplyMail(draft: Draft, knownName?: string): Mail {
   const emails =
     (draft.to + ',' + draft.cc).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []
-  const email = emails[0]?.toLowerCase() ?? 'someone@harbor.co'
+  const email = emails[0]?.toLowerCase() ?? 'someone@crescentsphere.com'
   const name = knownName?.trim() || email.split('@')[0]?.replace(/[._-]+/g, ' ') || 'Someone'
   const display = name.replace(/\b\w/g, (char) => char.toUpperCase())
   const initials =
@@ -100,6 +114,6 @@ export function buildReplyMail(draft: Draft, knownName?: string): Mail {
     label: 'Inbox',
     color: toneColors[Math.floor(Math.random() * toneColors.length)],
     unread: true,
-    to: ['alex@harbor.co'],
+    to: ['alex@crescentsphere.com'],
   }
 }

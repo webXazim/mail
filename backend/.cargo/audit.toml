@@ -1,0 +1,16 @@
+# CS Mail cargo-audit policy. cargo-audit reads project config from
+# .cargo/audit.toml. Keep exceptions minimal and documented.
+[advisories]
+# RUSTSEC-2023-0071 (rsa / Marvin timing side-channel) currently has no fixed
+# release. CS Mail does not perform attacker-controlled RSA private-key
+# decryption/signing on a network request path; the dependency is transitive.
+# Remove this exception as soon as an upstream patched release is available.
+ignore = ["RUSTSEC-2023-0071"]
+severity_threshold = "low"
+
+[output]
+deny = ["unmaintained"]
+show_tree = true
+
+[yanked]
+enabled = true

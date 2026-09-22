@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Check,
+  Building2,
   CalendarDays,
   ChevronDown,
   CircleHelp,
+  Bell,
   CreditCard,
   Folder,
   Layers,
@@ -29,9 +31,12 @@ import { foldersApi } from '../../services/folders'
 import { labelsApi } from '../../services/labels'
 import { settingsApi } from '../../services/settings'
 import { authApi } from '../../services/auth'
-import { useRole } from '../../services/profile'
+import { currentVirtualCounts } from '../../services/remote-mail'
+import { profileApi, useProfile, useRole } from '../../services/profile'
 import { primaryAccountId, unifiedViewId } from '../../services/accounts'
 import { ManageFolders } from '../ManageFolders'
+import { BrandIdentity } from '../BrandIdentity'
+import { isLocalAdminOrigin } from '../../lib/admin-origin'
 import type { Mailbox } from '../../types'
 
 type SidebarProps = {
@@ -42,16 +47,36 @@ type SidebarProps = {
 }
 
 const clampWidth = (value: number) => Math.max(210, Math.min(360, value))
+const isRemoteMode = (mailboxes: { id: string }[]) => mailboxes.length > 0
 
 export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: SidebarProps) {
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { mailbox, scheduledCount, accounts, activeAccount, setActiveAccount } = useMail()
+  const { mailbox, scheduledCount, accounts, activeAccount, setActiveAccount, remoteMailboxes } = useMail()
   const role = useRole()
+  const signedInProfile = useProfile()
+  const platformOnly = signedInProfile?.has_mailbox === false
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
-  const counts = useMemo(() => getFolderCounts(mailbox), [mailbox])
+  const counts = useMemo(() => {
+    if (!isRemoteMode(remoteMailboxes)) return getFolderCounts(mailbox)
+    const byRole = new Map(remoteMailboxes.filter((item) => item.role).map((item) => [item.role, item]))
+    const trash = byRole.get('trash')
+    const virtual = currentVirtualCounts()
+    return {
+      Inbox: byRole.get('inbox')?.total ?? 0,
+      Unread: virtual.unread,
+      Starred: virtual.starred,
+      Snoozed: mailbox.filter((mail) => mail.folder === 'Snoozed').length,
+      Sent: byRole.get('sent')?.total ?? 0,
+      Drafts: byRole.get('drafts')?.total ?? 0,
+      'All Mail': virtual.all,
+      Archive: byRole.get('archive')?.total ?? 0,
+      Spam: byRole.get('junk')?.total ?? 0,
+      Trash: trash?.total ?? 0,
+    }
+  }, [mailbox, remoteMailboxes])
   const profile = useMemo(() => {
     const active = accounts.find((account) => account.id === activeAccount) ?? accounts[0]
     const displayName =
@@ -65,11 +90,19 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
     return { displayName, initials, email: active.email, color: active.color }
   }, [accounts, activeAccount])
   const storage = useMemo(() => {
+    if (signedInProfile?.storage) {
+      const used = signedInProfile.storage.used_bytes / 1024 ** 3
+      const total = signedInProfile.storage.total_bytes / 1024 ** 3
+      return {
+        used: used >= 10 ? used.toFixed(0) : used.toFixed(1),
+        total: total >= 10 ? total.toFixed(0) : total.toFixed(1),
+        percent: Math.min(100, Math.max(0, Math.round(signedInProfile.storage.pct))),
+      }
+    }
     const attachments = mailbox.filter((mail) => mail.attachment).length
-    const used =
-      0.4 + mailbox.filter((mail) => mail.folder !== 'Trash').length * 0.002 + attachments * 0.012
-    return { used: used.toFixed(1), percent: Math.min(100, Math.round((used / 15) * 100)) }
-  }, [mailbox])
+    const used = 0.4 + mailbox.filter((mail) => mail.folder !== 'Trash').length * 0.002 + attachments * 0.012
+    return { used: used.toFixed(1), total: '15', percent: Math.min(100, Math.round((used / 15) * 100)) }
+  }, [mailbox, signedInProfile?.storage])
   const [resizing, setResizing] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [moreFoldersOpen, setMoreFoldersOpen] = useState(false)
@@ -77,6 +110,14 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const [manageFoldersOpen, setManageFoldersOpen] = useState(false)
   const labels = labelsApi.list()
   const customFolders = foldersApi.list()
+  useEffect(() => {
+    const refreshStorage = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<{ kind?: string }>).detail
+      if (detail?.kind === 'quota') void profileApi.refresh()
+    }
+    window.addEventListener('cs-mail-realtime', refreshStorage)
+    return () => window.removeEventListener('cs-mail-realtime', refreshStorage)
+  }, [])
   useEffect(() => {
     if (!profileOpen) return
     const close = () => setProfileOpen(false)
@@ -118,7 +159,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
     onCloseMobile()
   }
   const goCustomFolder = (id: string) => {
-    navigate(`/mail/folders/${id}`)
+    navigate(`/mail/folders/${encodeURIComponent(id)}`)
     onCloseMobile()
   }
   const closeMenu = () => setProfileOpen(false)
@@ -166,6 +207,50 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
       </button>
     )
   }
+  if (platformOnly) {
+    return (
+      <aside id="sidebar" className={`sidebar ${mobile ? 'sidebar--open' : ''}`} aria-label="Business navigation">
+        <div className="brand-row">
+          <a className="brand" href="/" aria-label="CS Mail home"><BrandIdentity /></a>
+          <button className="icon-button sidebar-close" onClick={onCloseMobile} aria-label="Close navigation"><X size={17} /></button>
+        </div>
+        <section className="sidebar-workspace">
+          <p className="nav-heading">Business</p>
+          <button className={`folder-link ${pathname.startsWith('/mail/business') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/business')}>
+            <Building2 size={17} /><span>Businesses</span>
+          </button>
+          <button className={`folder-link ${pathname.startsWith('/mail/notifications') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/notifications')}>
+            <Bell size={17} /><span>Notifications</span>
+          </button>
+          <button className={`folder-link ${pathname.startsWith('/mail/settings') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/settings')}>
+            <Settings2 size={17} /><span>Account settings</span>
+          </button>
+          <button className={`folder-link ${pathname.startsWith('/mail/pricing') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/pricing')}>
+            <CreditCard size={17} /><span>Plans</span>
+          </button>
+          {role === 'admin' && isLocalAdminOrigin() && (
+            <button className={`folder-link ${pathname.startsWith('/mail/admin') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin')}>
+              <Server size={17} /><span>Platform admin</span>
+            </button>
+          )}
+        </section>
+        <div className="sidebar-footer">
+          <div className="business-placeholder">
+            <strong>No hosted mailbox yet</strong>
+            <p>Verify a business domain before mail features are enabled.</p>
+          </div>
+          <div className="profile-wrap">
+            <div className="profile">
+              <span className={`avatar avatar--${profile.color}`}>{profile.initials}</span>
+              <span><strong>{profile.displayName}</strong><small>{signedInProfile?.login_email || profile.email}</small></span>
+            </div>
+            <button type="button" className="folder-link" onClick={signOut}><LogOut size={16} /><span>Sign out</span></button>
+          </div>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside
       id="sidebar"
@@ -178,11 +263,8 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         onMouseDown={() => setResizing(true)}
       />
       <div className="brand-row">
-        <a className="brand" href="/">
-          <span className="brand-mark">H</span>
-          <span>
-            harbor<span>mail</span>
-          </span>
+        <a className="brand" href="/" aria-label="CS Mail home">
+          <BrandIdentity />
         </a>
         <button
           className="icon-button sidebar-close"
@@ -284,8 +366,8 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
           </button>
         </div>
         {customFolders.map((customFolder) => {
-          const count = mailbox.filter((mail) => mail.folder === customFolder.name).length
-          const active = pathname.startsWith(`/mail/folders/${customFolder.id}`)
+          const count = customFolder.total ?? mailbox.filter((mail) => mail.folder === customFolder.name).length
+          const active = pathname.startsWith(`/mail/folders/${encodeURIComponent(customFolder.id)}`)
           return (
             <button
               key={customFolder.id}
@@ -346,7 +428,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         <div className="storage">
           <span>Storage</span>
           <strong>
-            {storage.used} GB <small>/ 15 GB</small>
+            {storage.used} GB <small>/ {storage.total} GB</small>
           </strong>
           <div className="storage-bar">
             <span style={{ width: `${storage.percent}%` }} />
@@ -422,6 +504,15 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
                 type="button"
                 role="menuitem"
                 className="profile-menu__item"
+                onClick={() => goAccount('/mail/business')}
+              >
+                <Building2 size={14} />
+                Business
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="profile-menu__item"
                 onClick={() => goAccount('/mail/settings')}
               >
                 <Settings2 size={14} />
@@ -436,7 +527,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
                 <CreditCard size={14} />
                 Billing
               </button>
-              {role === 'admin' && (
+              {role === 'admin' && isLocalAdminOrigin() && (
                 <button
                   type="button"
                   role="menuitem"

@@ -8,6 +8,7 @@ import { CommandPalette } from '../CommandPalette'
 import { Onboarding } from '../Onboarding'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { useProfile } from '../../services/profile'
 
 const Composer = lazy(() => import('../Composer').then((module) => ({ default: module.Composer })))
 
@@ -27,6 +28,8 @@ const goShortcuts: Record<string, string> = {
 export function MailLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const signedInProfile = useProfile()
+  const hasMailbox = signedInProfile?.has_mailbox !== false
   const {
     toasts,
     dismissToast,
@@ -76,11 +79,11 @@ export function MailLayout() {
       const target = event.target as HTMLElement
       const typing =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-      if (event.key.toLowerCase() === 'c' && !typing) {
+      if (hasMailbox && event.key.toLowerCase() === 'c' && !typing) {
         event.preventDefault()
         openCompose()
       }
-      if (event.key === '?') {
+      if (hasMailbox && event.key === '?') {
         event.preventDefault()
         setHelpOpen((value) => !value)
       }
@@ -99,7 +102,7 @@ export function MailLayout() {
         )
           navigate(`/mail/${folderPath(folder)}`)
       }
-      if (!typing) {
+      if (hasMailbox && !typing) {
         if (event.key.toLowerCase() === 'g' && !gPendingRef.current) {
           gPendingRef.current = true
           event.preventDefault()
@@ -120,7 +123,7 @@ export function MailLayout() {
     }
     window.addEventListener('keydown', handle)
     return () => window.removeEventListener('keydown', handle)
-  }, [folder, adminOpen, navigate, openCompose, closeCompose])
+  }, [folder, adminOpen, navigate, openCompose, closeCompose, hasMailbox])
 
   return (
     <div
@@ -145,13 +148,14 @@ export function MailLayout() {
         {offline && (
           <div className="offline-banner" role="status">
             <WifiOff size={14} />
-            You're offline — messages are saved locally and will sync when you reconnect.
+            You're offline — server changes will resume when you reconnect.
           </div>
         )}
         <Topbar
           onOpenMobile={() => setMobile(true)}
           mobileOpen={mobile}
           onHelp={() => setHelpOpen(true)}
+          mailEnabled={hasMailbox}
         />
         <Outlet key={location.pathname} />
       </main>
@@ -186,7 +190,7 @@ export function MailLayout() {
           ))}
         </div>
       )}
-      {helpOpen && (
+      {hasMailbox && helpOpen && (
         <div className="help-layer" onClick={() => setHelpOpen(false)}>
           <section
             className="help-panel"
@@ -198,7 +202,7 @@ export function MailLayout() {
           >
             <header>
               <div>
-                <p className="eyebrow">Harbor Mail</p>
+                <p className="eyebrow">CS Mail</p>
                 <h2 id="help-title">Keyboard shortcuts</h2>
               </div>
               <button
@@ -312,7 +316,7 @@ export function MailLayout() {
           </section>
         </div>
       )}
-      <CommandPalette
+      {hasMailbox && <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onNavigate={(path) => navigate(path)}
@@ -323,9 +327,9 @@ export function MailLayout() {
         onOpenAdmin={() => navigate('/mail/admin')}
         onOpenCalendar={() => navigate('/mail/calendar')}
         onToggleHelp={() => setHelpOpen(true)}
-      />
-      <Onboarding />
-      {composeOpen && (
+      />}
+      {hasMailbox && <Onboarding />}
+      {hasMailbox && composeOpen && (
         <Suspense fallback={null}>
           <Composer
             close={closeCompose}

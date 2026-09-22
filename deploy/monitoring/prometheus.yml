@@ -9,10 +9,10 @@ rule_files:
   - prometheus.rules.yml
 
 scrape_configs:
-  # The only scrape target in the stack: the Harbor API, which is already
+  # The only scrape target in the stack: the CS Mail API, which is already
   # DB-aware and DB-gated (L189). Metrics are hand-rolled Prometheus text
   # format exported at /api/metrics (WS6.3) on the same port as the API.
-  - job_name: harbor-api
+  - job_name: cs-mail-api
     metrics_path: /api/metrics
     scheme: http
     static_configs:

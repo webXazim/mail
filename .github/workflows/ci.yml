@@ -26,18 +26,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: harbor
-          POSTGRES_PASSWORD: harbor
-          POSTGRES_DB: harbor_test
+          POSTGRES_USER: csmail
+          POSTGRES_PASSWORD: csmail
+          POSTGRES_DB: csmail_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U harbor"
+          --health-cmd "pg_isready -U csmail"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      TEST_DATABASE_URL: postgres://harbor:harbor@localhost:5432/harbor_test
+      TEST_DATABASE_URL: postgres://csmail:csmail@localhost:5432/csmail_test
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
@@ -80,10 +80,8 @@ jobs:
       - name: Build
         run: npm run build
 
-  # Informational only. `cargo audit` is red on arrival because of advisories
-  # with no available fix (rsa / RUSTSEC-2023-0071) and a pending sqlx 0.7 -> 0.8
-  # upgrade (RUSTSEC-2024-0363). Do not make this blocking until those land, or
-  # every PR fails. See docs/LAUNCH.md.
+  # Blocking dependency audit. The only accepted RustSec exception lives in
+  # backend/.cargo/audit.toml; all other advisories remain release-blocking.
   audit:
     name: Dependency audit (blocking)
     runs-on: ubuntu-latest
@@ -117,12 +115,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t harbor-api:ci ./backend
+        run: docker build -t cs-mail-api:ci ./backend
       - name: Scan image (fail on CRITICAL)
         uses: aquasecurity/trivy-action@0.30.0
         with:
           scan-type: image
-          image-ref: harbor-api:ci
+          image-ref: cs-mail-api:ci
           format: sarif
           output: trivy.sarif
           severity: CRITICAL
@@ -132,7 +130,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.30.0
         with:
           scan-type: image
-          image-ref: harbor-api:ci
+          image-ref: cs-mail-api:ci
           format: cyclonedx
           output: sbom.cdx.json
       - uses: actions/upload-artifact@v4
@@ -142,26 +140,46 @@ jobs:
             trivy.sarif
             sbom.cdx.json
 
-  # WS8.4: post-deploy smoke (health -> register -> login -> refresh -> use the
-  # rotated token). Boots api + db only (no Stalwart needed) with verification
-  # relaxed and the provisioning bridge off.
+  # API + DB only; no Stalwart dependency. This uses the dedicated CI compose
+  # so the repository root has no ambiguous production/development compose file.
   smoke:
-    name: Post-deploy smoke (health/register/login/refresh)
+    name: API smoke (health/register/login/refresh)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Boot api + db
-        env:
-          HARBOR_JWT_SECRET: ci-only-secret-XXXXXXXXXXXXXXXXXXXXXXXXXX
-          HARBOR_REQUIRE_VERIFICATION: 'false'
-          HARBOR_MAIL_ADMIN_URL: ''
-          HARBOR_CORS_ORIGINS: http://localhost:5174
-        run: |
-          docker compose up -d db
-          docker compose up -d --no-deps api
+      - name: Boot CI API + database
+        run: docker compose -f deploy/development/ci-compose.yml up -d --build
       - name: Run smoke test
-        shell: pwsh
-        run: ./deploy/smoke-test.ps1 -BaseUrl http://127.0.0.1:8080
+        run: ./deploy/production/smoke-test.sh http://127.0.0.1:8080
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f deploy/development/ci-compose.yml logs --tail=200
+
+  release-layout:
+    name: Production release layout/scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: find deploy/production -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Verify clean production release
+        run: ./deploy/production/verify-release.sh
+
+  launch-cert-static:
+    name: Upgrade 36 release certification (static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release contract/topology
+        run: |
+          python3 deploy/production/certify_launch.py \
+            --static-only \
+            --root "$PWD" \
+            --report /tmp/cs-mail-launch-cert-static.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launch-cert-static
+          path: /tmp/cs-mail-launch-cert-static.json
 
   # WS8.5 / LAUNCH L190: Monitoring gate — BLOCKING. Runs the exact promtool
   # (v2.54.1, the same tag compose deploys) against the alert-rule unit tests.

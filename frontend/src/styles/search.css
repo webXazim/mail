@@ -34,7 +34,7 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   cursor: pointer;
 }
 .search-advanced__actions {
@@ -43,14 +43,14 @@
   gap: 8px;
   margin-top: 4px;
   padding-top: 12px;
-  border-top: 1px solid var(--a2t-line-soft);
+  border-top: 1px solid var(--cs-mail-line-soft);
 }
 .search-advanced__actions button {
   padding: 6px 12px;
-  border: 1px solid var(--a2t-line-soft);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-line-soft);
+  border-radius: var(--cs-mail-radius);
   background: transparent;
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   cursor: pointer;
   transition:
@@ -58,18 +58,18 @@
     color 0.12s;
 }
 .search-advanced__actions button:hover {
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-white);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-white);
 }
 .search-advanced__actions .search-advanced__submit {
-  background: var(--a2t-accent);
-  border-color: var(--a2t-accent);
-  color: var(--a2t-ink);
+  background: var(--cs-mail-accent);
+  border-color: var(--cs-mail-accent);
+  color: var(--cs-mail-ink);
   font-weight: 600;
 }
 .search-advanced__actions .search-advanced__submit:hover {
-  background: var(--a2t-accent-hover);
-  color: var(--a2t-ink);
+  background: var(--cs-mail-accent-hover);
+  color: var(--cs-mail-ink);
 }
 
 /* ---- mobile action sheet (search & mail list) ---- */
@@ -95,8 +95,8 @@
   width: min(340px, 92vw);
   max-height: 100vh;
   overflow-y: auto;
-  border: 1px solid var(--a2t-line-strong);
-  background: var(--a2t-panel);
+  border: 1px solid var(--cs-mail-line-strong);
+  background: var(--cs-mail-panel);
 }
 .mobile-sheet__head {
   display: flex;
@@ -104,25 +104,25 @@
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .mobile-sheet__head strong {
   display: block;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 13px;
   font-weight: 600;
 }
 .mobile-sheet__head span {
   display: block;
   margin-top: 4px;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 11px;
 }
 .mobile-sheet__grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1px;
-  background: var(--a2t-line-soft);
+  background: var(--cs-mail-line-soft);
 }
 .mobile-sheet__grid button {
   display: flex;
@@ -131,13 +131,13 @@
   gap: 6px;
   padding: 16px 8px;
   border: 0;
-  background: var(--a2t-panel);
-  color: var(--a2t-silver);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-silver);
   font-size: 11px;
   cursor: pointer;
 }
 .mobile-sheet__grid button:active {
-  background: var(--a2t-panel-raised);
+  background: var(--cs-mail-panel-raised);
 }
 .mobile-sheet__list button {
   display: flex;
@@ -146,15 +146,15 @@
   width: 100%;
   padding: 13px 16px;
   border: 0;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
   background: transparent;
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 .mobile-sheet__list button:active {
-  background: var(--a2t-panel-raised);
+  background: var(--cs-mail-panel-raised);
 }
 .mobile-sheet__expand {
   justify-content: space-between;
@@ -163,11 +163,11 @@
   transform: rotate(180deg);
 }
 .mobile-sheet__sub {
-  background: var(--a2t-bg);
+  background: var(--cs-mail-bg);
 }
 .mobile-sheet__body {
   padding: 14px;
 }
 .mobile-sheet__selected {
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }

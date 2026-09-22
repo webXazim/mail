@@ -1,6 +1,7 @@
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { CalendarDays } from 'lucide-react'
 import { legalDocs, legalNav, type LegalDoc } from '../lib/legal'
+import { BrandIdentity } from '../components/BrandIdentity'
 
 function LegalPageInner({ doc }: { doc: LegalDoc }) {
   const { hash } = useLocation()
@@ -9,11 +10,8 @@ function LegalPageInner({ doc }: { doc: LegalDoc }) {
   return (
     <main className="legal-page">
       <header className="legal-head">
-        <Link to="/login" className="legal-brand">
-          <span className="brand-mark">H</span>
-          <strong>
-            harbor<span>mail</span>
-          </strong>
+        <Link to="/" className="legal-brand" aria-label="CS Mail home">
+          <BrandIdentity />
         </Link>
         <nav className="legal-nav" aria-label="Legal documents">
           {legalNav.map((item) => (
@@ -46,7 +44,7 @@ function LegalPageInner({ doc }: { doc: LegalDoc }) {
         </aside>
 
         <article className="legal-content">
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>{doc.title}</h1>
           <p className="legal-updated">
             <CalendarDays size={13} /> Last updated {doc.updated}
@@ -65,9 +63,9 @@ function LegalPageInner({ doc }: { doc: LegalDoc }) {
 
       <footer className="legal-foot">
         <span>
-          Questions? <a href="mailto:legal@harbor.co">legal@harbor.co</a>
+          Questions? <a href="mailto:legal@crescentsphere.com">legal@crescentsphere.com</a>
         </span>
-        <span>© 2026 Harbor Mail, Inc.</span>
+        <span>© 2026 CS Mail</span>
       </footer>
     </main>
   )

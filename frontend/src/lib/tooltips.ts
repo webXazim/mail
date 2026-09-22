@@ -64,7 +64,7 @@ export function initTooltips() {
   if (tooltip) return
   if (!document.body) return
   tooltip = document.createElement('div')
-  tooltip.className = 'a2t-tooltip'
+  tooltip.className = 'cs-mail-tooltip'
   tooltip.setAttribute('role', 'tooltip')
   document.body.appendChild(tooltip)
 

@@ -50,10 +50,11 @@ import { vacationApi } from '../services/vacation'
 import { useMail } from '../state/mail/MailContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useMailListKeyboard } from '../hooks/useMailListKeyboard'
-import { composeToDraft, formatTime, isRemoteMail, remoteDraftApi } from '../services/remote-mail'
+import { composeToDraft, fetchMailPage, formatTime, isRemoteMail, remoteDraftApi } from '../services/remote-mail'
 import { NotFoundPage } from './NotFoundPage'
 import type { MailActionKind } from '../state/mail/mailboxReducer'
 import type { Draft, Mail } from '../types'
+import type { RealtimeEvent } from '../services/ws'
 
 const pageSize = 25
 
@@ -61,7 +62,7 @@ const toDraftMail = (draft: Draft): Mail => ({
   id: 'draft-local',
   initials: 'AM',
   sender: 'You',
-  email: 'alex@harbor.co',
+  email: 'alex@crescentsphere.com',
   subject: draft.subject || '(no subject)',
   preview:
     draft.body.slice(0, 120) ||
@@ -82,6 +83,9 @@ export function MailListPage() {
   const isMobile = useIsMobile()
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
+  const customMailboxId = pathname.match(/\/mail\/folders\/([^/]+)/)?.[1]
+    ? decodeURIComponent(pathname.match(/\/mail\/folders\/([^/]+)/)?.[1] ?? '')
+    : null
   const {
     mailbox,
     loading,
@@ -100,6 +104,7 @@ export function MailListPage() {
     reload,
     notify,
     importMails,
+    mergeRemoteMails,
     undoAction,
     toasts,
     dismissToast,
@@ -114,6 +119,15 @@ export function MailListPage() {
   const [filters, setFilters] = useState({ unread: false, starred: false, attachment: false })
   const [trashConfirm, setTrashConfirm] = useState(false)
   const [page, setPage] = useState(1)
+  const [remoteRows, setRemoteRows] = useState<Mail[]>([])
+  const [remoteTotal, setRemoteTotal] = useState(0)
+  const [remoteHasMore, setRemoteHasMore] = useState(false)
+  const [remoteAnchor, setRemoteAnchor] = useState<string | null>(null)
+  const [remoteQueryState, setRemoteQueryState] = useState<string | null>(null)
+  const [remoteLoading, setRemoteLoading] = useState(false)
+  const [remoteError, setRemoteError] = useState(false)
+  const [mailForwarding, setMailForwarding] = useState(() => forwardingApi.load())
+  const [mailVacation, setMailVacation] = useState(() => vacationApi.load())
   const [sheet, setSheet] = useState<Mail | null>(null)
   const [sheetSection, setSheetSection] = useState<'snooze' | 'label' | 'move' | null>(null)
 
@@ -150,17 +164,56 @@ export function MailListPage() {
       cancelled = true
     }
   }, [fetchServerDrafts])
-  const [scheduledList, setScheduledList] = useState(() => scheduleApi.list())
   useEffect(() => {
-    if (!isRemoteMail() || folder !== 'Scheduled') return
+    if (folder !== 'Inbox') return
     let cancelled = false
-    void scheduleApi.refresh().then((list) => {
-      if (!cancelled) setScheduledList(list)
-    })
+    void Promise.all([forwardingApi.refresh(), vacationApi.refresh()])
+      .then(([forwardResult, vacationResult]) => {
+        if (cancelled) return
+        setMailForwarding(forwardResult.forwarding)
+        setMailVacation(vacationResult.vacation)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [folder])
+
+  const [scheduledList, setScheduledList] = useState(() => scheduleApi.list())
+  useEffect(() => {
+    if (!isRemoteMail() || folder !== 'Scheduled') return
+    let cancelled = false
+    const refresh = () => {
+      void scheduleApi
+        .refresh()
+        .then((list) => {
+          if (!cancelled) setScheduledList(list)
+        })
+        .catch(() => {})
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 30000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [folder])
+
+  useEffect(() => {
+    if (!isRemoteMail()) return
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (!detail || detail.kind !== 'resource-changed') return
+      if (detail.payload.resource === 'drafts' && folder === 'Drafts') {
+        void fetchServerDrafts().then(setServerDrafts).catch(() => {})
+      }
+      if (detail.payload.resource === 'schedule' && folder === 'Scheduled') {
+        void scheduleApi.refresh().then(setScheduledList).catch(() => {})
+      }
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [fetchServerDrafts, folder])
   useEffect(() => {
     void receiptsApi.refresh()
   }, [])
@@ -202,6 +255,19 @@ export function MailListPage() {
     () => new Map(scheduledList.map((entry) => [entry.id, entry])),
     [scheduledList],
   )
+  const retryScheduled = useCallback(
+    async (id: string) => {
+      try {
+        await scheduleApi.retry(id)
+        const next = await scheduleApi.refresh()
+        setScheduledList(next)
+        notify('Scheduled delivery queued for retry')
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Could not retry scheduled delivery')
+      }
+    },
+    [notify],
+  )
   const labelOf = useMemo(() => new Map(mailbox.map((mail) => [mail.id, mail.label])), [mailbox])
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -213,6 +279,78 @@ export function MailListPage() {
     return counts
   }, [mailbox])
 
+  const remotePaged = isRemoteMail() && !query && !['Drafts', 'Scheduled', 'Snoozed'].includes(folder)
+  const remoteSort = useMemo(() => {
+    if (sortKey === 'oldest') return 'received_asc' as const
+    if (sortKey === 'sender-az') return 'sender_asc' as const
+    if (sortKey === 'sender-za') return 'sender_desc' as const
+    if (sortKey === 'subject-az') return 'subject_asc' as const
+    if (sortKey === 'subject-za') return 'subject_desc' as const
+    return 'received_desc' as const
+  }, [sortKey])
+
+  const loadRemotePage = useCallback(async (reset: boolean) => {
+    if (!remotePaged) return
+    setRemoteLoading(true)
+    setRemoteError(false)
+    try {
+      const result = await fetchMailPage(folder, {
+        limit: 50,
+        anchor: reset ? null : remoteAnchor,
+        queryState: reset ? null : remoteQueryState,
+        sort: remoteSort,
+        unread: filters.unread,
+        starred: filters.starred,
+        attachment: filters.attachment,
+        mailboxId: customMailboxId,
+      })
+      if (!reset && result.resetRequired) {
+        const fresh = await fetchMailPage(folder, {
+          limit: 50,
+          sort: remoteSort,
+          unread: filters.unread,
+          starred: filters.starred,
+          attachment: filters.attachment,
+          mailboxId: customMailboxId,
+        })
+        setRemoteRows(fresh.mails)
+        mergeRemoteMails(fresh.mails)
+        setRemoteTotal(fresh.total)
+        setRemoteHasMore(fresh.hasMore)
+        setRemoteAnchor(fresh.nextAnchor)
+        setRemoteQueryState(fresh.queryState)
+        setPage(1)
+      } else {
+        setRemoteRows((current) => {
+          if (reset) return result.mails
+          const seen = new Set(current.map((mail) => mail.id))
+          return [...current, ...result.mails.filter((mail) => !seen.has(mail.id))]
+        })
+        mergeRemoteMails(result.mails)
+        setRemoteTotal(result.total)
+        setRemoteHasMore(result.hasMore)
+        setRemoteAnchor(result.nextAnchor)
+        setRemoteQueryState(result.queryState)
+      }
+    } catch {
+      setRemoteError(true)
+    } finally {
+      setRemoteLoading(false)
+    }
+  }, [remotePaged, folder, customMailboxId, remoteAnchor, remoteQueryState, remoteSort, filters.unread, filters.starred, filters.attachment, mergeRemoteMails])
+
+  useEffect(() => {
+    if (!remotePaged) return
+    setPage(1)
+    setRemoteRows([])
+    setRemoteAnchor(null)
+    setRemoteQueryState(null)
+    void loadRemotePage(true)
+    // loadRemotePage intentionally includes cursor state; a reset must only
+    // rerun when the view/filter/sort changes, not after every fetched page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remotePaged, folder, customMailboxId, remoteSort, filters.unread, filters.starred, filters.attachment])
+
   const filtered = useMemo(() => {
     if (folder === 'Scheduled') return scheduledList.map(buildScheduledMail)
     if (folder === 'Drafts') {
@@ -223,21 +361,41 @@ export function MailListPage() {
   }, [folder, mailbox, query, category, draftsFolder, scheduledList, serverDrafts])
 
   const visiblePool = useMemo(() => {
+    if (remotePaged) {
+      const current = new Map(mailbox.map((mail) => [mail.id, mail]))
+      return remoteRows.map((mail) => current.get(mail.id) ?? mail).filter((mail) => {
+        if (filters.unread && !mail.unread) return false
+        if (filters.starred && !mail.starred) return false
+        if (filters.attachment && !mail.attachment) return false
+        if (folder === 'Unread') return mail.unread && mail.folder !== 'Trash'
+        if (folder === 'Starred') return Boolean(mail.starred) && mail.folder !== 'Trash'
+        if (folder === 'All Mail') return mail.folder !== 'Trash'
+        return (mail.folder || 'Inbox') === folder
+      })
+    }
     let items = filtered
     if (filters.unread) items = items.filter((mail) => mail.unread)
     if (filters.starred) items = items.filter((mail) => mail.starred)
     if (filters.attachment) items = items.filter((mail) => mail.attachment)
     items = sortMails(items, sortKey)
     return items
-  }, [filtered, sortKey, filters])
+  }, [remotePaged, remoteRows, mailbox, folder, filtered, sortKey, filters])
 
-  const pageCount = Math.max(1, Math.ceil(visiblePool.length / pageSize))
+  const totalForPaging = remotePaged ? remoteTotal : visiblePool.length
+  const pageCount = Math.max(1, Math.ceil(totalForPaging / pageSize))
   const currentPage = Math.min(page, pageCount)
   const visible = useMemo(
     () => visiblePool.slice((currentPage - 1) * pageSize, currentPage * pageSize),
     [visiblePool, currentPage],
   )
-  const goToPage = (next: number) => setPage(Math.max(1, Math.min(pageCount, next)))
+  const goToPage = async (next: number) => {
+    const target = Math.max(1, Math.min(pageCount, next))
+    const required = target * pageSize
+    if (remotePaged && required > visiblePool.length && remoteHasMore && !remoteLoading) {
+      await loadRemotePage(false)
+    }
+    setPage(target)
+  }
   const activeFilterCount =
     Number(filters.unread) + Number(filters.starred) + Number(filters.attachment)
 
@@ -247,15 +405,18 @@ export function MailListPage() {
       if (
         settingsApi.load().sendReadReceipts &&
         mail.email &&
-        !mail.email.toLowerCase().endsWith('@harbor.co') &&
+        !mail.email.toLowerCase().endsWith('@crescentsphere.com') &&
         !receiptsApi.has(mail.id)
       ) {
         void receiptsApi.record(mail)
         notify(`Read receipt sent to ${mail.sender}`)
       }
-      navigate(`/mail/${folderPath(folder)}/thread/${mail.id}`)
+      const base = customMailboxId
+        ? `folders/${encodeURIComponent(customMailboxId)}`
+        : folderPath(folder)
+      navigate(`/mail/${base}/thread/${mail.id}`)
     },
-    [folder, markRead, navigate, notify],
+    [folder, customMailboxId, markRead, navigate, notify],
   )
   const openDraft = useCallback(
     (mail?: Mail) => {
@@ -294,7 +455,7 @@ export function MailListPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'harbor-mail-export.mbox'
+    link.download = 'cs-mail-export.mbox'
     link.click()
     URL.revokeObjectURL(url)
     notify('Mailbox exported')
@@ -383,7 +544,7 @@ export function MailListPage() {
   const summary =
     visiblePool.length === 0
       ? '0 of 0'
-      : `${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, visiblePool.length)} of ${visiblePool.length}`
+      : `${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, totalForPaging)} of ${totalForPaging}`
 
   const slug = pathname.match(/\/mail\/([^/]+)/)?.[1]
   const validFolder = Boolean(
@@ -408,37 +569,31 @@ export function MailListPage() {
           Compose
         </button>
       </header>
-      {folder === 'Inbox' &&
-        (() => {
-          const forwarding = forwardingApi.load()
-          const vacation = vacationApi.load()
-          return forwarding.enabled || vacation.enabled ? (
-            <div className="mail-status">
-              {forwarding.enabled && forwarding.address && (
-                <div className="status-banner">
-                  <CornerDownRight size={14} />
-                  <span>
-                    Forwarding is on — mail to <strong>alex@harbor.co</strong> is sent to{' '}
-                    <strong>{forwarding.address}</strong>
-                    {forwarding.keepCopy ? '' : ' (no copy is kept in this mailbox)'}.
-                  </span>
-                </div>
-              )}
-              {vacation.enabled && (
-                <div className="status-banner">
-                  <Palmtree size={14} />
-                  <span>
-                    Auto-reply is on — <strong>&ldquo;{vacation.subject}&rdquo;</strong>
-                    {vacation.endsAt
-                      ? ` until ${new Date(vacation.endsAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
-                      : ''}
-                    .
-                  </span>
-                </div>
-              )}
+      {folder === 'Inbox' && (mailForwarding.enabled || mailVacation.enabled) && (
+        <div className="mail-status">
+          {mailForwarding.enabled && mailForwarding.address && (
+            <div className="status-banner">
+              <CornerDownRight size={14} />
+              <span>
+                Forwarding is on — incoming mail is sent to <strong>{mailForwarding.address}</strong>
+                {mailForwarding.keepCopy ? '' : ' (no copy is kept in this mailbox)'}.
+              </span>
             </div>
-          ) : null
-        })()}
+          )}
+          {mailVacation.enabled && (
+            <div className="status-banner">
+              <Palmtree size={14} />
+              <span>
+                Auto-reply is on — <strong>&ldquo;{mailVacation.subject}&rdquo;</strong>
+                {mailVacation.endsAt
+                  ? ` until ${new Date(mailVacation.endsAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+                  : ''}
+                .
+              </span>
+            </div>
+          )}
+        </div>
+      )}
       {folder === 'Inbox' && (
         <div className="category-tabs">
           {['Primary', 'Promotions', 'Social', 'Updates'].map((name) => (
@@ -788,28 +943,28 @@ export function MailListPage() {
         <button
           className="icon-button"
           aria-label="Previous"
-          disabled={currentPage <= 1}
-          onClick={() => goToPage(currentPage - 1)}
+          disabled={currentPage <= 1 || remoteLoading}
+          onClick={() => void goToPage(currentPage - 1)}
         >
           <ChevronLeft size={17} />
         </button>
         <button
           className="icon-button"
           aria-label="Next"
-          disabled={currentPage >= pageCount}
-          onClick={() => goToPage(currentPage + 1)}
+          disabled={currentPage >= pageCount || remoteLoading}
+          onClick={() => void goToPage(currentPage + 1)}
         >
           <ChevronRight size={17} />
         </button>
       </div>
       <section className="mail-list">
-        {loading ? (
+        {loading || (remotePaged && remoteLoading && remoteRows.length === 0) ? (
           <div className="list-state">
             <div className="loading-spinner" />
             <strong>Loading messages</strong>
-            <span>Syncing your Harbor Mailbox...</span>
+            <span>Syncing your CS Mail mailbox...</span>
           </div>
-        ) : loadError ? (
+        ) : loadError || remoteError ? (
           <div className="list-state" role="alert">
             <strong>We couldn't load your mailbox</strong>
             <span>
@@ -840,6 +995,11 @@ export function MailListPage() {
               onQuickArchive={readOnly ? undefined : quickArchive}
               onQuickStar={readOnly ? undefined : quickStar}
               onQuickTrash={readOnly ? undefined : quickTrash}
+              onQuickRetry={
+                readOnly && folder === 'Scheduled' && scheduledById.get(mail.id)?.status === 'dead'
+                  ? (mail) => void retryScheduled(mail.id)
+                  : undefined
+              }
               onQuickCancel={
                 readOnly && folder === 'Scheduled'
                   ? (mail) => removeScheduled(mail.id)
@@ -914,6 +1074,18 @@ export function MailListPage() {
             </header>
             {sheet.folder === 'Scheduled' ? (
               <div className="mobile-sheet__list">
+                {scheduledById.get(sheet.id)?.status === 'dead' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void retryScheduled(sheet.id)
+                      setSheet(null)
+                    }}
+                  >
+                    <RotateCcw size={16} />
+                    Retry delivery
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

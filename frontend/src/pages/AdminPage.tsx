@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  Activity,
   AtSign,
   Check,
   Copy,
@@ -11,6 +12,7 @@ import {
   History as HistoryIcon,
   KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   Mailbox,
   RefreshCw,
   Search,
@@ -25,6 +27,9 @@ import {
   remoteAdminApi,
   seedSso,
   ssoProviders,
+  type AdminDiagnostics,
+  type LaunchCertification,
+  type AdminQueueMessage,
   type Alias,
   type AuditEntry,
   type MailboxAccount,
@@ -34,6 +39,7 @@ import {
   type SsoSettings,
 } from '../services/admin'
 import { identitiesApi } from '../services/identities'
+import { adminSupportApi, type SupportMessage, type SupportTicket } from '../services/support'
 import { isRemoteMail } from '../services/remote-mail'
 import { useMail } from '../state/mail/MailContext'
 
@@ -46,6 +52,9 @@ type AdminTab =
   | 'domain'
   | 'security'
   | 'quarantine'
+  | 'queue'
+  | 'diagnostics'
+  | 'support'
   | 'audit'
 
 const tabs: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
@@ -57,6 +66,9 @@ const tabs: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'domain', label: 'Domain', icon: Globe },
   { id: 'security', label: 'Security', icon: ShieldCheck },
   { id: 'quarantine', label: 'Quarantine', icon: FileWarning },
+  { id: 'queue', label: 'Delivery queue', icon: RefreshCw },
+  { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
+  { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'audit', label: 'Audit log', icon: HistoryIcon },
 ]
 
@@ -103,11 +115,19 @@ export function AdminPage() {
   const [quarantine, setQuarantine] = useState<QuarantinedMail[]>(() => adminApi.listQuarantine())
   const [audit, setAudit] = useState<AuditEntry[]>(() => adminApi.listAudit())
   const [overview, setOverview] = useState<RemoteOverview | null>(null)
+  const [queue, setQueue] = useState<AdminQueueMessage[]>([])
+  const [queueTotal, setQueueTotal] = useState(0)
+  const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null)
+  const [launchCertifications, setLaunchCertifications] = useState<LaunchCertification[]>([])
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([])
+  const [selectedSupport, setSelectedSupport] = useState<{ ticket: SupportTicket; messages: SupportMessage[] } | null>(null)
+  const [supportReply, setSupportReply] = useState('')
   const [blockedSenders, setBlockedSenders] = useState<string[]>(() =>
     remote ? [] : security.blockedSenders,
   )
 
   const [mailboxForm, setMailboxForm] = useState({ email: '', displayName: '', quotaGB: 10 })
+  const [customMailboxQuota, setCustomMailboxQuota] = useState(false)
   const [mailboxPassword, setMailboxPassword] = useState('')
   const [aliasForm, setAliasForm] = useState({ local: '', forwardTo: '' })
   const [forwarderForm, setForwarderForm] = useState({ from: mailboxes[0]?.email ?? '', to: '' })
@@ -116,6 +136,10 @@ export function AdminPage() {
   const [mailboxStatusFilter, setMailboxStatusFilter] = useState<'all' | MailboxAccount['status']>(
     'all',
   )
+  const [platformRoleFilter, setPlatformRoleFilter] = useState<'all' | 'user' | 'platform_support' | 'platform_admin'>('all')
+  const userPageSize = 100
+  const [userPage, setUserPage] = useState(0)
+  const [userTotal, setUserTotal] = useState(0)
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState<string>('')
 
@@ -124,11 +148,16 @@ export function AdminPage() {
     window.setTimeout(() => setNotice(''), 4000)
   }
 
-  const reloadAdmin = () => {
+  const reloadUsers = (page = userPage) => {
+    const status = mailboxStatusFilter === 'all' ? undefined : mailboxStatusFilter === 'active' ? 'active' : 'suspended'
     void remoteAdminApi
-      .users()
-      .then(setMailboxes)
-      .catch((error: Error) => showNotice(error.message || 'Failed to load mailboxes'))
+      .usersPage({ q: mailboxQuery, status, platformRole: platformRoleFilter === 'all' ? undefined : platformRoleFilter, limit: userPageSize, offset: page * userPageSize })
+      .then((result) => { setMailboxes(result.users); setUserTotal(result.total) })
+      .catch((error: Error) => showNotice(error.message || 'Failed to load users'))
+  }
+
+  const reloadAdmin = () => {
+    reloadUsers()
     void remoteAdminApi
       .aliases()
       .then(setAliases)
@@ -141,6 +170,38 @@ export function AdminPage() {
       .blockedSenders()
       .then(setBlockedSenders)
       .catch((error: Error) => showNotice(error.message || 'Failed to load blocked senders'))
+    void remoteAdminApi
+      .forwarders()
+      .then(setForwarders)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load forwarders'))
+    void remoteAdminApi
+      .quarantine()
+      .then(setQuarantine)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load quarantine'))
+    void remoteAdminApi
+      .domain()
+      .then((next) => { setDomain(next.domain); setDns(next.dns) })
+      .catch((error: Error) => showNotice(error.message || 'Failed to load domain settings'))
+    void remoteAdminApi
+      .securityPolicy()
+      .then(setSecurity)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load security policy'))
+    void remoteAdminApi
+      .queue()
+      .then((next) => { setQueue(next.messages); setQueueTotal(next.total) })
+      .catch((error: Error) => showNotice(error.message || 'Failed to load delivery queue'))
+    void remoteAdminApi
+      .diagnostics()
+      .then(setDiagnostics)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load diagnostics'))
+    void remoteAdminApi
+      .launchCertifications()
+      .then(setLaunchCertifications)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load launch certification history'))
+    void adminSupportApi
+      .list()
+      .then(setSupportTickets)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load support tickets'))
   }
 
   useEffect(() => {
@@ -149,14 +210,26 @@ export function AdminPage() {
       .overview()
       .then((next) => {
         setOverview(next)
-        if (next.domain) {
-          setDomain({ domain: next.domain, catchAllEnabled: false, catchAll: '' })
-        }
       })
       .catch((error: Error) => showNotice(error.message || 'Failed to load admin overview'))
     reloadAdmin()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!remote) return
+    const timer = window.setTimeout(() => reloadUsers(userPage), 200)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remote, mailboxQuery, mailboxStatusFilter, platformRoleFilter, userPage])
+
+  useEffect(() => {
+    const active = mailboxes.filter((mailbox) => mailbox.status === 'active')
+    if (active.length === 0) return
+    if (!active.some((mailbox) => mailbox.email.toLowerCase() === forwarderForm.from.toLowerCase())) {
+      setForwarderForm((current) => ({ ...current, from: active[0].email }))
+    }
+  }, [mailboxes, forwarderForm.from])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -173,18 +246,20 @@ export function AdminPage() {
   const ownersCount = mailboxes.filter((mailbox) => mailbox.role === 'owner').length
   const adminsCount = mailboxes.filter((mailbox) => mailbox.role === 'admin').length
   const membersCount = mailboxes.filter((mailbox) => mailbox.role === 'member').length
-  const billingCount = mailboxes.filter((mailbox) => mailbox.role === 'billing').length
-  const visibleMailboxes = mailboxes.filter((mailbox) => {
+  const visibleMailboxes = remote ? mailboxes : mailboxes.filter((mailbox) => {
     const query = mailboxQuery.trim().toLowerCase()
+    const membershipSearch = (mailbox.businessMemberships ?? [])
+      .map((membership) => `${membership.organizationName} ${membership.planName ?? membership.planCode ?? ''} ${membership.role} ${membership.subscriptionStatus ?? ''}`)
+      .join(' ')
     const matchesQuery =
-      !query || `${mailbox.email} ${mailbox.displayName}`.toLowerCase().includes(query)
+      !query || `${mailbox.email} ${mailbox.displayName} ${mailbox.organizationName ?? ''} ${mailbox.subscriptionPlanName ?? ''} ${membershipSearch}`.toLowerCase().includes(query)
     return matchesQuery && (mailboxStatusFilter === 'all' || mailbox.status === mailboxStatusFilter)
   })
 
   const addMailbox = async (event: FormEvent) => {
     event.preventDefault()
     const raw = mailboxForm.email.trim().toLowerCase()
-    const full = raw.includes('@') ? raw : `${raw}@harbor.co`
+    const full = raw.includes('@') ? raw : `${raw}@crescentsphere.com`
     if (remote) {
       const email = raw.includes('@') ? raw : `${raw}@${domain.domain}`
       const password = mailboxPassword || genTempPassword()
@@ -193,13 +268,14 @@ export function AdminPage() {
           email,
           displayName: mailboxForm.displayName,
           password,
-          quotaGB: mailboxForm.quotaGB,
+          quotaGB: customMailboxQuota ? mailboxForm.quotaGB : undefined,
         })
         reloadAdmin()
         identitiesApi.add({ email, displayName: mailboxForm.displayName })
         setMailboxForm({ email: '', displayName: '', quotaGB: 10 })
+        setCustomMailboxQuota(false)
         setMailboxPassword('')
-        showNotice(`Mailbox ${email} created — temporary password: ${password}`)
+        showNotice(`Platform account ${email} created — temporary password: ${password}`)
       } catch (error) {
         showNotice(
           error instanceof Error && error.message ? error.message : 'Failed to create mailbox',
@@ -224,12 +300,15 @@ export function AdminPage() {
 
   const removeMailbox = async (id: string) => {
     if (remote) {
+      const target = mailboxes.find((mailbox) => mailbox.id === id)
+      const businesses = target?.businessMemberships?.length ?? 0
+      if (!window.confirm(`Permanently delete ${target?.email ?? 'this user'}?${businesses ? ` The account belongs to ${businesses} business${businesses === 1 ? '' : 'es'}; sole-owner protection is enforced by the server.` : ''}`)) return
       try {
         await remoteAdminApi.deleteUser(id)
         reloadAdmin()
-        showNotice('Mailbox removed')
+        showNotice('User account removed')
       } catch (error) {
-        showNotice(error instanceof Error && error.message ? error.message : 'Failed to remove mailbox')
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to remove user account')
       }
       return
     }
@@ -250,7 +329,10 @@ export function AdminPage() {
 
   const changeStatus = (id: string, status: string) => {
     if (remote) {
-      showNotice('Mailbox status is managed in Stalwart in this deployment')
+      void remoteAdminApi
+        .updateUser(id, { status: status === 'active' ? 'active' : 'suspended' })
+        .then(() => { reloadAdmin(); showNotice('User account status updated') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to update user account status'))
       return
     }
     const next = adminApi.setMailboxStatus(id, status as MailboxAccount['status'])
@@ -271,14 +353,15 @@ export function AdminPage() {
     setMailboxes(adminApi.setMailboxQuota(id, Number(value) || 1))
   }
 
+
   const changeRole = async (id: string, role: string) => {
     if (remote) {
       try {
-        await remoteAdminApi.updateUser(id, { role })
+        await remoteAdminApi.updateUser(id, { platform_role: role as 'user' | 'platform_support' | 'platform_admin' })
         reloadAdmin()
-        showNotice('Role updated')
+        showNotice('Platform access updated; active sessions were revoked.')
       } catch (error) {
-        showNotice(error instanceof Error && error.message ? error.message : 'Failed to update role')
+        showNotice(error instanceof Error && error.message ? error.message : 'Failed to update platform access')
       }
       return
     }
@@ -354,7 +437,18 @@ export function AdminPage() {
   const addForwarder = (event: FormEvent) => {
     event.preventDefault()
     if (remote) {
-      showNotice('External forwarding is configured in Stalwart in this deployment')
+      void remoteAdminApi
+        .createForwarder(forwarderForm.from, forwarderForm.to)
+        .then(async (result) => {
+          const code = result.verificationCode ?? window.prompt(`A verification code was sent to ${forwarderForm.to}. Enter it to enable forwarding:`)
+          if (code && result.forwarder?.id) {
+            await remoteAdminApi.verifyForwarder(result.forwarder.id, code)
+          }
+          setForwarderForm((current) => ({ ...current, to: '' }))
+          setForwarders(await remoteAdminApi.forwarders())
+          showNotice(code ? 'Forwarder verified and enabled' : 'Forwarder created; verification is pending')
+        })
+        .catch((error: Error) => showNotice(error.message || 'Failed to create forwarder'))
       return
     }
     const next = adminApi.addForwarder(forwarderForm.from, forwarderForm.to)
@@ -370,7 +464,12 @@ export function AdminPage() {
 
   const toggleForwarder = (id: string) => {
     if (remote) {
-      showNotice('External forwarding is managed in Stalwart in this deployment')
+      const current = forwarders.find((forwarder) => forwarder.id === id)
+      if (!current) return
+      void remoteAdminApi
+        .setForwarderEnabled(id, !current.enabled)
+        .then(async () => { setForwarders(await remoteAdminApi.forwarders()); showNotice(current.enabled ? 'Forwarder paused' : 'Forwarder enabled') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to update forwarder'))
       return
     }
     setForwarders(adminApi.toggleForwarder(id))
@@ -378,7 +477,10 @@ export function AdminPage() {
   }
   const removeForwarder = (id: string) => {
     if (remote) {
-      showNotice('External forwarding is managed in Stalwart in this deployment')
+      void remoteAdminApi
+        .deleteForwarder(id)
+        .then(async () => { setForwarders(await remoteAdminApi.forwarders()); showNotice('Forwarder removed') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to remove forwarder'))
       return
     }
     setForwarders(adminApi.removeForwarder(id))
@@ -387,7 +489,10 @@ export function AdminPage() {
 
   const verifyRecords = () => {
     if (remote) {
-      showNotice('DNS records are published at your DNS provider')
+      void remoteAdminApi
+        .domain()
+        .then((next) => { setDomain(next.domain); setDns(next.dns); showNotice('Domain DNS zone refreshed from the mail server') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to refresh domain DNS zone'))
       return
     }
     setDns(adminApi.verifyAll())
@@ -407,7 +512,11 @@ export function AdminPage() {
 
   const setCatchAllEnabled = (enabled: boolean) => {
     if (remote) {
-      showNotice('Catch-all routing is managed in Stalwart in this deployment')
+      const target = domain.catchAll || mailboxes.find((mailbox) => mailbox.status === 'active')?.email || ''
+      void remoteAdminApi
+        .updateDomain({ catch_all_enabled: enabled, catch_all: target })
+        .then((next) => { setDomain(next.domain); setDns(next.dns); showNotice(enabled ? 'Catch-all enabled' : 'Catch-all disabled') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to update catch-all'))
       return
     }
     const next = {
@@ -423,7 +532,10 @@ export function AdminPage() {
 
   const setCatchAllTarget = (target: string) => {
     if (remote) {
-      showNotice('Catch-all routing is managed in Stalwart in this deployment')
+      void remoteAdminApi
+        .updateDomain({ catch_all_enabled: true, catch_all: target })
+        .then((next) => { setDomain(next.domain); setDns(next.dns); showNotice('Catch-all recipient updated') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to update catch-all recipient'))
       return
     }
     const next = { ...domain, catchAll: target, catchAllEnabled: true }
@@ -446,7 +558,18 @@ export function AdminPage() {
     action: string,
     detail: string,
   ) => {
-    if (remote) return
+    if (remote) {
+      const supported = {
+        spamThreshold: patch.spamThreshold,
+        retentionDays: patch.retentionDays,
+        trashAutoPurge: patch.trashAutoPurge,
+      }
+      void remoteAdminApi
+        .updateSecurityPolicy(supported)
+        .then((next) => { setSecurity(next); showNotice(action) })
+        .catch((error: Error) => showNotice(error.message || `Failed: ${action}`))
+      return
+    }
     updateSecurity(patch)
     adminApi.logAudit(action, detail)
     setAudit(adminApi.listAudit())
@@ -511,7 +634,14 @@ export function AdminPage() {
 
   const releaseQuarantine = async (id: string) => {
     if (remote) {
-      showNotice('Quarantine is managed in Stalwart (Junk Mail) in this deployment')
+      try {
+        await remoteAdminApi.releaseQuarantine(id)
+        setQuarantine(await remoteAdminApi.quarantine())
+        void reload()
+        showNotice('Message released to Inbox')
+      } catch (error) {
+        showNotice(error instanceof Error ? error.message : 'Failed to release quarantined message')
+      }
       return
     }
     const next = await adminApi.releaseQuarantine(id)
@@ -523,7 +653,10 @@ export function AdminPage() {
 
   const removeQuarantine = (id: string) => {
     if (remote) {
-      showNotice('Quarantine is managed in Stalwart (Junk Mail) in this deployment')
+      void remoteAdminApi
+        .deleteQuarantine(id)
+        .then(async () => { setQuarantine(await remoteAdminApi.quarantine()); showNotice('Quarantined message deleted') })
+        .catch((error: Error) => showNotice(error.message || 'Failed to delete quarantined message'))
       return
     }
     setQuarantine(adminApi.deleteQuarantine(id))
@@ -550,6 +683,14 @@ export function AdminPage() {
           <button
             type="button"
             className="secondary-button"
+            onClick={() => navigate('/mail/admin/control-plane')}
+          >
+            <ShieldAlert size={14} />
+            SaaS control plane
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
             onClick={() => navigate('/mail/admin/billing')}
           >
             <CreditCard size={14} />
@@ -559,7 +700,7 @@ export function AdminPage() {
       </header>
 
       <nav className="admin-nav" aria-label="Admin sections">
-        {tabs.map((tabItem) => {
+        {tabs.filter((tabItem) => remote || !['queue', 'diagnostics', 'support'].includes(tabItem.id)).map((tabItem) => {
           const Icon = tabItem.icon
           return (
             <button
@@ -570,7 +711,7 @@ export function AdminPage() {
               key={tabItem.id}
             >
               <Icon size={14} />
-              {tabItem.label}
+              {remote && tabItem.id === 'mailboxes' ? 'Users' : remote && tabItem.id === 'roles' ? 'Platform access' : tabItem.label}
             </button>
           )
         })}
@@ -582,15 +723,57 @@ export function AdminPage() {
         <>
           <div className="admin-stats">
             <div className="admin-stat">
-              <strong>{activeCount}</strong>
-              <small>Active mailboxes</small>
+              <strong>{remote ? overview?.userCount ?? mailboxes.length : activeCount}</strong>
+              <small>{remote ? 'Platform users' : 'Active mailboxes'}</small>
             </div>
             <div className="admin-stat">
-              <strong>{remote ? adminsCount : adminsCount + ownersCount}</strong>
-              <small>{remote ? 'Admins' : 'Owners &amp; admins'}</small>
+              <strong>{remote ? overview?.businessCount ?? 0 : adminsCount + ownersCount}</strong>
+              <small>{remote ? 'Customer businesses' : 'Owners &amp; admins'}</small>
             </div>
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.activeSubscriptionCount ?? 0}</strong>
+                <small>Active subscriptions</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.expiring30DaysCount ?? 0}</strong>
+                <small>Expiring in 30 days</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.pastDueSubscriptionCount ?? 0}</strong>
+                <small>Past due</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.suspendedSubscriptionCount ?? 0}</strong>
+                <small>Suspended plans</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.paymentReviewCount ?? 0}</strong>
+                <small>Payments to review</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.suspendedUserCount ?? 0}</strong>
+                <small>Suspended users</small>
+              </div>
+            )}
+            {remote && (
+              <div className="admin-stat">
+                <strong>{overview?.unverifiedUserCount ?? 0}</strong>
+                <small>Unverified users</small>
+              </div>
+            )}
             <div className="admin-stat">
-              <strong>{remote ? '—' : quarantine.length}</strong>
+              <strong>{quarantine.length}</strong>
               <small>Quarantined messages</small>
             </div>
             <div className="admin-stat">
@@ -598,7 +781,7 @@ export function AdminPage() {
               <small>Aliases</small>
             </div>
             <div className="admin-stat">
-              <strong>{remote ? '—' : forwarders.length}</strong>
+              <strong>{forwarders.length}</strong>
               <small>Forwarders</small>
             </div>
             <div className="admin-stat">
@@ -608,8 +791,8 @@ export function AdminPage() {
               <small>Storage used</small>
             </div>
             <div className="admin-stat">
-              <strong>{remote ? '—' : sso.enabled ? 'On' : 'Off'}</strong>
-              <small>Single sign-on</small>
+              <strong>{remote ? (overview?.providerHealthy ? 'Healthy' : 'Check') : sso.enabled ? 'On' : 'Off'}</strong>
+              <small>{remote ? 'Mail service' : 'Single sign-on'}</small>
             </div>
           </div>
 
@@ -620,7 +803,7 @@ export function AdminPage() {
                 <strong>{domain.domain || (overview?.domain ?? '—')}</strong>
                 <small>
                   {remote
-                    ? 'DNS records and SMTP flow are managed at your provider and in Stalwart.'
+                    ? `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} expected DNS record groups are present in the server zone.`
                     : dnsVerified
                       ? 'All records verified — mail is flowing.'
                       : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
@@ -666,9 +849,9 @@ export function AdminPage() {
         <>
           <section className="settings-section">
             <div className="admin-section-head">
-              <h2>Mailboxes</h2>
+              <h2>{remote ? 'Users' : 'Mailboxes'}</h2>
               <span className="admin-section-count">
-                {visibleMailboxes.length} of {mailboxes.length}
+                {visibleMailboxes.length} of {remote ? userTotal : mailboxes.length}
               </span>
             </div>
             <div className="admin-list-tools">
@@ -676,56 +859,105 @@ export function AdminPage() {
                 <Search size={14} />
                 <input
                   value={mailboxQuery}
-                  onChange={(event) => setMailboxQuery(event.target.value)}
-                  placeholder="Search mailboxes"
-                  aria-label="Search mailboxes"
+                  onChange={(event) => { setMailboxQuery(event.target.value); setUserPage(0) }}
+                  placeholder={remote ? 'Search users, businesses or plans' : 'Search mailboxes'}
+                  aria-label={remote ? 'Search users' : 'Search mailboxes'}
                 />
               </label>
               <select
                 value={mailboxStatusFilter}
-                onChange={(event) =>
+                onChange={(event) => {
                   setMailboxStatusFilter(event.target.value as typeof mailboxStatusFilter)
-                }
+                  setUserPage(0)
+                }}
                 aria-label="Filter mailboxes by status"
               >
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
-                <option value="quarantine">Quarantine</option>
-                <option value="disabled">Disabled</option>
+                {remote ? <option value="disabled">Suspended</option> : <><option value="quarantine">Quarantine</option><option value="disabled">Disabled</option></>}
               </select>
+              {remote && (
+                <select
+                  value={platformRoleFilter}
+                  onChange={(event) => {
+                    setPlatformRoleFilter(event.target.value as typeof platformRoleFilter)
+                    setUserPage(0)
+                  }}
+                  aria-label="Filter users by platform access"
+                >
+                  <option value="all">All platform access</option>
+                  <option value="user">User</option>
+                  <option value="platform_support">Platform support</option>
+                  <option value="platform_admin">Platform admin</option>
+                </select>
+              )}
             </div>
             {visibleMailboxes.map((mailbox) => (
               <div className="billing-row" key={mailbox.id}>
                 <div>
                   <strong>{mailbox.email}</strong>
                   <small>
-                    {roleLabel[mailbox.role]} · {mailbox.displayName} ·{' '}
-                    {mailbox.storageUsedGB.toFixed(1)} GB of {mailbox.quotaGB} GB used
+                    {remote ? `${mailbox.platformRole === 'platform_admin' ? 'Platform admin' : mailbox.platformRole === 'platform_support' ? 'Platform support' : 'User'} · ${mailbox.emailVerified ? 'verified' : 'unverified'} · ${mailbox.displayName}` : `${roleLabel[mailbox.role]} · ${mailbox.displayName} · ${mailbox.storageUsedGB.toFixed(1)} GB of ${mailbox.quotaGB} GB used`}
                   </small>
+                  {remote && (
+                    <small>
+                      {mailbox.organizationName ? `${mailbox.organizationName} · ${mailbox.organizationRole ?? 'member'} · ${mailbox.subscriptionPlanName ?? mailbox.subscriptionPlanCode ?? 'no plan'} · ${mailbox.subscriptionStatus ?? 'unknown'}` : 'No active business'}
+                      {mailbox.subscriptionAssignedAt ? ` · activated ${timeFmt(mailbox.subscriptionAssignedAt)}` : ''}
+                      {mailbox.subscriptionPeriodEnd ? ` · expires ${new Date(mailbox.subscriptionPeriodEnd).toLocaleDateString()}` : ''}
+                      {mailbox.lastActiveAt ? ` · last active ${timeFmt(mailbox.lastActiveAt)}` : ' · never signed in'}
+                      {` · ${mailbox.businessCount ?? 0} business${mailbox.businessCount === 1 ? '' : 'es'}`}
+                    </small>
+                  )}
+                  {remote && (mailbox.businessMemberships?.length ?? 0) > 0 && (
+                    <details className="admin-user-businesses">
+                      <summary>All business access ({mailbox.businessMemberships?.length ?? 0})</summary>
+                      <div className="admin-user-businesses__list">
+                        {mailbox.businessMemberships?.map((membership) => (
+                          <div className="admin-user-business" key={membership.organizationId}>
+                            <div>
+                              <strong>{membership.organizationName}</strong>
+                              <small>
+                                {membership.role} · {membership.membershipStatus} · {membership.planName ?? membership.planCode ?? 'no plan'} · {membership.subscriptionStatus ?? 'no subscription'}
+                                {membership.assignedAt ? ` · activated ${timeFmt(membership.assignedAt)}` : ''}
+                                {membership.currentPeriodEnd ? ` · expires ${new Date(membership.currentPeriodEnd).toLocaleDateString()}` : ''}
+                              </small>
+                            </div>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => navigate(`/mail/admin/billing?business=${encodeURIComponent(membership.organizationId)}`)}
+                            >
+                              <CreditCard size={13} /> Manage plan
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
                 <div className="admin-actions">
-                  {!remote && (
-                    <select
+                  <select
                       className="admin-status-select"
                       value={mailbox.status}
                       aria-label={`Status for ${mailbox.email}`}
                       onChange={(event) => changeStatus(mailbox.id, event.target.value)}
                     >
                       <option value="active">Active</option>
-                      <option value="quarantine">Quarantine</option>
-                      <option value="disabled">Disabled</option>
+                      {remote ? <option value="disabled">Suspended</option> : <><option value="quarantine">Quarantine</option><option value="disabled">Disabled</option></>}
                     </select>
+                  {!remote && (
+                    <input
+                      className="admin-quota-input"
+                      type="number"
+                      min={1}
+                      max={5000}
+                      defaultValue={mailbox.quotaGB}
+                      aria-label={`Quota for ${mailbox.email}`}
+                      onBlur={(event) => changeQuota(mailbox.id, event.target.value)}
+                      title="Storage quota (GB)"
+                    />
                   )}
-                  <input
-                    className="admin-quota-input"
-                    type="number"
-                    min={1}
-                    max={100}
-                    defaultValue={mailbox.quotaGB}
-                    aria-label={`Quota for ${mailbox.email}`}
-                    onBlur={(event) => changeQuota(mailbox.id, event.target.value)}
-                    title="Storage quota (GB)"
-                  />
+                  {remote && <span className="business-badge" title="Manage hosted mailbox allocations from Business → Mailboxes & storage">Storage managed by business</span>}
                   <button
                     type="button"
                     className="secondary-button"
@@ -745,12 +977,19 @@ export function AdminPage() {
                 </div>
               </div>
             ))}
+            {remote && userTotal > userPageSize && (
+              <div className="admin-pagination">
+                <button type="button" className="secondary-button" disabled={userPage === 0} onClick={() => setUserPage((page) => Math.max(0, page - 1))}>Previous</button>
+                <span>Page {userPage + 1} of {Math.max(1, Math.ceil(userTotal / userPageSize))}</span>
+                <button type="button" className="secondary-button" disabled={(userPage + 1) * userPageSize >= userTotal} onClick={() => setUserPage((page) => page + 1)}>Next</button>
+              </div>
+            )}
             {visibleMailboxes.length === 0 && (
-              <p className="settings-hint">No mailboxes match this search.</p>
+              <p className="settings-hint">No {remote ? 'users' : 'mailboxes'} match this search.</p>
             )}
           </section>
           <form className="settings-section" onSubmit={addMailbox}>
-            <h2>Add a mailbox</h2>
+            <h2>{remote ? 'Add platform account' : 'Add a mailbox'}</h2>
             <label>
               Email address
               <input
@@ -773,22 +1012,34 @@ export function AdminPage() {
                 aria-label="Mailbox display name"
               />
             </label>
-            <label>
-              Storage quota (GB)
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={mailboxForm.quotaGB}
-                onChange={(event) =>
-                  setMailboxForm((current) => ({
-                    ...current,
-                    quotaGB: Number(event.target.value) || 10,
-                  }))
-                }
-                aria-label="Mailbox quota (GB)"
-              />
-            </label>
+            {remote && (
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={customMailboxQuota}
+                  onChange={(event) => setCustomMailboxQuota(event.target.checked)}
+                />
+                Use a custom storage quota instead of the plan quota
+              </label>
+            )}
+            {(!remote || customMailboxQuota) && (
+              <label>
+                {remote ? 'Custom storage quota (GB)' : 'Storage quota (GB)'}
+                <input
+                  type="number"
+                  min={1}
+                  max={5000}
+                  value={mailboxForm.quotaGB}
+                  onChange={(event) =>
+                    setMailboxForm((current) => ({
+                      ...current,
+                      quotaGB: Number(event.target.value) || 10,
+                    }))
+                  }
+                  aria-label="Mailbox quota (GB)"
+                />
+              </label>
+            )}
             {remote && (
               <label>
                 Temporary password
@@ -814,10 +1065,10 @@ export function AdminPage() {
         <>
           <section className="settings-section">
             <div className="admin-section-head">
-              <h2>Roles and permissions</h2>
+              <h2>{remote ? 'Platform access' : 'Roles and permissions'}</h2>
               <span className="admin-section-count">
                 {remote
-                  ? `${adminsCount} admins · ${membersCount} members · ${billingCount} billing`
+                  ? `${mailboxes.length} of ${userTotal} accounts on this page`
                   : `${ownersCount} owner · ${adminsCount} admins · ${membersCount} members`}
               </span>
             </div>
@@ -827,12 +1078,55 @@ export function AdminPage() {
                 can't be reassigned.
               </p>
             )}
-            <p className="settings-hint">
-              <strong>Admin</strong> — manages mailboxes, aliases, forwarders and security policy.
-            </p>
-            <p className="settings-hint">
-              <strong>Member</strong> — read-only access to the Admin center.
-            </p>
+            {remote ? (
+              <>
+                <p className="settings-hint"><strong>Platform admin</strong> — full localhost-only CS Mail control-plane access.</p>
+                <p className="settings-hint"><strong>Platform support</strong> — reserved support authority without platform-admin privilege.</p>
+                <p className="settings-hint"><strong>User</strong> — normal customer/platform login; business permissions come only from business membership.</p>
+                <div className="admin-list-tools">
+                  <label className="admin-search">
+                    <Search size={14} />
+                    <input
+                      value={mailboxQuery}
+                      onChange={(event) => { setMailboxQuery(event.target.value); setUserPage(0) }}
+                      placeholder="Search users, businesses or plans"
+                      aria-label="Search platform access"
+                    />
+                  </label>
+                  <select
+                    value={mailboxStatusFilter}
+                    onChange={(event) => {
+                      setMailboxStatusFilter(event.target.value as typeof mailboxStatusFilter)
+                      setUserPage(0)
+                    }}
+                    aria-label="Filter platform access by account status"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="disabled">Suspended</option>
+                  </select>
+                  <select
+                    value={platformRoleFilter}
+                    onChange={(event) => {
+                      setPlatformRoleFilter(event.target.value as typeof platformRoleFilter)
+                      setUserPage(0)
+                    }}
+                    aria-label="Filter platform access by role"
+                  >
+                    <option value="all">All platform access</option>
+                    <option value="user">User</option>
+                    <option value="platform_support">Platform support</option>
+                    <option value="platform_admin">Platform admin</option>
+                  </select>
+                  <span className="admin-section-count">{mailboxes.length} of {userTotal}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="settings-hint"><strong>Admin</strong> — manages mailboxes, aliases, forwarders and security policy.</p>
+                <p className="settings-hint"><strong>Member</strong> — read-only access to the Admin center.</p>
+              </>
+            )}
             {mailboxes.map((mailbox) => (
               <div className="billing-row" key={mailbox.id}>
                 <div>
@@ -842,19 +1136,36 @@ export function AdminPage() {
                 <div className="admin-actions">
                   <select
                     className="admin-status-select"
-                    value={mailbox.role}
-                    aria-label={`Role for ${mailbox.email}`}
-                    disabled={mailbox.role === 'owner'}
+                    value={remote ? mailbox.platformRole ?? 'user' : mailbox.role}
+                    aria-label={`${remote ? 'Platform access' : 'Role'} for ${mailbox.email}`}
+                    disabled={!remote && mailbox.role === 'owner'}
                     onChange={(event) => changeRole(mailbox.id, event.target.value)}
                   >
-                    {!remote && <option value="owner">Owner</option>}
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                    <option value="billing">Billing</option>
+                    {remote ? (
+                      <>
+                        <option value="user">User</option>
+                        <option value="platform_support">Platform support</option>
+                        <option value="platform_admin">Platform admin</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="owner">Owner</option>
+                        <option value="admin">Admin</option>
+                        <option value="member">Member</option>
+                        <option value="billing">Billing</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
             ))}
+            {remote && userTotal > userPageSize && (
+              <div className="admin-pagination">
+                <button type="button" className="secondary-button" disabled={userPage === 0} onClick={() => setUserPage((page) => Math.max(0, page - 1))}>Previous</button>
+                <span>Page {userPage + 1} of {Math.max(1, Math.ceil(userTotal / userPageSize))}</span>
+                <button type="button" className="secondary-button" disabled={(userPage + 1) * userPageSize >= userTotal} onClick={() => setUserPage((page) => page + 1)}>Next</button>
+              </div>
+            )}
           </section>
         </>
       )}
@@ -867,7 +1178,13 @@ export function AdminPage() {
               <div className="billing-row" key={alias.id}>
                 <div>
                   <strong>{alias.address}</strong>
-                  <small>Forwards to {alias.forwardTo}</small>
+                  <small>
+                    {alias.destinationType === 'mailbox' ? 'Mailbox alias for' : 'Delivers to'}{' '}
+                    {alias.forwardTo}
+                    {remote && alias.syncStatus && alias.syncStatus !== 'ready' && (
+                      <> · {alias.syncStatus}{alias.syncError ? ` — ${alias.syncError}` : ''}</>
+                    )}
+                  </small>
                 </div>
                 <button
                   type="button"
@@ -927,22 +1244,8 @@ export function AdminPage() {
 
       {tab === 'forwarders' && (
         <>
-          {remote ? (
-            <section className="settings-section">
-              <h2>Forwarders</h2>
-              <p className="settings-hint">
-                External forwarding rules are configured in <strong>Stalwart</strong> for this
-                deployment — there is no API surface for them in Harbor yet.
-              </p>
-              <p className="settings-hint">
-                To forward mail from a mail account, add an address alias or configure routing
-                rules on the mail server directly.
-              </p>
-            </section>
-          ) : (
-            <>
-              <section className="settings-section">
-                <h2>Forwarders</h2>
+          <section className="settings-section">
+            <h2>Forwarders</h2>
             {forwarders.map((forwarder) => (
               <div className="billing-row" key={forwarder.id}>
                 <div>
@@ -952,15 +1255,17 @@ export function AdminPage() {
                 <div className="admin-actions">
                   <span className={forwarder.enabled ? 'billing-paid' : ''}>
                     {forwarder.enabled && <Check size={13} />}
-                    {forwarder.enabled ? 'Enabled' : 'Paused'}
+                    {forwarder.enabled ? 'Enabled' : forwarder.verified === false ? 'Verification pending' : 'Paused'}
                   </span>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => toggleForwarder(forwarder.id)}
-                  >
-                    {forwarder.enabled ? 'Pause' : 'Enable'}
-                  </button>
+                  {(forwarder.verified !== false || !remote) && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => toggleForwarder(forwarder.id)}
+                    >
+                      {forwarder.enabled ? 'Pause' : 'Enable'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="icon-button"
@@ -1007,75 +1312,79 @@ export function AdminPage() {
                 aria-label="Forwarder target"
               />
             </label>
+            {remote && (
+              <p className="settings-hint">
+                External destinations must be verified before forwarding can be enabled. A code is
+                sent to the destination address after you add it.
+              </p>
+            )}
             <div className="row-actions">
-              <button type="submit" className="primary-button" disabled={!forwarderForm.from}>
+              <button type="submit" className="primary-button" disabled={!forwarderForm.from || !forwarderForm.to.trim()}>
                 <RefreshCw size={15} />
                 Add forwarder
               </button>
             </div>
-              </form>
-            </>
-          )}
+          </form>
         </>
       )}
 
       {tab === 'domain' && (
         <>
+          <section className="settings-section">
+            <h2>{domain.domain || (overview?.domain ?? 'Domain')}</h2>
+            <div className="billing-plan">
+              <div>
+                <strong>Domain status</strong>
+                <small>
+                  {remote
+                    ? `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} expected DNS record groups are present in the provider zone snapshot.`
+                    : dnsVerified
+                      ? 'All records verified — mail is flowing.'
+                      : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
+                </small>
+              </div>
+              <button type="button" className="secondary-button" onClick={verifyRecords}>
+                <RefreshCw size={14} />
+                {remote ? 'Refresh zone' : 'Check DNS records'}
+              </button>
+            </div>
+          </section>
+
           {remote ? (
             <section className="settings-section">
-              <h2>{domain.domain || (overview?.domain ?? 'Domain')}</h2>
+              <h2>Expected DNS zone</h2>
               <p className="settings-hint">
-                DNS records are published at your <strong>DNS provider</strong> and mail flow is
-                handled by Stalwart in this deployment.
+                This is the mail server's current expected zone. Publish these records at the DNS
+                provider when DNS management is manual.
               </p>
-              <p className="settings-hint">
-                The required MX, SPF, DKIM and DMARC records for{' '}
-                <strong>{domain.domain || (overview?.domain ?? 'your domain')}</strong> are
-                documented in the deployment guide.
-              </p>
+              <pre className="admin-record">{domain.dnsZoneFile || 'No DNS zone data returned by the mail server.'}</pre>
             </section>
           ) : (
-            <>
-              <section className="settings-section">
-                <h2>{domain.domain}</h2>
-                <div className="billing-plan">
+            <section className="settings-section">
+              <h2>DNS records</h2>
+              {dnsRecords.map((record) => (
+                <div className="billing-row" key={record.id}>
                   <div>
-                    <strong>Domain status</strong>
-                    <small>
-                      {dnsVerified
-                        ? 'All records verified — mail is flowing.'
-                        : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
-                    </small>
+                    <strong>{record.name}</strong>
+                    <small className="admin-record">{recordValue(record)}</small>
                   </div>
-                  <button type="button" className="secondary-button" onClick={verifyRecords}>
-                    <RefreshCw size={14} />
-                    Check DNS records
+                  <span className={`billing-paid ${dns[record.id] ? '' : 'admin-record--pending'}`}>
+                    {dns[record.id] && <Check size={13} />}
+                    {dns[record.id] ? 'Verified' : 'Required'}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void copyRecord({ id: record.id, value: recordValue(record) })}
+                  >
+                    {copied === record.id ? <Check size={14} /> : <Copy size={14} />}
+                    {copied === record.id ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-              </section>
-              <section className="settings-section">
-                <h2>DNS records</h2>
-            {dnsRecords.map((record) => (
-              <div className="billing-row" key={record.id}>
-                <div>
-                  <strong>{record.name}</strong>
-                  <small className="admin-record">{recordValue(record)}</small>
-                </div>
-                <span className={`billing-paid ${dns[record.id] ? '' : 'admin-record--pending'}`}>
-                  {dns[record.id] && <Check size={13} />}
-                  {dns[record.id] ? 'Verified' : 'Required'}
-                </span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => void copyRecord({ id: record.id, value: recordValue(record) })}
-                >
-                  {copied === record.id ? <Check size={14} /> : <Copy size={14} />}
-                  {copied === record.id ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            ))}
-          </section>
+              ))}
+            </section>
+          )}
+
           <section className="settings-section">
             <h2>Catch-all</h2>
             <label className="settings-options">
@@ -1104,27 +1413,68 @@ export function AdminPage() {
                 </select>
               </label>
             )}
-              </section>
-            </>
-          )}
+          </section>
         </>
       )}
 
       {tab === 'security' && (
         <>
           {remote && (
-            <section className="settings-section">
-              <h2>Mail filtering policy</h2>
-              <p className="settings-hint">
-                Spam scoring, TLS policy, attachment scanning, retention and single sign-on are
-                configured in <strong>Stalwart</strong> and at your identity provider — Harbor
-                exposes them once their management API lands here.
-              </p>
-              <p className="settings-hint">
-                Blocked senders below are enforced by the Harbor suppression list and are always
-                live.
-              </p>
-            </section>
+            <>
+              <section className="settings-section">
+                <h2>Spam filtering</h2>
+                <label className="admin-range">
+                  <span>Spam threshold — {security.spamThreshold}</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={security.spamThreshold}
+                    aria-label="Spam threshold"
+                    onChange={(event) =>
+                      updateSecurityAndLog(
+                        { spamThreshold: Number(event.target.value) },
+                        'Spam threshold updated',
+                        event.target.value,
+                      )
+                    }
+                  />
+                </label>
+                <p className="settings-hint">
+                  This value is written to the mail server's spam scoring policy. Blocked senders
+                  below are enforced by the server-side suppression list.
+                </p>
+              </section>
+              <section className="settings-section">
+                <h2>Retention policy</h2>
+                <label>
+                  Auto-expunge Trash and Junk after
+                  <select
+                    value={security.retentionDays}
+                    aria-label="Retention policy"
+                    onChange={(event) =>
+                      updateSecurityAndLog(
+                        { retentionDays: Number(event.target.value), trashAutoPurge: Number(event.target.value) > 0 },
+                        'Retention policy updated',
+                        retentionLabel(Number(event.target.value)),
+                      )
+                    }
+                  >
+                    <option value={0}>Keep until manually deleted</option>
+                    <option value={30}>30 days</option>
+                    <option value={90}>90 days</option>
+                    <option value={180}>180 days</option>
+                    <option value={365}>1 year</option>
+                  </select>
+                </label>
+                <p className="settings-hint">
+                  TLS topology, malware scanning, DMARC publication and SSO are intentionally not
+                  represented by cosmetic toggles here. Configure those at the mail/DNS/identity
+                  provider until a provider-backed control is available.
+                </p>
+              </section>
+            </>
           )}
           {!remote && (
             <>
@@ -1293,7 +1643,7 @@ export function AdminPage() {
                   <input
                     value={sso.entityId}
                     aria-label="SAML entity ID"
-                    placeholder="https://harbor.co/saml2"
+                    placeholder="https://crescentsphere.com/saml2"
                     onChange={(event) =>
                       setSso((current) => ({ ...current, entityId: event.target.value }))
                     }
@@ -1377,15 +1727,19 @@ export function AdminPage() {
 
       {tab === 'quarantine' && (
         <section className="settings-section">
-          <h2>Quarantined messages</h2>
-          {remote && (
-            <p className="settings-hint">
-              Quarantine is managed in <strong>Stalwart</strong> in this deployment — inspect the
-              Junk Mail folder or the mail server management UI to review and release quarantined
-              messages.
-            </p>
-          )}
-          {!remote && quarantine.map((item) => (
+          <div className="admin-page-head">
+            <div>
+              <h2>Quarantined messages</h2>
+              {remote && <p className="settings-hint">Server-authoritative view of user Junk mailboxes. Release moves the message to Inbox; delete permanently destroys it.</p>}
+            </div>
+            {remote && (
+              <button type="button" className="secondary-button" onClick={() => void remoteAdminApi.quarantine().then(setQuarantine)}>
+                <RefreshCw size={14} />
+                Refresh
+              </button>
+            )}
+          </div>
+          {quarantine.map((item) => (
             <div className="billing-row" key={item.id}>
               <div>
                 <strong>{item.subject}</strong>
@@ -1393,7 +1747,7 @@ export function AdminPage() {
                   {item.from} → {item.to} · {item.reason} · {item.sizeKB} KB
                 </small>
               </div>
-              <span className="admin-audit-time">{timeFmt(item.date)}</span>
+              <span className="admin-audit-time">{item.date ? timeFmt(item.date) : '—'}</span>
               <div className="admin-actions">
                 <button
                   type="button"
@@ -1414,10 +1768,204 @@ export function AdminPage() {
               </div>
             </div>
           ))}
-          {!remote && quarantine.length === 0 && (
+          {quarantine.length === 0 && (
             <p className="settings-hint">Nothing quarantined right now.</p>
           )}
         </section>
+      )}
+
+      {tab === 'queue' && (
+        <section className="settings-section">
+          <div className="admin-page-head">
+            <div>
+              <h2>Outbound delivery queue</h2>
+              <p className="settings-hint">{queueTotal} message{queueTotal === 1 ? '' : 's'} currently queued for delivery.</p>
+            </div>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void remoteAdminApi.queue().then((next) => { setQueue(next.messages); setQueueTotal(next.total) })}
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </button>
+          </div>
+          {queue.map((item) => {
+            const recipients = Object.keys(item.recipients ?? {})
+            return (
+              <div className="billing-row" key={item.id}>
+                <div>
+                  <strong>{item.returnPath || 'Null return path'}</strong>
+                  <small>
+                    → {recipients.length ? recipients.join(', ') : 'No recipients'} · {Math.ceil((item.size ?? 0) / 1024)} KB
+                    {item.nextRetry ? ` · next retry ${timeFmt(item.nextRetry)}` : ''}
+                  </small>
+                </div>
+                <div className="admin-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void remoteAdminApi.retryQueuedMessage(item.id).then(() => remoteAdminApi.queue()).then((next) => { setQueue(next.messages); setQueueTotal(next.total); showNotice('Queued message rescheduled') }).catch((error: Error) => showNotice(error.message || 'Failed to retry queued message'))}
+                  >
+                    <RefreshCw size={13} />
+                    Retry now
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Cancel queued message ${item.id}`}
+                    onClick={() => void remoteAdminApi.cancelQueuedMessage(item.id).then(() => remoteAdminApi.queue()).then((next) => { setQueue(next.messages); setQueueTotal(next.total); showNotice('Queued message cancelled') }).catch((error: Error) => showNotice(error.message || 'Failed to cancel queued message'))}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+          {queue.length === 0 && <p className="settings-hint">The outbound queue is empty.</p>}
+        </section>
+      )}
+
+      {tab === 'diagnostics' && (
+        <>
+          <section className="settings-section">
+            <div className="admin-page-head">
+              <h2>System diagnostics</h2>
+              <button type="button" className="secondary-button" onClick={() => void remoteAdminApi.diagnostics().then(setDiagnostics)}>
+                <RefreshCw size={14} />
+                Refresh
+              </button>
+            </div>
+            <div className="admin-stats">
+              <div className="admin-stat"><strong>{diagnostics?.database ? 'Healthy' : 'Check'}</strong><small>Database</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.mailProvider ? 'Healthy' : 'Check'}</strong><small>Mail service</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.queueTotal ?? 0}</strong><small>Queued deliveries</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.automationErrors ?? 0}</strong><small>Automation sync errors</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.addressSyncErrors ?? 0}</strong><small>Address sync errors</small></div>
+            </div>
+          </section>
+          <section className="settings-section">
+            <h2>Provisioning jobs</h2>
+            {(diagnostics?.provisioning ?? []).map((item) => (
+              <div className="billing-row" key={item.status}>
+                <div><strong>{item.status}</strong><small>Durable mailbox provisioning/reconciliation jobs</small></div>
+                <span>{item.count}</span>
+              </div>
+            ))}
+            {(diagnostics?.provisioning ?? []).length === 0 && <p className="settings-hint">No provisioning jobs are currently recorded.</p>}
+          </section>
+          <section className="settings-section">
+            <div className="admin-page-head">
+              <div>
+                <h2>Launch certification</h2>
+                <p className="settings-hint">Immutable production certification history tied to a release SHA-256 and the operator report digest.</p>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => void remoteAdminApi.launchCertifications().then(setLaunchCertifications)}>
+                <RefreshCw size={14} />
+                Refresh
+              </button>
+            </div>
+            {launchCertifications.slice(0, 10).map((run) => (
+              <div className="billing-row" key={run.id}>
+                <div>
+                  <strong>{run.status.toUpperCase()} · {run.release_label}</strong>
+                  <small>{timeFmt(run.completed_at ?? run.created_at)} · release {run.release_sha256.slice(0, 12)}… · report {run.report_sha256 ? `${run.report_sha256.slice(0, 12)}…` : 'pending'}</small>
+                </div>
+                <span>{run.mandatory_passed} passed / {run.mandatory_failed} failed</span>
+              </div>
+            ))}
+            {launchCertifications.length === 0 && <p className="settings-hint">No production launch certification has been recorded yet.</p>}
+          </section>
+        </>
+      )}
+
+      {tab === 'support' && (
+        <>
+          <section className="settings-section">
+            <div className="admin-page-head">
+              <div>
+                <h2>Support tickets</h2>
+                <p className="settings-hint">Requests submitted through the public or authenticated support form are stored here. Agent replies are sent by the backend and recorded on the ticket.</p>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => void adminSupportApi.list().then(setSupportTickets).catch((error: Error) => showNotice(error.message || 'Failed to load support tickets'))}>
+                <RefreshCw size={14} />
+                Refresh
+              </button>
+            </div>
+            {supportTickets.map((ticket) => (
+              <div className="billing-row" key={ticket.id ?? ticket.reference}>
+                <div>
+                  <strong>{ticket.reference} · {ticket.subject}</strong>
+                  <small>{ticket.requester_name} · {ticket.requester_email} · {ticket.topic}</small>
+                  <small>{ticket.status} · {ticket.priority ?? 'normal'}{ticket.updated_at ? ` · updated ${timeFmt(ticket.updated_at)}` : ''}</small>
+                </div>
+                <div className="admin-actions">
+                  {ticket.id && (
+                    <button type="button" className="secondary-button" onClick={() => void adminSupportApi.get(ticket.id as string).then(setSelectedSupport).catch((error: Error) => showNotice(error.message || 'Failed to load ticket'))}>
+                      Open
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {supportTickets.length === 0 && <p className="settings-hint">No support tickets are currently recorded.</p>}
+          </section>
+
+          {selectedSupport?.ticket.id && (
+            <section className="settings-section">
+              <div className="admin-section-head">
+                <div>
+                  <h2>{selectedSupport.ticket.reference}</h2>
+                  <p className="settings-hint">{selectedSupport.ticket.requester_name} · {selectedSupport.ticket.requester_email}</p>
+                </div>
+                <select
+                  aria-label="Support ticket status"
+                  value={selectedSupport.ticket.status}
+                  onChange={(event) => {
+                    const id = selectedSupport.ticket.id as string
+                    void adminSupportApi.update(id, { status: event.target.value }).then(async () => {
+                      setSelectedSupport(await adminSupportApi.get(id))
+                      setSupportTickets(await adminSupportApi.list())
+                      showNotice('Support ticket status updated')
+                    }).catch((error: Error) => showNotice(error.message || 'Failed to update support ticket'))
+                  }}
+                >
+                  <option value="open">Open</option>
+                  <option value="pending">Pending</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+              <div className="support-thread">
+                {selectedSupport.messages.map((message) => (
+                  <div className="support-message" key={message.id}>
+                    <strong>{message.author_kind === 'agent' ? 'CS Mail Support' : 'Requester'}</strong>
+                    <p>{message.body}</p>
+                    <small>{timeFmt(message.created_at)}</small>
+                  </div>
+                ))}
+              </div>
+              <form
+                className="admin-inline-form admin-inline-form--stacked"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const id = selectedSupport.ticket.id as string
+                  const message = supportReply.trim()
+                  if (!message) return
+                  void adminSupportApi.reply(id, message).then(async () => {
+                    setSupportReply('')
+                    setSelectedSupport(await adminSupportApi.get(id))
+                    setSupportTickets(await adminSupportApi.list())
+                    showNotice('Support reply sent')
+                  }).catch((error: Error) => showNotice(error.message || 'Failed to send support reply'))
+                }}
+              >
+                <textarea value={supportReply} onChange={(event) => setSupportReply(event.target.value)} rows={5} maxLength={10000} placeholder="Reply to the requester" aria-label="Support reply" />
+                <button type="submit" className="primary-button" disabled={!supportReply.trim()}>Send reply</button>
+              </form>
+            </section>
+          )}
+        </>
       )}
 
       {tab === 'audit' && (
@@ -1435,7 +1983,7 @@ export function AdminPage() {
                     const url = URL.createObjectURL(blob)
                     const link = document.createElement('a')
                     link.href = url
-                    link.download = 'harbor-audit.csv'
+                    link.download = 'cs-mail-audit.csv'
                     document.body.appendChild(link)
                     link.click()
                     link.remove()
@@ -1456,6 +2004,7 @@ export function AdminPage() {
               <div>
                 <strong>{entry.action}</strong>
                 <small>{entry.detail}</small>
+                <small>{entry.actor}{entry.eventHash ? ` · seal ${entry.eventHash.slice(0, 12)}…` : ''}</small>
               </div>
               <span className="admin-audit-time">{timeFmt(entry.time)}</span>
             </div>

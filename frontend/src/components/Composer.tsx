@@ -9,21 +9,21 @@ import {
 } from 'react'
 import { Clock3, Paperclip, Send, X } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
-import { uploadAttachment } from '../services/attachments'
+import { deleteStagedAttachment, uploadAttachment } from '../services/attachments'
 import { contactsService } from '../services/contacts'
 import { draftKey, draftsApi } from '../services/drafts'
-import { identitiesApi } from '../services/identities'
-import { primaryAccount } from '../services/accounts'
+import { identitiesApi, type Identity } from '../services/identities'
 import { parseAddresses } from '../lib/mail'
 import { isRemoteMail, parseRecipients, remoteDraftApi } from '../services/remote-mail'
 import { settingsApi } from '../services/settings'
-import type { Draft } from '../types'
+import type { Draft, DraftAttachment } from '../types'
 
 type ComposerProps = {
   close: () => void
   onSent?: (draft: Draft) => void | Promise<boolean>
   initialDraft?: Partial<Draft>
 }
+const freshKey = () => crypto.randomUUID()
 const emptyDraft: Draft = {
   to: '',
   cc: '',
@@ -33,6 +33,20 @@ const emptyDraft: Draft = {
   attachments: [],
   scheduledAt: '',
 }
+const normalizeAttachments = (value: unknown): DraftAttachment[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (item): item is DraftAttachment =>
+          Boolean(
+            item &&
+              typeof item === 'object' &&
+              'id' in item &&
+              typeof item.id === 'string' &&
+              'filename' in item &&
+              typeof item.filename === 'string',
+          ),
+      )
+    : []
 
 const addressIsInvalid = (part: string) => {
   const addr = part.includes('<') ? (part.match(/<([^>]+)>/)?.[1] ?? part) : part
@@ -44,42 +58,46 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\
 export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const signature = settingsApi.load().signature
   const signatureBlock = signature ? `\n--\n${signature}` : ''
-  const identities = useMemo(() => {
-    const primary = primaryAccount()
-    const displayName = settingsApi.load().displayName || primary.name
-    return identitiesApi
-      .list()
-      .map((identity) =>
-        identity.primary
-          ? { name: displayName, email: isRemoteMail() ? primary.email : identity.email }
-          : { name: identity.displayName, email: identity.email },
-      )
-  }, [])
+  const remote = isRemoteMail()
+  const [identities, setIdentities] = useState<Identity[]>(() => identitiesApi.list())
   const [draft, setDraft] = useState<Draft>(() => {
-    if (initialDraft)
-      return { ...emptyDraft, ...initialDraft, attachments: initialDraft.attachments ?? [] }
+    if (initialDraft) {
+      return {
+        ...emptyDraft,
+        ...initialDraft,
+        attachments: normalizeAttachments(initialDraft.attachments),
+        clientKey: initialDraft.clientKey || freshKey(),
+        sendKey: initialDraft.sendKey || freshKey(),
+      }
+    }
     let saved: Partial<Draft> = {}
-    try {
-      saved = JSON.parse(localStorage.getItem(draftKey) || '{}')
-    } catch {
-      /* ignore a malformed autosave */
+    if (!remote) {
+      try {
+        saved = JSON.parse(localStorage.getItem(draftKey) || '{}')
+      } catch {
+        /* ignore a malformed demo autosave */
+      }
     }
     if (signature && !saved.body) saved.body = signatureBlock
-    return { ...emptyDraft, ...saved, attachments: saved.attachments ?? [] }
+    return {
+      ...emptyDraft,
+      ...saved,
+      attachments: normalizeAttachments(saved.attachments),
+      clientKey: saved.clientKey || freshKey(),
+      sendKey: saved.sendKey || freshKey(),
+    }
   })
   const [includeSignature, setIncludeSignature] = useState(Boolean(signature))
   const [showCopies, setShowCopies] = useState(Boolean(draft.cc || draft.bcc))
-  const [status, setStatus] = useState('Saved to Drafts')
+  const [status, setStatus] = useState(remote ? 'Ready' : 'Saved to Drafts')
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
-  const identityByEmail = useMemo(
-    () => new Map(identities.map((identity) => [identity.email, identity])),
+  const identityById = useMemo(
+    () => new Map(identities.map((identity) => [identity.id, identity])),
     [identities],
   )
-  const [fromIdentity, setFromIdentity] = useState(
-    draft.from?.email ??
-      (isRemoteMail() ? primaryAccount().email : identities[0]?.email) ??
-      'alex@harbor.co',
+  const [fromIdentityId, setFromIdentityId] = useState(
+    draft.identityId || identities.find((identity) => identity.primary)?.id || identities[0]?.id || '',
   )
   const [recipientError, setRecipientError] = useState<'to' | 'cc' | 'bcc' | null>(null)
   const dialogRef = useRef<HTMLElement>(null)
@@ -88,10 +106,40 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const skipInitialSave = useRef(true)
   useFocusTrap(dialogRef)
   useEffect(() => {
+    if (!remote) return
+    remoteDraftApi.setActiveId(draft.serverDraftId || null)
+    return () => remoteDraftApi.clearActive()
+  }, [])
+  useEffect(() => {
+    if (!remote) return
+    let cancelled = false
+    void identitiesApi
+      .refresh()
+      .then((rows) => {
+        if (cancelled) return
+        setIdentities(rows)
+        const selected = draft.identityId
+          ? rows.find((identity) => identity.id === draft.identityId)
+          : rows.find((identity) => identity.primary) || rows[0]
+        if (selected) {
+          setFromIdentityId(selected.id)
+          setDraft((current) =>
+            current.identityId === selected.id
+              ? current
+              : { ...current, identityId: selected.id, from: { name: selected.displayName, email: selected.email } },
+          )
+        }
+      })
+      .catch(() => setStatus('Could not load sender identity'))
+    return () => {
+      cancelled = true
+    }
+  }, [remote])
+  useEffect(() => {
     if (editorRef.current) editorRef.current.textContent = initialBodyRef.current
   }, [])
   const update = (field: keyof Draft, value: string) => {
-    setDraft((current) => ({ ...current, [field]: value }))
+    setDraft((current) => ({ ...current, [field]: value, sendKey: freshKey() }))
     if (field === 'to' || field === 'cc' || field === 'bcc') setRecipientError(null)
     setStatus('Saving...')
   }
@@ -100,6 +148,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
       skipInitialSave.current = false
       return
     }
+    if (remote) return
     const timer = window.setTimeout(() => {
       localStorage.setItem(draftKey, JSON.stringify(draft))
       setStatus('Saved to Drafts')
@@ -107,16 +156,27 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     return () => window.clearTimeout(timer)
   }, [draft])
   useEffect(() => {
-    if (skipInitialSave.current || !isRemoteMail()) return
+    if (skipInitialSave.current || !remote) return
     const timer = window.setTimeout(() => {
-      if (!draft.to && !draft.cc && !draft.bcc && !draft.subject && !draft.body) return
+      if (
+        !draft.to &&
+        !draft.cc &&
+        !draft.bcc &&
+        !draft.subject &&
+        !draft.body &&
+        draft.attachments.length === 0
+      )
+        return
       const compose = {
         to: parseRecipients(draft.to),
         cc: parseRecipients(draft.cc),
         bcc: parseRecipients(draft.bcc),
         subject: draft.subject,
         body_text: draft.body,
-        attachments: [],
+        attachments: draft.attachments.map((attachment) => ({ id: attachment.id })),
+        identity_id: draft.identityId,
+        client_key: draft.clientKey,
+        send_key: draft.sendKey,
       }
       remoteDraftApi
         .save(compose)
@@ -137,7 +197,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     const nextBody = includeSignature
       ? draft.body.replace(new RegExp(`${escapeRegExp(signatureBlock)}\\s*$`), '')
       : draft.body + signatureBlock
-    setDraft((current) => ({ ...current, body: nextBody }))
+    setDraft((current) => ({ ...current, body: nextBody, sendKey: freshKey() }))
     editorRef.current.textContent = nextBody
     setIncludeSignature((current) => !current)
     setStatus('Saving...')
@@ -147,9 +207,13 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     setUploading(true)
     setStatus('Uploading attachment...')
     try {
-      const names: string[] = []
-      for (const file of files) names.push((await uploadAttachment(file)).name)
-      setDraft((current) => ({ ...current, attachments: [...current.attachments, ...names] }))
+      const uploaded: DraftAttachment[] = []
+      for (const file of files) uploaded.push(await uploadAttachment(file))
+      setDraft((current) => ({
+        ...current,
+        attachments: [...current.attachments, ...uploaded],
+        sendKey: freshKey(),
+      }))
       setStatus('Saved to Drafts')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Upload failed')
@@ -157,11 +221,14 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
       setUploading(false)
     }
   }
-  const removeAttachment = (name: string) =>
+  const removeAttachment = (attachment: DraftAttachment) => {
     setDraft((current) => ({
       ...current,
-      attachments: current.attachments.filter((item) => item !== name),
+      attachments: current.attachments.filter((item) => item.id !== attachment.id),
+      sendKey: freshKey(),
     }))
+    void deleteStagedAttachment(attachment.id).catch(() => {})
+  }
   const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
     const files = Array.from(event.clipboardData.files)
     if (!files.length) return
@@ -174,6 +241,20 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     void addFiles(Array.from(event.dataTransfer.files))
   }
   const discard = () => {
+    const attachmentIds = draft.attachments.map((attachment) => attachment.id)
+    const activeDraft = remoteDraftApi.activeId()
+    if (isRemoteMail()) {
+      void (async () => {
+        if (activeDraft) {
+          try {
+            await remoteDraftApi.remove(activeDraft)
+          } catch {
+            /* server cleanup worker still protects/reclaims referenced files */
+          }
+        }
+        await Promise.all(attachmentIds.map((id) => deleteStagedAttachment(id).catch(() => {})))
+      })()
+    }
     draftsApi.clear()
     close()
   }
@@ -204,6 +285,25 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
       setStatus('Check the recipients: enter valid email addresses')
       return
     }
+    if (remote) {
+      try {
+        setStatus('Saving draft before send...')
+        await remoteDraftApi.save({
+          to: parseRecipients(draft.to),
+          cc: parseRecipients(draft.cc),
+          bcc: parseRecipients(draft.bcc),
+          subject: draft.subject,
+          body_text: draft.body,
+          attachments: draft.attachments.map((attachment) => ({ id: attachment.id })),
+          identity_id: draft.identityId,
+          client_key: draft.clientKey,
+          send_key: draft.sendKey,
+        })
+      } catch (error) {
+        setStatus(error instanceof Error ? `Draft not saved — ${error.message}` : 'Draft not saved')
+        return
+      }
+    }
     const ok = (await onSent?.(draft)) ?? true
     if (!ok) return
     draftsApi.clear()
@@ -212,7 +312,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   }
   return (
     <div className="compose-layer">
-      <datalist id="harbor-contacts">
+      <datalist id="cs-mail-contacts">
         {contactsService.list().map((contact) => (
           <option key={contact.email} value={`${contact.name} <${contact.email}>`} />
         ))}
@@ -238,17 +338,24 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
             From
             <select
               aria-label="From address"
-              value={fromIdentity}
+              value={fromIdentityId}
               onChange={(event) => {
-                const email = event.target.value
-                setFromIdentity(email)
-                const identity = identityByEmail.get(email)
-                if (identity) setDraft((current) => ({ ...current, from: identity }))
+                const id = event.target.value
+                setFromIdentityId(id)
+                const identity = identityById.get(id)
+                if (identity) {
+                  setDraft((current) => ({
+                    ...current,
+                    identityId: identity.id,
+                    from: { name: identity.displayName, email: identity.email },
+                    sendKey: freshKey(),
+                  }))
+                }
               }}
             >
               {identities.map((identity) => (
-                <option key={identity.email} value={identity.email}>
-                  {identity.name} &lt;{identity.email}&gt;
+                <option key={identity.id} value={identity.id}>
+                  {identity.displayName} &lt;{identity.email}&gt;
                 </option>
               ))}
             </select>
@@ -256,7 +363,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
           <label>
             To
             <input
-              list="harbor-contacts"
+              list="cs-mail-contacts"
               autoFocus
               value={draft.to}
               onChange={(event) => update('to', event.target.value)}
@@ -280,7 +387,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
               <label>
                 Cc
                 <input
-                  list="harbor-contacts"
+                  list="cs-mail-contacts"
                   value={draft.cc}
                   onChange={(event) => update('cc', event.target.value)}
                   placeholder="Carbon copy"
@@ -292,7 +399,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
               <label>
                 Bcc
                 <input
-                  list="harbor-contacts"
+                  list="cs-mail-contacts"
                   value={draft.bcc}
                   onChange={(event) => update('bcc', event.target.value)}
                   placeholder="Blind carbon copy"
@@ -371,14 +478,14 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
             />
             {draft.attachments.length > 0 && (
               <div className="chips">
-                {draft.attachments.map((name) => (
-                  <small className="attachment-chip" key={name}>
+                {draft.attachments.map((attachment) => (
+                  <small className="attachment-chip" key={attachment.id}>
                     <Paperclip size={13} />
-                    {name}
+                    {attachment.filename}
                     <button
                       type="button"
-                      aria-label={`Remove ${name}`}
-                      onClick={() => removeAttachment(name)}
+                      aria-label={`Remove ${attachment.filename}`}
+                      onClick={() => removeAttachment(attachment)}
                     >
                       <X size={12} />
                     </button>

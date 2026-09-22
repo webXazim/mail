@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { ArrowRight, BarChart3, LockKeyhole, LifeBuoy, Mail } from 'lucide-react'
 import { bootstrapSession, isSessionActive } from '../../lib/api'
+import { BrandIdentity } from '../BrandIdentity'
 
 export function PublicLayout() {
   const [signedIn, setSignedIn] = useState(isSessionActive())
@@ -13,11 +14,8 @@ export function PublicLayout() {
   return (
     <div className="site-shell">
       <header className="site-head">
-        <Link to="/" className="site-brand">
-          <span className="brand-mark">H</span>
-          <strong>
-            harbor<span>mail</span>
-          </strong>
+        <Link to="/" className="site-brand" aria-label="CS Mail home">
+          <BrandIdentity />
         </Link>
         <nav className="site-nav" aria-label="Primary">
           <NavLink
@@ -60,11 +58,8 @@ export function PublicLayout() {
       <footer className="site-foot">
         <div className="site-foot__cols">
           <div className="site-foot__brand">
-            <Link to="/" className="site-brand">
-              <span className="brand-mark">H</span>
-              <strong>
-                harbor<span>mail</span>
-              </strong>
+            <Link to="/" className="site-brand" aria-label="CS Mail home">
+              <BrandIdentity />
             </Link>
             <p>Calm, focused email for teams. Space for the things that matter.</p>
             <Link to="/status" className="site-foot__status">
@@ -88,7 +83,7 @@ export function PublicLayout() {
           </div>
           <div className="site-foot__col">
             <p className="eyebrow">Company</p>
-            <a href="mailto:sales@harbor.co">
+            <a href="mailto:sales@crescentsphere.com">
               <LockKeyhole size={13} />
               Contact sales
             </a>
@@ -101,7 +96,7 @@ export function PublicLayout() {
           </div>
         </div>
         <div className="site-foot__bottom">
-          <span>© 2026 Harbor Mail, Inc.</span>
+          <span>© 2026 CS Mail</span>
           <span>
             Made in San Francisco <ArrowRight size={12} />
           </span>

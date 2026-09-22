@@ -1,7 +1,7 @@
 :root {
-  font-family: var(--a2t-sans);
-  color: var(--a2t-silver);
-  background: var(--a2t-bg);
+  font-family: var(--cs-mail-sans);
+  color: var(--cs-mail-silver);
+  background: var(--cs-mail-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -16,8 +16,8 @@ body,
 }
 body {
   margin: 0;
-  background: var(--a2t-bg);
-  color: var(--a2t-silver);
+  background: var(--cs-mail-bg);
+  color: var(--cs-mail-silver);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -34,16 +34,16 @@ a {
   color: inherit;
 }
 ::selection {
-  background: var(--a2t-accent);
-  color: var(--a2t-ink);
+  background: var(--cs-mail-accent);
+  color: var(--cs-mail-ink);
 }
 :focus-visible {
   outline: none;
-  box-shadow: var(--a2t-focus);
+  box-shadow: var(--cs-mail-focus);
 }
 input[type='checkbox'],
 input[type='radio'] {
-  accent-color: var(--a2t-accent);
+  accent-color: var(--cs-mail-accent);
   cursor: pointer;
 }
 ::-webkit-scrollbar {
@@ -54,10 +54,10 @@ input[type='radio'] {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--a2t-line);
+  background: var(--cs-mail-line);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--a2t-line-strong);
+  background: var(--cs-mail-line-strong);
 }
 
 .icon-button {
@@ -68,14 +68,14 @@ input[type='radio'] {
   flex: none;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--a2t-radius);
+  border-radius: var(--cs-mail-radius);
   background: transparent;
-  color: var(--a2t-copy);
+  color: var(--cs-mail-copy);
 }
 .icon-button:hover {
-  color: var(--a2t-white);
-  background: var(--a2t-panel-raised);
-  border-color: var(--a2t-line-soft);
+  color: var(--cs-mail-white);
+  background: var(--cs-mail-panel-raised);
+  border-color: var(--cs-mail-line-soft);
 }
 .icon-button:disabled {
   opacity: 0.35;
@@ -92,8 +92,8 @@ input[type='radio'] {
   gap: 8px;
   height: 34px;
   padding: 0 16px;
-  border-radius: var(--a2t-radius);
-  font-family: var(--a2t-mono);
+  border-radius: var(--cs-mail-radius);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -101,13 +101,13 @@ input[type='radio'] {
   white-space: nowrap;
 }
 .primary-button {
-  background: var(--a2t-accent);
-  border: 1px solid var(--a2t-accent);
-  color: var(--a2t-ink);
+  background: var(--cs-mail-accent);
+  border: 1px solid var(--cs-mail-accent);
+  color: var(--cs-mail-ink);
 }
 .primary-button:hover {
-  background: var(--a2t-accent-hover);
-  border-color: var(--a2t-accent-hover);
+  background: var(--cs-mail-accent-hover);
+  border-color: var(--cs-mail-accent-hover);
 }
 .primary-button:disabled {
   opacity: 0.5;
@@ -115,35 +115,35 @@ input[type='radio'] {
 }
 .secondary-button {
   background: transparent;
-  border: 1px solid var(--a2t-line);
-  color: var(--a2t-silver);
+  border: 1px solid var(--cs-mail-line);
+  color: var(--cs-mail-silver);
 }
 .secondary-button:hover {
-  color: var(--a2t-accent);
-  border-color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
+  border-color: var(--cs-mail-accent);
 }
 .text-button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--a2t-accent);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-accent);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .text-button:hover {
-  color: var(--a2t-accent-hover);
+  color: var(--cs-mail-accent-hover);
 }
 .eyebrow {
   margin: 0 0 8px;
-  font-family: var(--a2t-mono);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }
 .avatar {
   display: grid;
@@ -151,9 +151,9 @@ input[type='radio'] {
   width: 30px;
   height: 30px;
   flex: none;
-  border-radius: var(--a2t-radius);
-  border: 1px solid var(--a2t-line);
-  font-family: var(--a2t-mono);
+  border-radius: var(--cs-mail-radius);
+  border: 1px solid var(--cs-mail-line);
+  font-family: var(--cs-mail-mono);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -201,16 +201,16 @@ input[type='radio'] {
   border: 0;
 }
 
-.a2t-tooltip {
+.cs-mail-tooltip {
   position: fixed;
   z-index: 90;
   max-width: min(260px, calc(100vw - 16px));
   padding: 5px 9px;
-  border: 1px solid var(--a2t-line-strong);
-  background: var(--a2t-panel-raised);
-  box-shadow: var(--a2t-shadow-1);
-  color: var(--a2t-white);
-  font-family: var(--a2t-mono);
+  border: 1px solid var(--cs-mail-line-strong);
+  background: var(--cs-mail-panel-raised);
+  box-shadow: var(--cs-mail-shadow-1);
+  color: var(--cs-mail-white);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -227,7 +227,7 @@ input[type='radio'] {
     transform 0.12s ease;
   pointer-events: none;
 }
-.a2t-tooltip.is-visible {
+.cs-mail-tooltip.is-visible {
   opacity: 1;
   transform: translateY(0);
 }

@@ -1,0 +1,12 @@
+[Unit]
+Description=CS Mail production backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=CS_MAIL_ROOT=/opt/sites/cs-mail
+ExecStart=/opt/sites/cs-mail/deploy/production/backup.sh /opt/cs-mail/.env.production
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

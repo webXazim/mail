@@ -1,8 +1,8 @@
 [package]
-name = "harbor-api"
+name = "cs-mail-api"
 version = "0.1.0"
 edition = "2021"
-description = "Harbor Mail business backend - Axum container on the crescentsphere VPS"
+description = "CS Mail backend API - Axum, PostgreSQL and self-hosted mail integration"
 license = "MIT"
 
 [dependencies]
@@ -16,17 +16,25 @@ chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = "9"
 argon2 = "0.5"
 sha2 = "0.10"
+futures-util = "0.3"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 dotenvy = "0.15"
 anyhow = "1"
 thiserror = "1"
-# Stalwart provisioning bridge (management JMAP over HTTP). rustls-only to keep
+# Stalwart provider integration (management + mail JMAP over HTTP). rustls-only to keep
 # the Debian runtime image free of OpenSSL build deps.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Blob/get returns attachment bytes as base64.
 base64 = "0.22"
+# TOTP (RFC 6238), recovery-code generation, and local SVG QR enrollment.
+hmac = "0.12.1"
+sha1 = "0.10.7"
+data-encoding = "2.11.1"
+rand = "0.8.8"
+idna = "1"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

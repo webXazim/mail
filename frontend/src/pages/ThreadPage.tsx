@@ -119,7 +119,7 @@ export function ThreadPage() {
       <div className="list-state">
         <div className="loading-spinner" />
         <strong>Loading conversation</strong>
-        <span>Syncing your Harbor Mailbox...</span>
+        <span>Syncing your CS Mail mailbox...</span>
       </div>
     )
   if (!mail)

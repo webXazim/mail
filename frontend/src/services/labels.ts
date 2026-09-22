@@ -2,7 +2,7 @@ export type ManagedLabel = { id: string; name: string; color: string }
 
 export const labelColors = ['coral', 'green', 'blue', 'amber', 'purple'] as const
 
-const labelsKey = 'harbor-mail:labels'
+const labelsKey = 'cs-mail:labels'
 
 const defaults: ManagedLabel[] = [
   { id: 'l-clients', name: 'Clients', color: 'coral' },

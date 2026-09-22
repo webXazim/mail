@@ -19,6 +19,8 @@ type Fields = {
   attachment: boolean
   unread: boolean
   starred: boolean
+  after: string
+  before: string
   scope: string
 }
 
@@ -30,6 +32,8 @@ const emptyFields: Fields = {
   attachment: false,
   unread: false,
   starred: false,
+  after: '',
+  before: '',
   scope: '',
 }
 
@@ -44,16 +48,24 @@ export function AdvancedSearch({
   const set = <K extends keyof Fields>(key: K, value: Fields[K]) =>
     setFields((current) => ({ ...current, [key]: value }))
 
+  const queryValue = (value: string) => {
+    const trimmed = value.trim()
+    if (!/[\s"]/u.test(trimmed)) return trimmed
+    return `"${trimmed.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  }
+
   const submit = () => {
     const tokens: string[] = []
     if (fields.scope) tokens.push(`in:${fields.scope}`)
-    if (fields.from.trim()) tokens.push(`from:${fields.from.trim()}`)
-    if (fields.to.trim()) tokens.push(`to:${fields.to.trim()}`)
-    if (fields.subject.trim()) tokens.push(`subject:${fields.subject.trim()}`)
+    if (fields.from.trim()) tokens.push(`from:${queryValue(fields.from)}`)
+    if (fields.to.trim()) tokens.push(`to:${queryValue(fields.to)}`)
+    if (fields.subject.trim()) tokens.push(`subject:${queryValue(fields.subject)}`)
     if (fields.words.trim()) tokens.push(fields.words.trim())
     if (fields.attachment) tokens.push('has:attachment')
     if (fields.unread) tokens.push('is:unread')
     if (fields.starred) tokens.push('is:starred')
+    if (fields.after) tokens.push(`after:${fields.after}`)
+    if (fields.before) tokens.push(`before:${fields.before}`)
     onSubmit(tokens.join(' '))
   }
 
@@ -98,6 +110,24 @@ export function AdvancedSearch({
           placeholder="Has the words"
           value={fields.words}
           onChange={(event) => set('words', event.target.value)}
+        />
+      </div>
+      <div className="search-advanced__field">
+        <span className="sr-only">After date</span>
+        <input
+          type="date"
+          aria-label="After date"
+          value={fields.after}
+          onChange={(event) => set('after', event.target.value)}
+        />
+      </div>
+      <div className="search-advanced__field">
+        <span className="sr-only">Before date</span>
+        <input
+          type="date"
+          aria-label="Before date"
+          value={fields.before}
+          onChange={(event) => set('before', event.target.value)}
         />
       </div>
       <div className="search-advanced__check">

@@ -17,6 +17,23 @@ const mockRemoteAdminApi = vi.hoisted(() => ({
   deleteAlias: vi.fn(),
   blockSender: vi.fn(),
   unblockSender: vi.fn(),
+  forwarders: vi.fn(),
+  createForwarder: vi.fn(),
+  verifyForwarder: vi.fn(),
+  setForwarderEnabled: vi.fn(),
+  deleteForwarder: vi.fn(),
+  domain: vi.fn(),
+  updateDomain: vi.fn(),
+  securityPolicy: vi.fn(),
+  updateSecurityPolicy: vi.fn(),
+  quarantine: vi.fn(),
+  releaseQuarantine: vi.fn(),
+  deleteQuarantine: vi.fn(),
+  queue: vi.fn(),
+  retryQueuedMessage: vi.fn(),
+  cancelQueuedMessage: vi.fn(),
+  diagnostics: vi.fn(),
+  auditExport: vi.fn(),
 }))
 
 vi.mock('../services/admin', async (importOriginal) => {
@@ -43,18 +60,17 @@ const clickTab = async (label: RegExp) => {
 describe('AdminPage (remote mode)', () => {
   beforeEach(() => {
     mockRemoteAdminApi.overview.mockResolvedValue({
-      adminEmail: 'admin@harbor.test',
-      domain: 'harbor.test',
+      adminEmail: 'admin@cs-mail.test',
+      domain: 'cs-mail.test',
       userCount: 1,
       adminCount: 1,
-      audit: [
-        { id: 'a1', time: '2026-09-18T00:00:00Z', actor: 'admin', action: 'admin.user.created', detail: 'alpha' },
-      ],
+      auditEventCount: 1,
+      providerHealthy: true,
     })
     mockRemoteAdminApi.users.mockResolvedValue([
       {
         id: 'u1',
-        email: 'alex@harbor.test',
+        email: 'alex@cs-mail.test',
         displayName: 'Alex',
         status: 'active',
         role: 'admin',
@@ -63,37 +79,53 @@ describe('AdminPage (remote mode)', () => {
       },
     ])
     mockRemoteAdminApi.aliases.mockResolvedValue([
-      { id: 'al1', address: 'support@harbor.test', forwardTo: 'alex@harbor.test' },
+      { id: 'al1', address: 'support@cs-mail.test', forwardTo: 'alex@cs-mail.test' },
     ])
     mockRemoteAdminApi.audit.mockResolvedValue([
       { id: 'a1', time: '2026-09-18T00:00:00Z', actor: 'admin', action: 'admin.user.created', detail: 'alpha' },
     ])
-    mockRemoteAdminApi.blockedSenders.mockResolvedValue(['spam@harbor.test'])
+    mockRemoteAdminApi.blockedSenders.mockResolvedValue(['spam@cs-mail.test'])
+    mockRemoteAdminApi.forwarders.mockResolvedValue([
+      { id: 'u1', from: 'alex@cs-mail.test', to: 'outside@example.net', enabled: true, verified: true, keepCopy: true },
+    ])
+    mockRemoteAdminApi.quarantine.mockResolvedValue([])
+    mockRemoteAdminApi.domain.mockResolvedValue({
+      domain: { domain: 'cs-mail.test', catchAllEnabled: false, catchAll: '', dnsZoneFile: 'cs-mail.test. IN MX 10 mail.cs-mail.test.' },
+      dns: { mx: true, spf: true, dkim: true, dmarc: true },
+    })
+    mockRemoteAdminApi.securityPolicy.mockResolvedValue({
+      requireTls: true, scanAttachments: true, spamThreshold: 5, retentionDays: 30, trashAutoPurge: true, dmarcPolicy: 'quarantine', blockedSenders: [],
+      supported: { spamThreshold: true, retention: true, blockedSenders: true, requireTls: false, scanAttachments: false, dmarcPolicy: false, sso: false },
+    })
+    mockRemoteAdminApi.queue.mockResolvedValue({ messages: [], total: 0 })
+    mockRemoteAdminApi.diagnostics.mockResolvedValue({
+      database: true, mailProvider: true, queueTotal: 0, automationErrors: 0, addressSyncErrors: 0, provisioning: [],
+    })
   })
 
   it('loads the live overview and shows the real domain', async () => {
     mount()
-    expect(await screen.findByText('harbor.test')).toBeInTheDocument()
+    expect(await screen.findByText('cs-mail.test')).toBeInTheDocument()
     expect(mockRemoteAdminApi.overview).toHaveBeenCalled()
   })
 
   it('lists mailboxes from the live users endpoint', async () => {
     mount()
     await clickTab(/mailboxes/i)
-    expect(await screen.findByText('alex@harbor.test')).toBeInTheDocument()
+    expect(await screen.findByText('alex@cs-mail.test')).toBeInTheDocument()
     expect(mockRemoteAdminApi.users).toHaveBeenCalled()
   })
 
   it('lists aliases from the live aliases endpoint', async () => {
     mount()
     await clickTab(/aliases/i)
-    expect(await screen.findByText('support@harbor.test')).toBeInTheDocument()
+    expect(await screen.findByText('support@cs-mail.test')).toBeInTheDocument()
   })
 
   it('shows live blocked senders on the security tab', async () => {
     mount()
     await clickTab(/security/i)
-    expect(await screen.findByText('spam@harbor.test')).toBeInTheDocument()
+    expect(await screen.findByText('spam@cs-mail.test')).toBeInTheDocument()
   })
 
   it('shows the audit log from the live audit endpoint', async () => {
@@ -102,9 +134,10 @@ describe('AdminPage (remote mode)', () => {
     expect(await screen.findByText('admin.user.created')).toBeInTheDocument()
   })
 
-  it('marks forwarders as Stalwart-managed in remote mode', async () => {
+  it('lists server-authoritative forwarders in remote mode', async () => {
     mount()
     await clickTab(/forwarders/i)
-    expect(await screen.findByText(/External forwarding rules are configured/)).toBeInTheDocument()
+    expect(await screen.findByText('outside@example.net')).toBeInTheDocument()
+    expect(mockRemoteAdminApi.forwarders).toHaveBeenCalled()
   })
 })

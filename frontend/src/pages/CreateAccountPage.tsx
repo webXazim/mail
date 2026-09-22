@@ -1,11 +1,16 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowRight, Eye, EyeOff, KeyRound, UserPlus } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthShell } from '../components/AuthShell'
 import { authApi } from '../services/auth'
 
 export function CreateAccountPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const requested = (location.state as { from?: string } | null)?.from
+  useEffect(() => {
+    if (requested) sessionStorage.setItem('cs-mail:return-to', requested)
+  }, [requested])
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -25,8 +30,8 @@ export function CreateAccountPage() {
     try {
       const result = await authApi.register(name.trim(), email, password)
       if ('access' in result && result.access) {
-        localStorage.setItem('harbor-mail:display-name', name.trim())
-        navigate('/mail/inbox')
+        localStorage.setItem('cs-mail:display-name', name.trim())
+        navigate('/mail/business')
       } else {
         navigate('/verify-email')
       }
@@ -40,7 +45,7 @@ export function CreateAccountPage() {
     <AuthShell
       eyebrow="Get started"
       title="Create your account"
-      copy="Set up Harbor Mail for you and your team."
+      copy="Create your CS Mail login. After verification, create a business or join one by invitation."
       asideIcon={<UserPlus size={20} />}
       foot={
         <Link to="/login" className="text-button">
@@ -60,7 +65,7 @@ export function CreateAccountPage() {
             name="email"
             type="email"
             autoComplete="email"
-            placeholder="you@company.com"
+            placeholder="you@example.com"
             required
           />
         </label>

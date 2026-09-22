@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus, ShieldOff, Trash2 } from 'lucide-react'
 import { spamApi, type SpamLevel } from '../../services/spam'
+import { isRemoteMail } from '../../services/remote-mail'
 
 const levelDescriptions: Record<SpamLevel, string> = {
   low: 'Fewer messages are treated as junk. You may see more spam.',
@@ -9,12 +10,26 @@ const levelDescriptions: Record<SpamLevel, string> = {
 }
 
 export function SpamSettings() {
+  const remote = isRemoteMail()
   const [settings, setSettings] = useState(() => spamApi.load())
   const [blockedInput, setBlockedInput] = useState('')
   const [allowedInput, setAllowedInput] = useState('')
   const [notice, setNotice] = useState('')
 
   const matchingEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+
+  if (remote) {
+    return (
+      <div className="settings-section">
+        <h3>Junk filtering</h3>
+        <p className="settings-hint">
+          Per-user allow/block lists are not server-authoritative on this deployment, so CS Mail
+          does not expose browser-only controls as if they changed mail delivery. Use the mailbox
+          spam actions and the administrator mail-security policy instead.
+        </p>
+      </div>
+    )
+  }
 
   const block = () => {
     if (!matchingEmail(blockedInput)) {
@@ -55,7 +70,7 @@ export function SpamSettings() {
         </label>
         <p className="settings-hint">{levelDescriptions[settings.spamLevel]}</p>
         <p className="settings-hint">
-          Harbor Mail learns from links you mark as spam or not-spam in the mailbox.
+          CS Mail learns from links you mark as spam or not-spam in the mailbox.
         </p>
       </div>
 

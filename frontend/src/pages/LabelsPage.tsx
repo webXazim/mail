@@ -19,7 +19,7 @@ export function LabelsPage() {
     <div className="settings-page" role="region" aria-label="Labels">
       <header className="calendar-head">
         <div>
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>Labels</h1>
         </div>
         <div className="calendar-head__actions">
@@ -33,6 +33,8 @@ export function LabelsPage() {
           </button>
         </div>
       </header>
+
+      <p className="settings-hint">Labels are a browser-local organization preference on this deployment; they do not change server-side mail routing.</p>
 
       <div className="settings-section">
         <h2>Your labels</h2>

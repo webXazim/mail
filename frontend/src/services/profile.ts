@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { apiFetch } from '../lib/api'
+import { apiFetch, mailboxContextStore } from '../lib/api'
 import { primaryAccount, setPrimaryIdentity } from './accounts'
 import { isDemoAllowed } from './auth'
 import { isRemoteMail } from './remote-mail'
@@ -10,11 +10,38 @@ export type Profile = {
   email: string
   display_name: string
   role: string
+  platform_role?: 'user' | 'platform_support' | 'platform_admin'
+  login_email?: string
+  has_mailbox?: boolean
+  mailbox_email?: string | null
+  active_mailbox_id?: string | null
+  primary_mailbox_id?: string | null
+  active_organization?: { id: string; name: string | null; role: string | null } | null
   onboarded: boolean
-  storage: { used_bytes: number; total_bytes: number; pct: number }
+  storage: {
+    used_bytes: number
+    total_bytes: number
+    pct: number
+    provider_total_bytes?: number | null
+    quota_in_sync?: boolean
+  }
+  entitlements?: {
+    quota_bytes: number
+    quota_override_bytes: number | null
+    quota_source: 'plan' | 'override'
+    feature_flags: Record<string, boolean>
+  }
+  limits?: {
+    max_attachment_bytes: number
+    max_total_attachment_bytes: number
+    mailbox_bytes: number
+    max_recipients: number
+    daily_send_limit: number
+    seats: number
+  }
 }
 
-const profileKey = 'harbor-mail:profile'
+const profileKey = 'cs-mail:profile'
 
 export function displayNameOf(profile: Profile): string {
   return profile.display_name.trim() || profile.email.split('@')[0]
@@ -60,7 +87,7 @@ export function useProfile(): Profile | null {
 export function useRole(): string | null {
   const profile = useProfile()
   if (profile?.role) return profile.role
-  if (isDemoAllowed() && localStorage.getItem('harbor-mail:demo') === 'true') return 'admin'
+  if (isDemoAllowed() && localStorage.getItem('cs-mail:demo') === 'true') return 'admin'
   return null
 }
 
@@ -71,7 +98,7 @@ export function useRole(): string | null {
  */
 function applyIdentity(profile: Profile) {
   const name = displayNameOf(profile)
-  setPrimaryIdentity({ name, email: profile.email })
+  setPrimaryIdentity({ name, email: profile.mailbox_email || profile.email })
   const current = settingsApi.load()
   if (current.displayName === defaultSettings.displayName) {
     settingsApi.save({ ...current, displayName: name })
@@ -85,6 +112,7 @@ export const profileApi = {
     if (!isRemoteMail()) return null
     try {
       const profile = await apiFetch<Profile>('/api/profile')
+      mailboxContextStore.set(profile.active_organization?.id ?? null, profile.active_mailbox_id ?? profile.primary_mailbox_id ?? null)
       localStorage.setItem(profileKey, JSON.stringify(profile))
       setCurrent(profile)
       applyIdentity(profile)
@@ -101,6 +129,7 @@ export const profileApi = {
       method: 'PUT',
       body: JSON.stringify(patch),
     })
+    mailboxContextStore.set(profile.active_organization?.id ?? null, profile.active_mailbox_id ?? profile.primary_mailbox_id ?? null)
     localStorage.setItem(profileKey, JSON.stringify(profile))
     setCurrent(profile)
     applyIdentity(profile)
@@ -110,7 +139,7 @@ export const profileApi = {
 
 /** Best-known identity for the signed-in user (profile, else cached account). */
 export function localIdentity(): { name: string; email: string } {
-  if (current) return { name: displayNameOf(current), email: current.email }
+  if (current) return { name: displayNameOf(current), email: current.mailbox_email || current.email }
   const account = primaryAccount()
   return { name: account.name, email: account.email }
 }

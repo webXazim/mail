@@ -7,6 +7,20 @@ export type MailboxStatus = 'active' | 'quarantine' | 'disabled'
 
 export type Role = 'owner' | 'admin' | 'member' | 'billing'
 
+export type UserBusinessMembership = {
+  organizationId: string
+  organizationName: string
+  role: 'owner' | 'admin' | 'member' | 'billing'
+  membershipStatus: 'active' | 'invited' | 'suspended'
+  planCode?: string | null
+  planName?: string | null
+  subscriptionStatus?: string | null
+  assignedAt?: string | null
+  currentPeriodStart?: string | null
+  currentPeriodEnd?: string | null
+  assignmentSource?: string | null
+}
+
 export type MailboxAccount = {
   id: string
   email: string
@@ -15,15 +29,43 @@ export type MailboxAccount = {
   role: Role
   storageUsedGB: number
   quotaGB: number
+  plan?: string
+  quotaSource?: 'plan' | 'override'
+  planQuotaGB?: number
+  providerQuotaGB?: number | null
+  quotaInSync?: boolean
+  platformRole?: 'user' | 'platform_support' | 'platform_admin'
+  emailVerified?: boolean
+  createdAt?: string
+  lastActiveAt?: string | null
+  businessCount?: number
+  organizationId?: string | null
+  organizationName?: string | null
+  organizationRole?: 'owner' | 'admin' | 'member' | 'billing' | null
+  subscriptionPlanCode?: string | null
+  subscriptionPlanName?: string | null
+  subscriptionStatus?: string | null
+  subscriptionAssignedAt?: string | null
+  subscriptionPeriodEnd?: string | null
+  subscriptionAssignmentSource?: string | null
+  businessMemberships?: UserBusinessMembership[]
 }
 
-export type Alias = { id: string; address: string; forwardTo: string }
+export type Alias = {
+  id: string
+  address: string
+  forwardTo: string
+  destinationType?: 'mailbox' | 'external'
+  enabled?: boolean
+  syncStatus?: string
+  syncError?: string
+}
 
-export type Forwarder = { id: string; from: string; to: string; enabled: boolean }
+export type Forwarder = { id: string; from: string; to: string; enabled: boolean; verified?: boolean; keepCopy?: boolean }
 
 export type DnsStatus = { mx: boolean; spf: boolean; dkim: boolean; dmarc: boolean }
 
-export type DomainSettings = { domain: string; catchAllEnabled: boolean; catchAll: string }
+export type DomainSettings = { domain: string; catchAllEnabled: boolean; catchAll: string; dnsZoneFile?: string; dnsManagement?: string; providerAvailable?: boolean }
 
 export type SecuritySettings = {
   spamThreshold: number
@@ -65,23 +107,24 @@ export type AuditEntry = {
   actor: string
   action: string
   detail: string
+  eventHash?: string
 }
 
-const mailboxesKey = 'harbor-mail:admin:mailboxes'
-const aliasesKey = 'harbor-mail:admin:aliases'
-const forwardersKey = 'harbor-mail:admin:forwarders'
-const dnsKey = 'harbor-mail:admin:dns'
-const domainKey = 'harbor-mail:admin:domain'
-const securityKey = 'harbor-mail:admin:security'
-const quarantineKey = 'harbor-mail:admin:quarantine'
-const auditKey = 'harbor-mail:admin:audit'
-const passwordsKey = 'harbor-mail:admin:passwords'
-const ssoKey = 'harbor-mail:admin:sso'
+const mailboxesKey = 'cs-mail:admin:mailboxes'
+const aliasesKey = 'cs-mail:admin:aliases'
+const forwardersKey = 'cs-mail:admin:forwarders'
+const dnsKey = 'cs-mail:admin:dns'
+const domainKey = 'cs-mail:admin:domain'
+const securityKey = 'cs-mail:admin:security'
+const quarantineKey = 'cs-mail:admin:quarantine'
+const auditKey = 'cs-mail:admin:audit'
+const passwordsKey = 'cs-mail:admin:passwords'
+const ssoKey = 'cs-mail:admin:sso'
 
 export const seedMailboxes: MailboxAccount[] = [
   {
     id: 'mb-alex',
-    email: 'alex@harbor.co',
+    email: 'alex@crescentsphere.com',
     displayName: 'Alex Morgan',
     status: 'active',
     role: 'owner',
@@ -90,8 +133,8 @@ export const seedMailboxes: MailboxAccount[] = [
   },
   {
     id: 'mb-nora',
-    email: 'nora@harbor.co',
-    displayName: 'Nora Harbor',
+    email: 'nora@crescentsphere.com',
+    displayName: 'Nora Saleh',
     status: 'active',
     role: 'member',
     storageUsedGB: 0.2,
@@ -99,7 +142,7 @@ export const seedMailboxes: MailboxAccount[] = [
   },
   {
     id: 'mb-jonas',
-    email: 'jonas@harbor.co',
+    email: 'jonas@crescentsphere.com',
     displayName: 'Jonas Meier',
     status: 'active',
     role: 'member',
@@ -108,7 +151,7 @@ export const seedMailboxes: MailboxAccount[] = [
   },
   {
     id: 'mb-dev',
-    email: 'dev@harbor.co',
+    email: 'dev@crescentsphere.com',
     displayName: 'Dev Team',
     status: 'active',
     role: 'member',
@@ -118,17 +161,17 @@ export const seedMailboxes: MailboxAccount[] = [
 ]
 
 export const seedAliases: Alias[] = [
-  { id: 'al-support', address: 'support@harbor.co', forwardTo: 'alex@harbor.co' },
-  { id: 'al-sales', address: 'sales@harbor.co', forwardTo: 'nora@harbor.co' },
-  { id: 'al-hello', address: 'hello@harbor.co', forwardTo: 'alex@harbor.co' },
+  { id: 'al-support', address: 'support@crescentsphere.com', forwardTo: 'alex@crescentsphere.com' },
+  { id: 'al-sales', address: 'sales@crescentsphere.com', forwardTo: 'nora@crescentsphere.com' },
+  { id: 'al-hello', address: 'hello@crescentsphere.com', forwardTo: 'alex@crescentsphere.com' },
 ]
 
 export const seedForwarders: Forwarder[] = [
-  { id: 'fw-alex', from: 'alex@harbor.co', to: 'alexmorgan@example.com', enabled: true },
+  { id: 'fw-alex', from: 'alex@crescentsphere.com', to: 'alexmorgan@example.com', enabled: true },
 ]
 
 export const seedDomain: DomainSettings = {
-  domain: 'harbor.co',
+  domain: 'crescentsphere.com',
   catchAllEnabled: false,
   catchAll: '',
 }
@@ -146,7 +189,7 @@ export const seedSecurity: SecuritySettings = {
 export const seedSso: SsoSettings = {
   enabled: false,
   provider: 'okta',
-  entityId: 'https://harbor.co/saml2',
+  entityId: 'https://crescentsphere.com/saml2',
   enforce: false,
 }
 
@@ -157,7 +200,7 @@ export const seedQuarantine: QuarantinedMail[] = [
   {
     id: 'q-1',
     from: 'prize@win-now.example',
-    to: 'alex@harbor.co',
+    to: 'alex@crescentsphere.com',
     subject: 'You have won a prize!',
     date: atTime(35),
     reason: 'Blocked by global blocklist',
@@ -166,7 +209,7 @@ export const seedQuarantine: QuarantinedMail[] = [
   {
     id: 'q-2',
     from: 'billing@ghost-invoice.example',
-    to: 'nora@harbor.co',
+    to: 'nora@crescentsphere.com',
     subject: 'Invoice overdue — pay immediately',
     date: atTime(120),
     reason: 'High spam score (8.4 / 10)',
@@ -187,30 +230,30 @@ export const seedAudit: AuditEntry[] = [
     time: atTime(60),
     actor: 'admin',
     action: 'Mailbox created',
-    detail: 'ops@harbor.co (Ops Team)',
+    detail: 'ops@crescentsphere.com (Ops Team)',
   },
   {
     id: 'au-3',
     time: atTime(20),
     actor: 'admin',
     action: 'Forwarder added',
-    detail: 'alex@harbor.co → alexmorgan@example.com',
+    detail: 'alex@crescentsphere.com → alexmorgan@example.com',
   },
 ]
 
 export const dnsRecords: { id: keyof DnsStatus; name: string; value: string }[] = [
-  { id: 'mx', name: 'MX', value: 'harbor.co. 300 IN MX 10 mail.harbor.co.' },
-  { id: 'spf', name: 'SPF', value: 'harbor.co. TXT "v=spf1 include:harbor.co ~all"' },
+  { id: 'mx', name: 'MX', value: 'crescentsphere.com. 300 IN MX 10 mail.crescentsphere.com.' },
+  { id: 'spf', name: 'SPF', value: 'crescentsphere.com. TXT "v=spf1 include:crescentsphere.com ~all"' },
   {
     id: 'dkim',
     name: 'DKIM',
     value:
-      'harbor-mail._domainkey.harbor.co. TXT "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC…"',
+      'cs-mail._domainkey.crescentsphere.com. TXT "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC…"',
   },
   {
     id: 'dmarc',
     name: 'DMARC',
-    value: '_dmarc.harbor.co. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@harbor.co"',
+    value: '_dmarc.crescentsphere.com. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@crescentsphere.com"',
   },
 ]
 
@@ -242,7 +285,7 @@ const clone = <T>(value: T): T =>
   Array.isArray(value) ? (value.map((item) => ({ ...item })) as T) : { ...value }
 
 const roleOf = (mailbox: MailboxAccount): Role => {
-  if (mailbox.email.toLowerCase() === 'alex@harbor.co') return 'owner'
+  if (mailbox.email.toLowerCase() === 'alex@crescentsphere.com') return 'owner'
   return mailbox.role === 'admin' ? 'admin' : 'member'
 }
 
@@ -260,7 +303,7 @@ export const adminApi = {
   addMailbox(input: { email: string; displayName?: string; quotaGB?: number }) {
     const current = this.listMailboxes()
     const raw = input.email.trim().toLowerCase()
-    const email = raw.includes('@') ? raw : `${raw}@harbor.co`
+    const email = raw.includes('@') ? raw : `${raw}@crescentsphere.com`
     if (
       !/^[a-z0-9.+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email) ||
       current.some((mailbox) => mailbox.email.toLowerCase() === email)
@@ -317,7 +360,7 @@ export const adminApi = {
     const current = this.listMailboxes()
     const target = current.find((mailbox) => mailbox.id === id)
     if (!target || target.role === role) return current
-    const isPrimary = target.email.toLowerCase() === 'alex@harbor.co'
+    const isPrimary = target.email.toLowerCase() === 'alex@crescentsphere.com'
     if (isPrimary && role !== 'owner') return current
     if (!isPrimary && role === 'owner') return current
     const next = current.map((mailbox) => (mailbox.id === id ? { ...mailbox, role } : mailbox))
@@ -519,13 +562,46 @@ type BackendUser = {
   email: string
   display_name: string
   role: 'admin' | 'member' | 'billing'
+  status: 'active' | 'suspended'
   plan: string
   quota_bytes: number
+  quota_override_bytes?: number | null
+  quota_source?: 'plan' | 'override'
+  plan_mailbox_bytes?: number
+  provider_quota_bytes?: number | null
+  quota_in_sync?: boolean
   mail_account_id: string | null
   onboarded: boolean
   created_at: string
   storage_used_bytes: number
   storage_pct: number
+  platform_role: 'user' | 'platform_support' | 'platform_admin'
+  email_verified: boolean
+  email_verified_at?: string | null
+  last_active_at?: string | null
+  business_count?: number
+  primary_organization_id?: string | null
+  primary_organization_name?: string | null
+  primary_organization_role?: 'owner' | 'admin' | 'member' | 'billing' | null
+  subscription_plan_code?: string | null
+  subscription_plan_name?: string | null
+  subscription_status?: string | null
+  subscription_assigned_at?: string | null
+  subscription_period_end?: string | null
+  subscription_assignment_source?: string | null
+  business_memberships?: Array<{
+    organization_id: string
+    organization_name: string
+    role: 'owner' | 'admin' | 'member' | 'billing'
+    membership_status: 'active' | 'invited' | 'suspended'
+    plan_code?: string | null
+    plan_name?: string | null
+    subscription_status?: string | null
+    assigned_at?: string | null
+    current_period_start?: string | null
+    current_period_end?: string | null
+    assignment_source?: string | null
+  }>
 }
 
 type BackendAlias = {
@@ -534,6 +610,10 @@ type BackendAlias = {
   domain: string
   source: string
   forwardTo: string
+  destinationType?: 'mailbox' | 'external'
+  enabled?: boolean
+  syncStatus?: string
+  syncError?: string
 }
 
 type BackendAudit = {
@@ -542,6 +622,14 @@ type BackendAudit = {
   actor: string
   action: string
   detail: unknown
+  eventHash?: string
+}
+
+export type RemoteUsersPage = {
+  users: MailboxAccount[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export type RemoteOverview = {
@@ -549,7 +637,64 @@ export type RemoteOverview = {
   domain: string
   userCount: number
   adminCount: number
-  audit: AuditEntry[]
+  suspendedUserCount: number
+  unverifiedUserCount: number
+  auditEventCount: number
+  businessCount: number
+  activeSubscriptionCount: number
+  pastDueSubscriptionCount: number
+  suspendedSubscriptionCount: number
+  expiring30DaysCount: number
+  paymentReviewCount: number
+  providerHealthy: boolean
+}
+
+export type AdminSecurityPolicy = SecuritySettings & {
+  providerAvailable?: boolean
+  supported?: {
+    spamThreshold: boolean
+    retention: boolean
+    blockedSenders: boolean
+    requireTls: boolean
+    scanAttachments: boolean
+    dmarcPolicy: boolean
+    sso: boolean
+  }
+}
+
+export type AdminQueueMessage = {
+  id: string
+  createdAt?: string
+  nextRetry?: string | null
+  returnPath?: string
+  recipients?: Record<string, unknown>
+  size?: number
+  priority?: number
+}
+
+export type AdminDiagnostics = {
+  database: boolean
+  mailProvider: boolean
+  queueTotal: number
+  automationErrors: number
+  addressSyncErrors: number
+  provisioning: { status: string; count: number }[]
+}
+
+export type LaunchCertification = {
+  id: string
+  release_label: string
+  release_sha256: string
+  environment: string
+  status: 'running' | 'passed' | 'failed' | 'aborted'
+  report_sha256: string
+  report_path: string
+  mandatory_passed: number
+  mandatory_failed: number
+  optional_skipped: number
+  started_at: string
+  completed_at?: string | null
+  created_at: string
 }
 
 const remoteRole = (role: BackendUser['role']): Role =>
@@ -559,10 +704,42 @@ const mapUser = (user: BackendUser): MailboxAccount => ({
   id: user.id,
   email: user.email,
   displayName: user.display_name,
-  status: 'active',
+  status: user.status === 'suspended' ? 'disabled' : 'active',
   role: remoteRole(user.role),
   storageUsedGB: (user.storage_used_bytes ?? 0) / GB,
   quotaGB: Math.max(1, Math.round((user.quota_bytes ?? 0) / GB)),
+  plan: user.plan,
+  quotaSource: user.quota_source ?? (user.quota_override_bytes ? 'override' : 'plan'),
+  planQuotaGB: Math.max(1, Math.round((user.plan_mailbox_bytes ?? user.quota_bytes ?? 0) / GB)),
+  providerQuotaGB: user.provider_quota_bytes ? user.provider_quota_bytes / GB : null,
+  quotaInSync: user.quota_in_sync,
+  platformRole: user.platform_role,
+  emailVerified: Boolean(user.email_verified),
+  createdAt: user.created_at,
+  lastActiveAt: user.last_active_at ?? null,
+  businessCount: user.business_count ?? 0,
+  organizationId: user.primary_organization_id ?? null,
+  organizationName: user.primary_organization_name ?? null,
+  organizationRole: user.primary_organization_role ?? null,
+  subscriptionPlanCode: user.subscription_plan_code ?? null,
+  subscriptionPlanName: user.subscription_plan_name ?? null,
+  subscriptionStatus: user.subscription_status ?? null,
+  subscriptionAssignedAt: user.subscription_assigned_at ?? null,
+  subscriptionPeriodEnd: user.subscription_period_end ?? null,
+  subscriptionAssignmentSource: user.subscription_assignment_source ?? null,
+  businessMemberships: (user.business_memberships ?? []).map((membership) => ({
+    organizationId: membership.organization_id,
+    organizationName: membership.organization_name,
+    role: membership.role,
+    membershipStatus: membership.membership_status,
+    planCode: membership.plan_code ?? null,
+    planName: membership.plan_name ?? null,
+    subscriptionStatus: membership.subscription_status ?? null,
+    assignedAt: membership.assigned_at ?? null,
+    currentPeriodStart: membership.current_period_start ?? null,
+    currentPeriodEnd: membership.current_period_end ?? null,
+    assignmentSource: membership.assignment_source ?? null,
+  })),
 })
 
 const detailText = (detail: unknown): string => {
@@ -581,6 +758,7 @@ const mapAudit = (entry: BackendAudit): AuditEntry => ({
   actor: entry.actor,
   action: entry.action,
   detail: detailText(entry.detail),
+  eventHash: entry.eventHash,
 })
 
 export type CreateUserInput = {
@@ -590,31 +768,62 @@ export type CreateUserInput = {
   quotaGB?: number
 }
 
-/** Live /api/admin/* + /api/aliases + /api/admin/suppressions backing for the
- * Admin center in remote (connected) mode. Demo mode keeps the localStorage
- * mock above. Sections with no server counterpart (forwarders, DNS, catch-all,
- * quarantine, SSO, spam/retention toggles) are marked unavailable in the UI. */
+/** Live server-authoritative Admin center. Demo mode keeps the localStorage
+ * mock above, but authenticated remote mode never falls back to browser state. */
 export const remoteAdminApi = {
   async overview(): Promise<RemoteOverview> {
     const data = await apiFetch<{
       admin: { id: string; email: string }
-      users: BackendUser[]
-      admins: BackendUser[]
-      audit_events: BackendAudit[]
+      domain: string
+      user_count: number
+      admin_count: number
+      suspended_user_count: number
+      unverified_user_count: number
+      audit_events: number
+      business_count: number
+      active_subscription_count: number
+      past_due_subscription_count: number
+      suspended_subscription_count: number
+      expiring_30_days_count: number
+      payment_review_count: number
+      provider_healthy: boolean
     }>('/api/admin/overview')
-    const domain = (data.admin.email.split('@')[1] ?? '').toLowerCase()
     return {
       adminEmail: data.admin.email,
-      domain,
-      userCount: data.users.length,
-      adminCount: data.admins.length,
-      audit: (data.audit_events ?? []).map(mapAudit),
+      domain: data.domain,
+      userCount: data.user_count ?? 0,
+      adminCount: data.admin_count ?? 0,
+      suspendedUserCount: data.suspended_user_count ?? 0,
+      unverifiedUserCount: data.unverified_user_count ?? 0,
+      auditEventCount: data.audit_events ?? 0,
+      businessCount: data.business_count ?? 0,
+      activeSubscriptionCount: data.active_subscription_count ?? 0,
+      pastDueSubscriptionCount: data.past_due_subscription_count ?? 0,
+      suspendedSubscriptionCount: data.suspended_subscription_count ?? 0,
+      expiring30DaysCount: data.expiring_30_days_count ?? 0,
+      paymentReviewCount: data.payment_review_count ?? 0,
+      providerHealthy: Boolean(data.provider_healthy),
+    }
+  },
+
+  async usersPage(options: { q?: string; status?: 'active' | 'suspended'; platformRole?: 'user' | 'platform_support' | 'platform_admin'; limit?: number; offset?: number } = {}): Promise<RemoteUsersPage> {
+    const params = new URLSearchParams()
+    if (options.q?.trim()) params.set('q', options.q.trim())
+    if (options.status) params.set('status', options.status)
+    if (options.platformRole) params.set('platform_role', options.platformRole)
+    params.set('limit', String(options.limit ?? 100))
+    params.set('offset', String(options.offset ?? 0))
+    const data = await apiFetch<{ users: BackendUser[]; total?: number; limit?: number; offset?: number }>(`/api/admin/users?${params.toString()}`)
+    return {
+      users: (data.users ?? []).map(mapUser),
+      total: data.total ?? data.users?.length ?? 0,
+      limit: data.limit ?? options.limit ?? 100,
+      offset: data.offset ?? options.offset ?? 0,
     }
   },
 
   async users(): Promise<MailboxAccount[]> {
-    const data = await apiFetch<{ users: BackendUser[] }>('/api/admin/users')
-    return (data.users ?? []).map(mapUser)
+    return (await this.usersPage()).users
   },
 
   async createUser(input: CreateUserInput): Promise<void> {
@@ -632,7 +841,7 @@ export const remoteAdminApi = {
 
   async updateUser(
     id: string,
-    patch: { display_name?: string; role?: string; quota_bytes?: number; password?: string },
+    patch: { display_name?: string; role?: string; platform_role?: 'user' | 'platform_support' | 'platform_admin'; status?: 'active' | 'suspended'; plan?: string; quota_bytes?: number; reset_quota_override?: boolean; password?: string },
   ): Promise<void> {
     await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -650,6 +859,10 @@ export const remoteAdminApi = {
       id: alias.id,
       address: alias.address,
       forwardTo: alias.forwardTo,
+      destinationType: alias.destinationType,
+      enabled: alias.enabled,
+      syncStatus: alias.syncStatus,
+      syncError: alias.syncError,
     }))
   },
 
@@ -662,6 +875,127 @@ export const remoteAdminApi = {
 
   async deleteAlias(id: string): Promise<void> {
     await apiFetch(`/api/aliases/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async forwarders(): Promise<Forwarder[]> {
+    const data = await apiFetch<{ forwarders: Forwarder[] }>('/api/admin/forwarders')
+    return data.forwarders ?? []
+  },
+
+  async createForwarder(from: string, to: string): Promise<{ verificationCode?: string | null; forwarder?: Forwarder }> {
+    return await apiFetch<{ verificationCode?: string | null; forwarder?: Forwarder }>('/api/admin/forwarders', {
+      method: 'POST',
+      body: JSON.stringify({ from, to, keep_copy: true }),
+    })
+  },
+
+  async verifyForwarder(id: string, code: string): Promise<void> {
+    await apiFetch(`/api/admin/forwarders/${encodeURIComponent(id)}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    })
+  },
+
+  async setForwarderEnabled(id: string, enabled: boolean): Promise<void> {
+    await apiFetch(`/api/admin/forwarders/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    })
+  },
+
+  async deleteForwarder(id: string): Promise<void> {
+    await apiFetch(`/api/admin/forwarders/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async domain(): Promise<{ domain: DomainSettings; dns: DnsStatus }> {
+    const data = await apiFetch<{
+      domain: string
+      catchAllEnabled: boolean
+      catchAll: string
+      dnsZoneFile?: string
+      dnsManagement?: string
+      providerAvailable?: boolean
+      dns: DnsStatus
+    }>('/api/admin/domain')
+    return {
+      domain: {
+        domain: data.domain,
+        catchAllEnabled: Boolean(data.catchAllEnabled),
+        catchAll: data.catchAll ?? '',
+        dnsZoneFile: data.dnsZoneFile ?? '',
+        dnsManagement: data.dnsManagement,
+        providerAvailable: data.providerAvailable,
+      },
+      dns: data.dns ?? { mx: false, spf: false, dkim: false, dmarc: false },
+    }
+  },
+
+  async updateDomain(patch: { catch_all_enabled?: boolean; catch_all?: string }): Promise<{ domain: DomainSettings; dns: DnsStatus }> {
+    const data = await apiFetch<{
+      domain: string
+      catchAllEnabled: boolean
+      catchAll: string
+      dnsZoneFile?: string
+      dnsManagement?: string
+      providerAvailable?: boolean
+      dns: DnsStatus
+    }>('/api/admin/domain', { method: 'PATCH', body: JSON.stringify(patch) })
+    return {
+      domain: {
+        domain: data.domain,
+        catchAllEnabled: Boolean(data.catchAllEnabled),
+        catchAll: data.catchAll ?? '',
+        dnsZoneFile: data.dnsZoneFile ?? '',
+        dnsManagement: data.dnsManagement,
+        providerAvailable: data.providerAvailable,
+      },
+      dns: data.dns ?? { mx: false, spf: false, dkim: false, dmarc: false },
+    }
+  },
+
+  async securityPolicy(): Promise<AdminSecurityPolicy> {
+    return await apiFetch<AdminSecurityPolicy>('/api/admin/security-policy')
+  },
+
+  async updateSecurityPolicy(patch: Partial<Pick<SecuritySettings, 'spamThreshold' | 'retentionDays' | 'trashAutoPurge'>>): Promise<AdminSecurityPolicy> {
+    return await apiFetch<AdminSecurityPolicy>('/api/admin/security-policy', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  },
+
+  async quarantine(): Promise<QuarantinedMail[]> {
+    const data = await apiFetch<{ messages: QuarantinedMail[] }>('/api/admin/quarantine?limit=100')
+    return data.messages ?? []
+  },
+
+  async releaseQuarantine(id: string): Promise<void> {
+    await apiFetch(`/api/admin/quarantine/${encodeURIComponent(id)}/release`, { method: 'POST' })
+  },
+
+  async deleteQuarantine(id: string): Promise<void> {
+    await apiFetch(`/api/admin/quarantine/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async queue(): Promise<{ messages: AdminQueueMessage[]; total: number }> {
+    return await apiFetch<{ messages: AdminQueueMessage[]; total: number }>('/api/admin/queue?limit=100')
+  },
+
+  async retryQueuedMessage(id: string): Promise<void> {
+    await apiFetch(`/api/admin/queue/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+  },
+
+  async cancelQueuedMessage(id: string): Promise<void> {
+    await apiFetch(`/api/admin/queue/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async diagnostics(): Promise<AdminDiagnostics> {
+    return await apiFetch<AdminDiagnostics>('/api/admin/diagnostics')
+  },
+
+  async launchCertifications(): Promise<LaunchCertification[]> {
+    const data = await apiFetch<{ runs: LaunchCertification[] }>('/api/admin/launch-certifications')
+    return data.runs ?? []
   },
 
   async blockedSenders(): Promise<string[]> {
@@ -688,5 +1022,170 @@ export const remoteAdminApi = {
   /** Download the full admin audit trail as an RFC 4180 CSV document. */
   async auditExport(): Promise<string> {
     return await apiFetch<string>('/api/admin/audit/export')
+  },
+}
+
+export type PlatformControls = {
+  public_signup_enabled: boolean
+  business_creation_enabled: boolean
+  plan_ordering_enabled: boolean
+  domain_onboarding_enabled: boolean
+  mailbox_provisioning_enabled: boolean
+  outbound_sending_enabled: boolean
+  maintenance_message: string
+  updated_at?: string
+  updated_by?: string | null
+  updated_by_email?: string | null
+}
+
+export type AdminBusiness = {
+  id: string
+  name: string
+  slug: string
+  status: 'active' | 'suspended' | 'closed'
+  status_reason: string
+  status_changed_at?: string | null
+  owner_email?: string | null
+  member_count: number
+  domain_count: number
+  mailbox_count: number
+  active_mailbox_count: number
+  plan_code?: string | null
+  plan_name?: string | null
+  subscription_status?: string | null
+  purchased_mailbox_count?: number | null
+  current_period_end?: string | null
+  assignment_source?: string | null
+  created_at: string
+}
+
+export type AdminBusinessMember = {
+  user_id: string
+  email: string
+  display_name: string
+  role: 'owner' | 'admin' | 'billing' | 'member'
+  status: 'active' | 'suspended'
+  platform_role: 'user' | 'platform_support' | 'platform_admin'
+  joined_at: string
+}
+
+export type AdminHostedDomain = {
+  id: string
+  organization_id: string
+  organization_name: string
+  domain: string
+  status: string
+  is_primary: boolean
+  verified_at?: string | null
+  provider_domain_id?: string | null
+  dns_ready: boolean
+  dns: { mx: boolean; spf: boolean; dkim: boolean; dmarc: boolean }
+  last_error: string
+  last_dns_readiness_check?: string | null
+  mailbox_count: number
+  created_at: string
+}
+
+export type AdminHostedMailbox = {
+  id: string
+  organization_id: string
+  organization_name: string
+  domain: string
+  address: string
+  display_name: string
+  status: string
+  sync_status: string
+  sync_error: string
+  quota_bytes: number
+  quota_used?: number | null
+  provider_account_id?: string | null
+  user_id?: string | null
+  user_email?: string | null
+  created_at: string
+}
+
+export type AdminRecoveryItem = {
+  id: string
+  kind: 'provisioning' | 'import' | 'scheduled' | 'billing_email'
+  operation?: string
+  target: string
+  status: string
+  attempts: number
+  max_attempts?: number
+  last_error: string
+  updated_at: string
+  mailbox_id?: string | null
+}
+
+export type AdminRecovery = {
+  provisioning: AdminRecoveryItem[]
+  imports: AdminRecoveryItem[]
+  scheduled: AdminRecoveryItem[]
+  billing_email: AdminRecoveryItem[]
+}
+
+const listParams = (options: { q?: string; status?: string; limit?: number; offset?: number } = {}) => {
+  const params = new URLSearchParams()
+  if (options.q?.trim()) params.set('q', options.q.trim())
+  if (options.status?.trim()) params.set('status', options.status.trim())
+  params.set('limit', String(options.limit ?? 50))
+  params.set('offset', String(options.offset ?? 0))
+  return params.toString()
+}
+
+export const platformAdminApi = {
+  controls(): Promise<PlatformControls> {
+    return apiFetch<PlatformControls>('/api/admin/platform-controls')
+  },
+  updateControls(value: PlatformControls): Promise<PlatformControls> {
+    return apiFetch<PlatformControls>('/api/admin/platform-controls', {
+      method: 'PUT',
+      body: JSON.stringify(value),
+    })
+  },
+  businesses(options: { q?: string; status?: string; limit?: number; offset?: number } = {}) {
+    return apiFetch<{ businesses: AdminBusiness[]; total: number; limit: number; offset: number }>(`/api/admin/businesses?${listParams(options)}`)
+  },
+  updateBusinessStatus(id: string, input: { status: 'active' | 'suspended' | 'closed'; reason?: string; confirm_name?: string }) {
+    return apiFetch(`/api/admin/businesses/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify(input) })
+  },
+  businessMembers(id: string) {
+    return apiFetch<{ members: AdminBusinessMember[] }>(`/api/admin/businesses/${encodeURIComponent(id)}/members`)
+  },
+  updateBusinessMember(organizationId: string, userId: string, input: { role: AdminBusinessMember['role']; status: AdminBusinessMember['status'] }) {
+    return apiFetch(`/api/admin/businesses/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify(input) })
+  },
+  removeBusinessMember(organizationId: string, userId: string) {
+    return apiFetch(`/api/admin/businesses/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' })
+  },
+  domains(options: { q?: string; status?: string; limit?: number; offset?: number } = {}) {
+    return apiFetch<{ domains: AdminHostedDomain[]; total: number; limit: number; offset: number }>(`/api/admin/hosted-domains?${listParams(options)}`)
+  },
+  domainAction(id: string, action: 'suspend' | 'resume' | 'check_dns' | 'provision' | 'delete', confirmDomain = '') {
+    return apiFetch(`/api/admin/hosted-domains/${encodeURIComponent(id)}/action`, { method: 'POST', body: JSON.stringify({ action, confirm_domain: confirmDomain }) })
+  },
+  mailboxes(options: { q?: string; status?: string; limit?: number; offset?: number } = {}) {
+    return apiFetch<{ mailboxes: AdminHostedMailbox[]; total: number; limit: number; offset: number }>(`/api/admin/hosted-mailboxes?${listParams(options)}`)
+  },
+  mailboxAction(
+    id: string,
+    action: 'suspend' | 'activate' | 'delete' | 'set_quota',
+    options: { confirmAddress?: string; quotaBytes?: number; resetToDefault?: boolean } = {},
+  ) {
+    return apiFetch(`/api/admin/hosted-mailboxes/${encodeURIComponent(id)}/action`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action,
+        confirm_address: options.confirmAddress ?? '',
+        quota_bytes: options.quotaBytes,
+        reset_to_default: Boolean(options.resetToDefault),
+      }),
+    })
+  },
+  recovery(): Promise<AdminRecovery> {
+    return apiFetch<AdminRecovery>('/api/admin/recovery')
+  },
+  retryRecovery(id: string, kind: AdminRecoveryItem['kind']) {
+    return apiFetch(`/api/admin/recovery/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({ kind }) })
   },
 }

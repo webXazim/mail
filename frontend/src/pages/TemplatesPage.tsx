@@ -29,7 +29,7 @@ export function TemplatesPage() {
     <div className="settings-page" role="region" aria-label="Templates">
       <header className="calendar-head">
         <div>
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>Templates</h1>
         </div>
         <div className="calendar-head__actions">
@@ -43,6 +43,8 @@ export function TemplatesPage() {
           </button>
         </div>
       </header>
+
+      <p className="settings-hint">Templates are stored in this browser on this deployment. They are a compose convenience, not a server-enforced mail setting.</p>
 
       <div className="settings-section">
         <h2>Your templates</h2>

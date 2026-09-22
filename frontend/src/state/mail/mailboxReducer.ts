@@ -32,6 +32,7 @@ export type MailboxAction =
   | { type: 'sent'; mail: Mail }
   | { type: 'receive'; mail: Mail }
   | { type: 'append'; mails: Mail[] }
+  | { type: 'upsert'; mails: Mail[] }
   | { type: 'drop-account'; accountId: string }
   | { type: 'unsend-mail'; id: string }
   | { type: 'notice'; message: string }
@@ -176,6 +177,14 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
       return { ...state, mailbox: [action.mail, ...state.mailbox] }
     case 'append':
       return { ...state, mailbox: [...state.mailbox, ...action.mails] }
+    case 'upsert': {
+      if (!action.mails.length) return state
+      const incoming = new Map(action.mails.map((mail) => [mail.id, mail]))
+      const merged = state.mailbox.map((mail) => incoming.get(mail.id) ?? mail)
+      const known = new Set(state.mailbox.map((mail) => mail.id))
+      for (const mail of action.mails) if (!known.has(mail.id)) merged.push(mail)
+      return { ...state, mailbox: merged }
+    }
     case 'drop-account':
       return {
         ...state,

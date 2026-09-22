@@ -1,5 +1,5 @@
 .thread-main .reader {
-  height: calc(100vh - var(--a2t-header-h));
+  height: calc(100vh - var(--cs-mail-header-h));
   border-left: 0;
 }
 .reader {
@@ -7,7 +7,7 @@
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  background: var(--a2t-bg);
+  background: var(--cs-mail-bg);
 }
 .reader-toolbar {
   position: sticky;
@@ -17,15 +17,15 @@
   align-items: center;
   gap: 4px;
   padding: 10px 20px;
-  background: var(--a2t-shell);
+  background: var(--cs-mail-shell);
   backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .reader-toolbar__sep {
   width: 1px;
   height: 20px;
   margin: 0 6px;
-  background: var(--a2t-line-soft);
+  background: var(--cs-mail-line-soft);
 }
 .reader-content {
   width: min(720px, 100%);
@@ -37,7 +37,7 @@
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.04em;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   line-height: 1.2;
 }
 .reader-details {
@@ -46,9 +46,9 @@
   gap: 12px;
   margin-top: 18px;
   padding: 12px 14px;
-  border: 1px solid var(--a2t-line-soft);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
+  border: 1px solid var(--cs-mail-line-soft);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
 }
 .reader-details > span:nth-child(2) {
   display: grid;
@@ -56,25 +56,25 @@
   min-width: 0;
 }
 .reader-details strong {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   font-weight: 600;
 }
 .reader-details small {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .reader-details time {
   margin-left: auto;
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
 }
 .reader-details__toggle {
   width: 26px;
   height: 26px;
   padding: 0;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .reader-details__toggle svg {
   transition: transform 0.16s ease;
@@ -87,9 +87,9 @@
   gap: 12px;
   margin-top: 10px;
   padding: 12px 16px;
-  border: 1px solid var(--a2t-line-soft);
-  border-top: 1px solid var(--a2t-line);
-  background: var(--a2t-panel-raised);
+  border: 1px solid var(--cs-mail-line-soft);
+  border-top: 1px solid var(--cs-mail-line);
+  background: var(--cs-mail-panel-raised);
 }
 .reader-envelope__rows {
   display: grid;
@@ -103,8 +103,8 @@
   min-width: 0;
 }
 .reader-envelope__rows dt {
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -117,7 +117,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--a2t-copy);
+  color: var(--cs-mail-copy);
   font-size: 11px;
 }
 .reader-envelope__security {
@@ -126,8 +126,8 @@
   align-items: center;
   gap: 6px 12px;
   padding-top: 12px;
-  border-top: 1px dashed var(--a2t-line);
-  color: var(--a2t-copy-soft);
+  border-top: 1px dashed var(--cs-mail-line);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .reader-envelope__security svg {
@@ -136,7 +136,7 @@
 }
 .reader-envelope__security .ok {
   color: #7fd8c8;
-  font-family: var(--a2t-mono);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -150,9 +150,9 @@
   margin-top: 26px;
 }
 .thread-message {
-  border: 1px solid var(--a2t-line-soft);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
+  border: 1px solid var(--cs-mail-line-soft);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
 }
 .thread-message header {
   display: flex;
@@ -166,18 +166,18 @@
   min-width: 0;
 }
 .thread-message header strong {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   font-weight: 600;
 }
 .thread-message header small,
 .thread-message header time {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .thread-message header time {
   margin-left: auto;
-  font-family: var(--a2t-mono);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
 }
 .thread-message header .icon-button {
@@ -186,7 +186,7 @@
   height: 28px;
 }
 .thread-message--open {
-  border-color: var(--a2t-line);
+  border-color: var(--cs-mail-line);
 }
 .thread-message--open .reader-copy {
   margin: 0;
@@ -194,7 +194,7 @@
 }
 .thread-message--open .reader-copy p {
   margin: 12px 0;
-  color: var(--a2t-copy);
+  color: var(--cs-mail-copy);
   font-size: 13.5px;
   line-height: 1.7;
 }
@@ -204,10 +204,10 @@
   gap: 12px;
   margin-top: 24px;
   padding: 14px 16px;
-  border: 1px solid var(--a2t-line-soft);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
-  color: var(--a2t-copy);
+  border: 1px solid var(--cs-mail-line-soft);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-copy);
 }
 .attachment > span {
   display: grid;
@@ -215,12 +215,12 @@
   min-width: 0;
 }
 .attachment strong {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   font-weight: 600;
 }
 .attachment small {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .attachment .secondary-button {
@@ -240,22 +240,22 @@
   width: 100%;
   margin-top: 18px;
   padding: 14px 16px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-copy);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-copy);
   text-align: left;
 }
 .reply-box:hover {
-  border-color: var(--a2t-accent);
+  border-color: var(--cs-mail-accent);
 }
 .reply-box strong {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   font-weight: 600;
 }
 .reply-box small {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .reader-links-note {
@@ -264,15 +264,15 @@
   gap: 8px;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid var(--a2t-line);
-  border-left: 3px solid var(--a2t-accent);
-  background: var(--a2t-panel);
-  color: var(--a2t-copy-soft);
+  border: 1px solid var(--cs-mail-line);
+  border-left: 3px solid var(--cs-mail-accent);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .reader-links-note svg {
   flex: none;
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }
 
 .split-view {
@@ -286,8 +286,8 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  border-right: 1px solid var(--a2t-line-soft);
-  background: var(--a2t-bg);
+  border-right: 1px solid var(--cs-mail-line-soft);
+  background: var(--cs-mail-bg);
 }
 .split-list__head {
   display: flex;
@@ -295,7 +295,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .split-list__head div {
   display: grid;
@@ -304,14 +304,14 @@
 .split-list__head strong,
 .split-list__head h1 {
   margin: 0;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 .split-list__head span {
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;

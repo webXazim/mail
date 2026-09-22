@@ -2,8 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { useMail } from '../../state/mail/MailContext'
 import { primaryAccountId } from '../../services/accounts'
+import { isRemoteMail } from '../../services/remote-mail'
 
 export function AccountsSettings() {
+  const remote = isRemoteMail()
   const { accounts, addAccount, removeAccount } = useMail()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -57,6 +59,16 @@ export function AccountsSettings() {
           </div>
         ))}
       </div>
+      {remote ? (
+        <div className="settings-section">
+          <h3>Linked accounts</h3>
+          <p className="settings-hint">
+            External account linking is not enabled on this CS Mail deployment. The primary
+            mailbox above is authoritative; this page will not store third-party credentials in
+            the browser or pretend a local account is connected.
+          </p>
+        </div>
+      ) : (
       <div className="settings-section">
         <h3>Add an account</h3>
         <form onSubmit={submit}>
@@ -94,6 +106,7 @@ export function AccountsSettings() {
           </button>
         </form>
       </div>
+      )}
     </div>
   )
 }

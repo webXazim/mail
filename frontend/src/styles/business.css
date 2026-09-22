@@ -1,0 +1,131 @@
+.business-page { min-height: 100%; }
+.business-page .page-head p:last-child { max-width: 720px; }
+.business-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: calc(100vh - 150px); border-top: 1px solid var(--cs-mail-line); }
+.business-list { padding: 18px 14px; border-right: 1px solid var(--cs-mail-line); background: var(--cs-mail-paper); }
+.business-list__item { width: 100%; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 0; background: transparent; color: var(--cs-mail-copy); text-align: left; cursor: pointer; }
+.business-list__item:hover, .business-list__item--active { background: var(--cs-mail-ink-2); }
+.business-list__item span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.business-list__item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.business-list__item small, .business-row small { color: var(--cs-mail-muted); }
+.business-list__icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--cs-mail-line); }
+.business-create { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--cs-mail-line); }
+.business-create label { display: block; margin-bottom: 7px; font-size: 11px; color: var(--cs-mail-muted); }
+.business-create > div { display: grid; grid-template-columns: 1fr 36px; gap: 7px; }
+.business-create input { min-width: 0; }
+.business-content { padding: 28px; max-width: 980px; width: 100%; }
+.business-summary { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding-bottom: 22px; border-bottom: 1px solid var(--cs-mail-line); }
+.business-summary h2 { margin: 4px 0; font-size: 24px; }
+.business-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--cs-mail-muted); border: 1px solid var(--cs-mail-line); padding: 7px 9px; }
+.business-section { padding: 22px 0; border-bottom: 1px solid var(--cs-mail-line); }
+.business-section > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.business-section > header > div { display: flex; gap: 8px; align-items: center; }
+.business-section h3 { margin: 0; font-size: 15px; }
+.business-row { display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 12px 0; border-top: 1px solid var(--cs-mail-line-soft, var(--cs-mail-line)); }
+.business-row > div { display: grid; gap: 3px; }
+.business-placeholder, .business-empty { padding: 28px 0; color: var(--cs-mail-muted); }
+.business-placeholder strong { color: var(--cs-mail-copy); }
+.business-placeholder p { max-width: 650px; margin-bottom: 0; }
+.business-empty { max-width: 620px; padding-top: 70px; }
+.business-empty h2 { color: var(--cs-mail-copy); }
+.business-section--quiet p { color: var(--cs-mail-muted); max-width: 720px; }
+.business-alert { margin: 0 28px 18px; padding: 10px 12px; border: 1px solid var(--cs-mail-line); }
+.business-alert--error { border-color: var(--cs-mail-danger, #b64b4b); }
+.status-dot { display: inline-flex; align-items: center; font-size: 10px; text-transform: capitalize; color: var(--cs-mail-muted); }
+.status-dot--active { color: var(--cs-mail-positive, #70b890); }
+.invite-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--cs-mail-bg); }
+.invite-card { width: min(460px, 100%); border: 1px solid var(--cs-mail-line); padding: 32px; background: var(--cs-mail-paper); }
+.invite-icon { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--cs-mail-line); margin-bottom: 18px; }
+.invite-card h1 { margin: 0 0 8px; }
+.invite-card p { color: var(--cs-mail-muted); margin-bottom: 22px; }
+@media (max-width: 760px) {
+  .business-layout { grid-template-columns: 1fr; }
+  .business-list { border-right: 0; border-bottom: 1px solid var(--cs-mail-line); }
+  .business-content { padding: 20px 16px; }
+  .business-summary { display: block; }
+  .business-badge { margin-top: 12px; }
+}
+
+.business-team-admin { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--cs-mail-line); }
+.business-invite-form { display: grid; grid-template-columns: minmax(220px, 1fr) 150px auto; gap: 10px; align-items: end; }
+.business-invite-form > div { display: grid; gap: 6px; }
+.business-invite-form label { font-size: 11px; color: var(--cs-mail-muted); }
+.business-invite-form select { min-height: 38px; }
+.business-invite-form .primary-button { min-height: 38px; white-space: nowrap; }
+.business-pending { margin-top: 18px; }
+.topbar-context { min-width: 0; display: grid; gap: 2px; }
+.topbar-context strong { font-size: 13px; }
+.topbar-context span { color: var(--cs-mail-muted); font-size: 11px; }
+@media (max-width: 760px) {
+  .business-invite-form { grid-template-columns: 1fr; }
+}
+
+/* Upgrade 20 — customer domain ownership */
+.business-domain-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 10px; align-items: end; padding: 12px 0 18px; }
+.business-domain-form > div { display: grid; gap: 6px; }
+.business-domain-form label { font-size: 11px; color: var(--cs-mail-muted); }
+.business-domain-form .primary-button { min-height: 38px; white-space: nowrap; }
+.business-domain-notice { margin: 0 0 10px; padding: 9px 10px; border-left: 2px solid var(--cs-mail-accent); color: var(--cs-mail-muted); }
+.business-domain-card { border-top: 1px solid var(--cs-mail-line-soft, var(--cs-mail-line)); }
+.business-domain-card__head { border-top: 0; }
+.business-dns-proof { margin: 0 0 16px; padding: 14px; border: 1px solid var(--cs-mail-line); background: var(--cs-mail-paper); display: grid; gap: 10px; }
+.business-dns-proof > div:not(.business-domain-actions) { display: grid; grid-template-columns: 110px minmax(0,1fr) 36px; gap: 10px; align-items: center; }
+.business-dns-proof span { color: var(--cs-mail-muted); font-size: 11px; }
+.business-dns-proof code { overflow-wrap: anywhere; font-size: 12px; }
+.business-dns-proof p { margin: 0; color: var(--cs-mail-muted); font-size: 12px; line-height: 1.55; }
+.business-domain-error { color: var(--cs-mail-danger, #b64b4b) !important; }
+.business-domain-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px; }
+.business-domain-ready { display: flex; align-items: flex-start; gap: 8px; padding: 0 0 16px; color: var(--cs-mail-muted); }
+.business-domain-ready p { margin: 0; }
+.business-domain-ready strong { color: var(--cs-mail-copy); }
+@media (max-width: 720px) {
+  .business-domain-form { grid-template-columns: 1fr; }
+  .business-dns-proof > div:not(.business-domain-actions) { grid-template-columns: 1fr 36px; }
+  .business-dns-proof > div:not(.business-domain-actions) > span { grid-column: 1 / -1; }
+}
+
+/* Upgrade 21 — provider-backed mail DNS readiness */
+.business-mail-dns { margin: 0 0 18px; padding: 14px; border: 1px solid var(--cs-mail-line); display: grid; gap: 12px; }
+.business-mail-dns__head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+.business-mail-dns__head p { margin: 4px 0 0; color: var(--cs-mail-muted); font-size: 12px; line-height: 1.5; max-width: 650px; }
+.business-dns-checks { display: flex; flex-wrap: wrap; gap: 7px; }
+.business-dns-check { display: inline-flex; gap: 5px; align-items: center; padding: 5px 7px; border: 1px solid var(--cs-mail-line); color: var(--cs-mail-muted); font-size: 11px; }
+.business-dns-check--ready { color: var(--cs-mail-positive, #70b890); }
+.business-dns-records { display: grid; gap: 6px; }
+.business-dns-record { display: grid; grid-template-columns: 56px minmax(160px,.7fr) minmax(240px,1.3fr) 36px; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--cs-mail-line-soft, var(--cs-mail-line)); }
+.business-dns-record > span { color: var(--cs-mail-muted); font-size: 10px; font-weight: 700; }
+.business-dns-record code { overflow-wrap: anywhere; font-size: 11px; }
+.business-zone-file { border-top: 1px solid var(--cs-mail-line); padding-top: 9px; }
+.business-zone-file summary { cursor: pointer; color: var(--cs-mail-muted); font-size: 11px; }
+.business-zone-file pre { overflow: auto; max-height: 240px; padding: 10px; border: 1px solid var(--cs-mail-line); font-size: 10px; white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .business-mail-dns__head { display: grid; }
+  .business-dns-record { grid-template-columns: 50px 1fr 36px; }
+  .business-dns-record code:nth-of-type(2) { grid-column: 1 / 3; }
+}
+
+/* Upgrade 32 — pooled business storage with per-mailbox allocations */
+.business-storage-pool { margin: 8px 0 18px; padding: 14px 0 16px; border-top: 1px solid var(--cs-mail-line); border-bottom: 1px solid var(--cs-mail-line); display: grid; gap: 9px; }
+.business-storage-pool > div:first-child { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.business-storage-pool > div:first-child > span { color: var(--cs-mail-muted); font-size: 11px; }
+.business-storage-pool strong small, .business-mailbox-storage strong small { color: var(--cs-mail-muted); font-weight: 500; }
+.business-storage-pool__meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--cs-mail-muted); font-size: 11px; }
+.business-storage-pool p { margin: 0; max-width: 760px; color: var(--cs-mail-muted); font-size: 11px; line-height: 1.55; }
+.business-mailbox-row { border-top: 1px solid var(--cs-mail-line-soft, var(--cs-mail-line)); }
+.business-mailbox-row > .business-row { border-top: 0; padding-bottom: 8px; }
+.business-mailbox-storage { display: grid; grid-template-columns: minmax(190px,.8fr) minmax(150px,1fr) minmax(280px,1.2fr); gap: 16px; align-items: center; padding: 0 0 14px; }
+.business-mailbox-storage__readout { min-width: 0; display: grid; gap: 3px; }
+.business-mailbox-storage__readout > span:first-child { color: var(--cs-mail-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.business-storage-source { color: var(--cs-mail-muted); font-size: 10px; }
+.business-mailbox-storage .storage-bar { margin: 0; min-width: 120px; }
+.business-storage-editor { display: grid; gap: 5px; justify-self: end; }
+.business-storage-editor > label { color: var(--cs-mail-muted); font-size: 10px; }
+.business-storage-editor > div { display: flex; align-items: center; gap: 7px; }
+.business-storage-editor input { width: 86px; min-height: 36px; }
+.business-storage-editor > div > span { color: var(--cs-mail-muted); font-size: 11px; }
+.business-storage-editor .secondary-button { min-height: 36px; white-space: nowrap; }
+@media (max-width: 860px) {
+  .business-mailbox-storage { grid-template-columns: 1fr; gap: 9px; }
+  .business-storage-editor { justify-self: stretch; }
+  .business-storage-editor > div { flex-wrap: wrap; }
+  .business-storage-pool > div:first-child { display: grid; gap: 4px; }
+}

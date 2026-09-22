@@ -86,27 +86,80 @@ export function SearchPage() {
     [],
   )
 
-  const hasOperators = /\b(in|from|to|subject|label|is|has):/.test(query)
+  const remoteMode = isRemoteMail()
   const [remoteResults, setRemoteResults] = useState<Mail[]>([])
+  const [remoteTotal, setRemoteTotal] = useState(0)
+  const [remoteHasMore, setRemoteHasMore] = useState(false)
+  const [remoteAnchor, setRemoteAnchor] = useState<string | null>(null)
+  const [remoteQueryState, setRemoteQueryState] = useState<string | null>(null)
+  const [remoteLoading, setRemoteLoading] = useState(false)
+  const [remoteError, setRemoteError] = useState<string | null>(null)
+
+  const remoteSort = useMemo(() => {
+    if (sortKey === 'oldest') return 'received_asc' as const
+    if (sortKey === 'sender-az') return 'sender_asc' as const
+    if (sortKey === 'sender-za') return 'sender_desc' as const
+    if (sortKey === 'subject-az') return 'subject_asc' as const
+    if (sortKey === 'subject-za') return 'subject_desc' as const
+    return 'received_desc' as const
+  }, [sortKey])
+
+  const loadRemoteSearch = useCallback(
+    async (reset: boolean): Promise<boolean> => {
+      if (!remoteMode || !query.trim()) return false
+      setRemoteLoading(true)
+      setRemoteError(null)
+      try {
+        const result = await searchMail(query, {
+          limit: 50,
+          anchor: reset ? null : remoteAnchor,
+          queryState: reset ? null : remoteQueryState,
+          sort: remoteSort,
+        })
+        if (!reset && result.resetRequired) {
+          const fresh = await searchMail(query, { limit: 50, sort: remoteSort })
+          setRemoteResults(fresh.mails)
+          setRemoteTotal(fresh.total)
+          setRemoteHasMore(fresh.hasMore)
+          setRemoteAnchor(fresh.nextAnchor)
+          setRemoteQueryState(fresh.queryState)
+          setPage(1)
+          return true
+        }
+        setRemoteResults((current) => {
+          if (reset) return result.mails
+          const seen = new Set(current.map((mail) => mail.id))
+          return [...current, ...result.mails.filter((mail) => !seen.has(mail.id))]
+        })
+        setRemoteTotal(result.total)
+        setRemoteHasMore(result.hasMore)
+        setRemoteAnchor(result.nextAnchor)
+        setRemoteQueryState(result.queryState)
+        return false
+      } catch (error) {
+        setRemoteError(error instanceof Error ? error.message : 'Search failed')
+        return false
+      } finally {
+        setRemoteLoading(false)
+      }
+    },
+    [query, remoteMode, remoteAnchor, remoteQueryState, remoteSort],
+  )
 
   useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      if (!query || hasOperators || !isRemoteMail()) {
-        setRemoteResults([])
-        return
-      }
-      try {
-        const results = await searchMail(query)
-        if (!cancelled) setRemoteResults(results)
-      } catch {
-        if (!cancelled) setRemoteResults([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [query, hasOperators])
+    setPage(1)
+    setChecked([])
+    setRemoteResults([])
+    setRemoteTotal(0)
+    setRemoteHasMore(false)
+    setRemoteAnchor(null)
+    setRemoteQueryState(null)
+    setRemoteError(null)
+    if (remoteMode && query.trim()) void loadRemoteSearch(true)
+    // Cursor state is intentionally excluded: changing it means another page
+    // arrived, not that the search definition changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, remoteMode, remoteSort])
 
   const handleSort = useCallback(
     (nextKey: SortKey) => {
@@ -118,40 +171,46 @@ export function SearchPage() {
 
   const list = useMemo(() => {
     if (!query) return []
-    if (hasOperators) {
-      return filterMails(mailbox, 'All Mail', query).filter((m) => m.folder !== 'Spam')
-    }
-    const merged = [...remoteResults, ...filterMails(mailbox, 'All Mail', query)]
-    const seen = new Set<string>()
-    const deduped = merged.filter((mail) => {
-      if (seen.has(mail.id)) return false
-      seen.add(mail.id)
-      return true
-    })
-    return deduped.filter((m) => m.folder !== 'Spam')
-  }, [mailbox, query, remoteResults, hasOperators])
+    if (remoteMode) return remoteResults
+    return filterMails(mailbox, 'All Mail', query)
+  }, [mailbox, query, remoteMode, remoteResults])
 
-  const sorted = useMemo(() => sortMails(list, sortKey), [list, sortKey])
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  // Remote results are already globally ordered by JMAP. Re-sorting only the
+  // currently fetched window would corrupt ordering across later pages.
+  const sorted = useMemo(
+    () => (remoteMode ? list : sortMails(list, sortKey)),
+    [list, remoteMode, sortKey],
+  )
+  const totalResults = remoteMode ? remoteTotal : sorted.length
+  const pageCount = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
   const visible = useMemo(
     () => sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [sorted, currentPage],
   )
 
-  const queryParts = query.split(/\s+/).filter(Boolean)
-  const cleanQuery = queryParts
-    .filter(
-      (part) =>
-        !part.match(/^(from|to|subject|label|in|is|has):/i) &&
-        !part.match(/^-?(unread|read|starred|snoozed|sent|draft|attachment)$/i),
-    )
-    .join(' ')
-  const searchPhrase = cleanQuery || query
-  const summary = searchPhrase
-    ? `${sorted.length} result${sorted.length === 1 ? '' : 's'} for “${searchPhrase}”`
-    : sorted.length
-      ? `${sorted.length} message${sorted.length === 1 ? '' : 's'}`
+  const goToPage = useCallback(
+    async (next: number) => {
+      const target = Math.max(1, Math.min(pageCount, next))
+      const required = target * PAGE_SIZE
+      if (
+        remoteMode &&
+        required > sorted.length &&
+        remoteHasMore &&
+        !remoteLoading
+      ) {
+        const reset = await loadRemoteSearch(false)
+        if (reset) return
+      }
+      setPage(target)
+    },
+    [loadRemoteSearch, pageCount, remoteHasMore, remoteLoading, remoteMode, sorted.length],
+  )
+
+  const summary = query
+    ? `${totalResults} result${totalResults === 1 ? '' : 's'} for “${query}”`
+    : totalResults
+      ? `${totalResults} message${totalResults === 1 ? '' : 's'}`
       : 'No messages'
 
   const openThread = useCallback(
@@ -238,7 +297,7 @@ export function SearchPage() {
           <div className="list-state">
             <div className="loading-spinner" />
             <strong>Loading messages</strong>
-            <span>Searching your Harbor Mailbox...</span>
+            <span>Searching your CS Mail mailbox...</span>
           </div>
         )}
       </div>
@@ -420,7 +479,7 @@ export function SearchPage() {
           className="icon-button"
           aria-label="Previous"
           disabled={currentPage <= 1}
-          onClick={() => setPage((p) => p - 1)}
+          onClick={() => void goToPage(currentPage - 1)}
         >
           <ChevronLeft size={17} />
         </button>
@@ -428,14 +487,28 @@ export function SearchPage() {
           className="icon-button"
           aria-label="Next"
           disabled={currentPage >= pageCount}
-          onClick={() => setPage((p) => p + 1)}
+          onClick={() => void goToPage(currentPage + 1)}
         >
           <ChevronRight size={17} />
         </button>
       </div>
 
       <section className="mail-list">
-        {visible.length ? (
+        {remoteMode && remoteError ? (
+          <div className="list-state" role="alert">
+            <strong>Search could not be completed</strong>
+            <span>{remoteError}</span>
+            <button className="primary-button" onClick={() => void loadRemoteSearch(true)}>
+              Try again
+            </button>
+          </div>
+        ) : remoteMode && remoteLoading && !visible.length ? (
+          <div className="list-state">
+            <div className="loading-spinner" />
+            <strong>Searching mail</strong>
+            <span>Searching your server mailbox…</span>
+          </div>
+        ) : visible.length ? (
           visible.map((mail, index) => (
             <MailRow
               key={mail.id}

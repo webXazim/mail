@@ -1,4 +1,4 @@
-import { Archive, Star, Trash2, X } from 'lucide-react'
+import { Archive, RotateCcw, Star, Trash2, X } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 import { presenceOf } from '../services/presence'
 import type { Mail } from '../types'
@@ -14,6 +14,7 @@ type Props = {
   onQuickStar?: (mail: Mail) => void
   onQuickTrash?: (mail: Mail) => void
   onQuickCancel?: (mail: Mail) => void
+  onQuickRetry?: (mail: Mail) => void
   onLongPress?: (mail: Mail) => void
   swipeable?: boolean
   onSwipeArchive?: (mail: Mail) => void
@@ -33,6 +34,7 @@ export const MailRow = memo(function MailRow({
   onQuickStar,
   onQuickTrash,
   onQuickCancel,
+  onQuickRetry,
   onLongPress,
   swipeable = false,
   onSwipeArchive,
@@ -239,6 +241,15 @@ export const MailRow = memo(function MailRow({
         </span>
         <span className="mail-row__meta">
           <span className="mail-row__quicks" onClick={(event) => event.stopPropagation()}>
+            {onQuickRetry && (
+              <button
+                type="button"
+                aria-label={`Retry ${mail.subject}`}
+                onClick={() => onQuickRetry(mail)}
+              >
+                <RotateCcw size={15} />
+              </button>
+            )}
             {onQuickCancel && (
               <button
                 type="button"

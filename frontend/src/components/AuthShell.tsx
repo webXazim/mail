@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Moon } from 'lucide-react'
+import { BrandIdentity } from './BrandIdentity'
 
 type AuthShellProps = {
   eyebrow: string
@@ -25,10 +26,7 @@ export function AuthShell({
     <main className="auth-page">
       <section className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark">H</span>
-          <strong>
-            harbor<span>mail</span>
-          </strong>
+          <BrandIdentity />
         </div>
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>

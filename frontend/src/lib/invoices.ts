@@ -2,106 +2,69 @@ export type Invoice = {
   id: string
   period: string
   date: string
+  dueDate: string
   amount: string
-  status: 'paid' | 'pending'
+  status: 'issued' | 'paid' | 'void'
   plan: string
-  seats: number
+  mailboxCount: number
+  includedMailboxCount: number
+  extraMailboxCount: number
+  extraMailboxUnitPrice: string
+  extraMailboxTotal: string
+  baseRate: string
   rate: string
   subtotal: string
   tax: string
+  taxRate: string
   total: string
   paymentMethod: string
   billedTo: string
+  sellerName: string
+  sellerVat: string
+  sellerCr: string
+  sellerAddress: string
+  buyerName: string
+  buyerVat: string
+  buyerCr: string
+  buyerAddress: string
 }
-
-export const invoices: Invoice[] = [
-  {
-    id: 'INV-2026-036',
-    period: 'September 2026',
-    date: 'September 1, 2026',
-    amount: '$8.00',
-    status: 'paid',
-    plan: 'Harbor Team',
-    seats: 1,
-    rate: '$8.00',
-    subtotal: '$8.00',
-    tax: '$0.00',
-    total: '$8.00',
-    paymentMethod: 'Visa ending in 4049',
-    billedTo: 'alex@harbor.co',
-  },
-  {
-    id: 'INV-2026-033',
-    period: 'August 2026',
-    date: 'August 1, 2026',
-    amount: '$8.00',
-    status: 'paid',
-    plan: 'Harbor Team',
-    seats: 1,
-    rate: '$8.00',
-    subtotal: '$8.00',
-    tax: '$0.00',
-    total: '$8.00',
-    paymentMethod: 'Visa ending in 4049',
-    billedTo: 'alex@harbor.co',
-  },
-  {
-    id: 'INV-2026-030',
-    period: 'July 2026',
-    date: 'July 1, 2026',
-    amount: '$8.00',
-    status: 'paid',
-    plan: 'Harbor Team',
-    seats: 1,
-    rate: '$8.00',
-    subtotal: '$8.00',
-    tax: '$0.00',
-    total: '$8.00',
-    paymentMethod: 'Visa ending in 4049',
-    billedTo: 'alex@harbor.co',
-  },
-  {
-    id: 'INV-2026-027',
-    period: 'June 2026',
-    date: 'June 1, 2026',
-    amount: '$8.00',
-    status: 'paid',
-    plan: 'Harbor Team',
-    seats: 1,
-    rate: '$8.00',
-    subtotal: '$8.00',
-    tax: '$0.00',
-    total: '$8.00',
-    paymentMethod: 'Visa ending in 4049',
-    billedTo: 'alex@harbor.co',
-  },
-]
 
 type InvoiceResolver = (id: string) => Invoice | undefined
 let dynamicResolver: InvoiceResolver | null = null
 
-/** Let the billing service supply invoices that live on the API as they load. */
 export const registerInvoiceResolver = (resolver: InvoiceResolver) => {
   dynamicResolver = resolver
 }
 
-export const invoiceFor = (id: string): Invoice | undefined =>
-  invoices.find((invoice) => invoice.id.toLowerCase() === id.toLowerCase()) ?? dynamicResolver?.(id)
+export const invoiceFor = (id: string): Invoice | undefined => dynamicResolver?.(id)
 
 export const invoiceToText = (invoice: Invoice) =>
   [
-    'Harbor Mail receipt',
+    'CS Mail invoice',
     '==================',
     `Invoice: ${invoice.id}`,
-    `Period: ${invoice.period}`,
-    `Date: ${invoice.date}`,
-    `Status: ${invoice.status === 'paid' ? 'Paid' : 'Pending'}`,
-    `Billed to: ${invoice.billedTo}`,
-    `Payment: ${invoice.paymentMethod}`,
+    `Issue date: ${invoice.date}`,
+    `Due date: ${invoice.dueDate}`,
+    `Status: ${invoice.status.toUpperCase()}`,
     '',
-    `${invoice.plan} (${invoice.seats} seat)`,
-    `  ${invoice.rate} x ${invoice.seats}`,
+    `Seller: ${invoice.sellerName}`,
+    invoice.sellerVat ? `Seller VAT: ${invoice.sellerVat}` : '',
+    invoice.sellerCr ? `Seller CR: ${invoice.sellerCr}` : '',
+    invoice.sellerAddress,
+    '',
+    `Billed to: ${invoice.buyerName || invoice.billedTo}`,
+    invoice.buyerVat ? `Buyer VAT: ${invoice.buyerVat}` : '',
+    invoice.buyerCr ? `Buyer CR: ${invoice.buyerCr}` : '',
+    invoice.buyerAddress,
+    invoice.billedTo,
+    '',
+    `${invoice.plan} (${invoice.includedMailboxCount} included mailbox${invoice.includedMailboxCount === 1 ? '' : 'es'}; ${invoice.mailboxCount} total)`,
+    `Base plan: ${invoice.baseRate}`,
+    invoice.extraMailboxCount > 0 ? `${invoice.extraMailboxCount} additional mailbox${invoice.extraMailboxCount === 1 ? '' : 'es'} × ${invoice.extraMailboxUnitPrice}` : '',
     `Subtotal: ${invoice.subtotal}`,
-    `Tax: ${invoice.tax}`,
+    `Tax (${invoice.taxRate}): ${invoice.tax}`,
     `Total: ${invoice.total}`,
-  ].join('\n')
+    `Payment method: ${invoice.paymentMethod}`,
+  ]
+    .filter(Boolean)
+    .join('\n')

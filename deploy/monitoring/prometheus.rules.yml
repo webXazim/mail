@@ -1,19 +1,19 @@
-# Harbor alert rules — must reference the REAL metric names/labels exported by
+# CS Mail alert rules — must reference the REAL metric names/labels exported by
 # `/api/metrics` (see backend/src/metrics.rs). If an `expr` here drifts from a
 # name or label the API actually emits, the rule is dead-on-arrival and the
 # gate is silently unverified. Proven by `prometheus.rules.test.yml` via
 # `promtool test rules` (a blocking CI job — L190).
 groups:
-  - name: harbor_availability
+  - name: cs_mail_availability
     rules:
-      - alert: HarborHigh5xxRate
+      - alert: CSMailHigh5xxRate
         expr: |
           sum by (path) (
-            rate(harbor_http_responses_5xx_total{path=~".+"}[5m])
+            rate(cs_mail_http_responses_5xx_total{path=~".+"}[5m])
           )
           / on (path)
           sum by (path) (
-            rate(harbor_http_requests_total{path=~".+"}[5m])
+            rate(cs_mail_http_requests_total{path=~".+"}[5m])
           ) > 0.05
         for: 10m
         labels:
@@ -24,10 +24,10 @@ groups:
           description: "{{ $labels.path }} served 5xx at {{ $value | humanizePercentage }} of requests for 10m — check api logs, `docker compose logs api`."
           runbook: "deploy/monitoring/RUNBOOK.md#5xx"
 
-      - alert: HarborErrorBudgetBurning
+      - alert: CSMailErrorBudgetBurning
         expr: |
-          sum(rate(harbor_http_responses_5xx_total{path=~".+"}[1h]))
-          / sum(rate(harbor_http_requests_total{path=~".+"}[1h]))
+          sum(rate(cs_mail_http_responses_5xx_total{path=~".+"}[1h]))
+          / sum(rate(cs_mail_http_requests_total{path=~".+"}[1h]))
           > 0.02
         for: 30m
         labels:
@@ -37,9 +37,9 @@ groups:
           summary: "Error budget burning (2% 5xx over 1h)"
           description: "Cross-route 5xx share reached {{ $value | humanizePercentage }} over the last hour."
 
-  - name: harbor_latency
+  - name: cs_mail_latency
     rules:
-      - alert: HarborSlowRoute
+      - alert: CSMailSlowRoute
         # NOTE: no `sum by (le)` continuation is allowed here — any aggregation
         # that does not carry `le` forward destroys the histogram boundaries and
         # histogram_quantile silently returns nothing (a dead rule). With a
@@ -48,7 +48,7 @@ groups:
         expr: |
           histogram_quantile(
             0.95,
-            rate(harbor_http_request_duration_seconds_bucket{path=~".+"}[5m])
+            rate(cs_mail_http_request_duration_seconds_bucket{path=~".+"}[5m])
           ) > 2
         for: 10m
         labels:
@@ -59,12 +59,12 @@ groups:
           description: "{{ $labels.path }} p95 is {{ $value }}s — check SQLx pool pressure and Stalwart round trips."
           runbook: "deploy/monitoring/RUNBOOK.md#latency"
 
-  - name: harbor_data
+  - name: cs_mail_data
     rules:
       # Dead SQLx pool = do-not-deploy condition (WS6.5 gate also keys off /api/health).
-      - alert: HarborDbPoolExhausted
+      - alert: CSMailDbPoolExhausted
         expr: |
-          harbor_db_pool_connections{state="idle"} == 0
+          cs_mail_db_pool_connections{state="idle"} == 0
         for: 5m
         labels:
           severity: critical
@@ -73,21 +73,21 @@ groups:
           summary: "DB pool has zero idle connections"
           description: "All SQLx pool connections busy for 5m — lookup/inserts queuing; likely a leaking query or locked table."
 
-      - alert: HarborDbPoolGone
-        expr: absent(harbor_db_pool_connections)
+      - alert: CSMailDbPoolGone
+        expr: absent(cs_mail_db_pool_connections)
         for: 5m
         labels:
           severity: critical
           gate: l190
         annotations:
           summary: "DB pool metric absent"
-          description: "`harbor_db_pool_connections` stopped appearing — api metrics endpoint unreachable or DB layer dead."
+          description: "`cs_mail_db_pool_connections` stopped appearing — api metrics endpoint unreachable or DB layer dead."
 
-  - name: harbor_delivery
+  - name: cs_mail_delivery
     rules:
-      - alert: HarborSmtpFailures
+      - alert: CSMailSmtpFailures
         expr: |
-          sum by (result) (rate(harbor_smtp_sends_total{result="failed"}[15m]))
+          sum by (result) (rate(cs_mail_smtp_sends_total{result="failed"}[15m]))
           > 0.02
         for: 10m
         labels:
@@ -97,9 +97,9 @@ groups:
           summary: "SMTP delivery failures climbing"
           description: "failed deliveries at {{ $value | humanize }} send/min — check `docker compose logs smtp` + Stalwart."
 
-      - alert: HarborSmtpRateLimited
+      - alert: CSMailSmtpRateLimited
         expr: |
-          sum by (result) (rate(harbor_smtp_sends_total{result="rate_limited"}[15m]))
+          sum by (result) (rate(cs_mail_smtp_sends_total{result="rate_limited"}[15m]))
           > 0.02
         for: 15m
         labels:
@@ -110,9 +110,9 @@ groups:
           description: "{{ $labels.result }} at {{ $value | humanize }} /min — users near plan caps or warmup ramp."
           runbook: "deploy/monitoring/RUNBOOK.md#rate-limited"
 
-      - alert: HarborSmtpSuppressed
+      - alert: CSMailSmtpSuppressed
         expr: |
-          sum by (result) (rate(harbor_smtp_sends_total{result="suppressed"}[15m]))
+          sum by (result) (rate(cs_mail_smtp_sends_total{result="suppressed"}[15m]))
           > 0.005
         for: 15m
         labels:

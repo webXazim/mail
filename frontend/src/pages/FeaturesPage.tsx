@@ -110,7 +110,7 @@ export function FeaturesPage() {
           should already be.
         </h1>
         <p className="site-page__intro">
-          Harbor Mail is built for people who treat email as work — not as a notification feed.
+          CS Mail is built for people who treat email as work — not as a notification feed.
         </p>
       </section>
 

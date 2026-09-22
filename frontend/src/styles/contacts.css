@@ -4,10 +4,10 @@
   gap: 8px;
   margin: 16px 0 10px;
   padding: 0 12px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-copy-soft);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-copy-soft);
 }
 .contacts-query input {
   flex: 1;
@@ -16,7 +16,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 12px;
 }
 .contacts-add {
@@ -29,15 +29,15 @@
   min-width: 0;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
   outline: 0;
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-white);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-white);
   font-size: 12px;
 }
 .contacts-add input:focus {
-  border-color: var(--a2t-accent);
+  border-color: var(--cs-mail-accent);
 }
 .contacts-list {
   display: grid;
@@ -50,7 +50,7 @@
   align-items: center;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .contacts-list__text {
   display: grid;
@@ -59,12 +59,12 @@
   min-width: 0;
 }
 .contacts-list__text strong {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   font-weight: 600;
 }
 .contacts-list__text small {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 
@@ -87,11 +87,11 @@
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.04em;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
 }
 .contacts-head__count {
   margin: 4px 0 0;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 11px;
 }
 .contacts-body {
@@ -103,33 +103,33 @@
   gap: 10px 14px;
   margin-bottom: 18px;
   padding: 18px;
-  border: 1px solid var(--a2t-line);
-  background: var(--a2t-panel);
+  border: 1px solid var(--cs-mail-line);
+  background: var(--cs-mail-panel);
 }
 .contacts-form h2 {
   grid-column: 1 / -1;
   margin: 0;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 14px;
 }
 .contacts-form label {
   display: grid;
   gap: 5px;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 11px;
 }
 .contacts-form input {
   height: 34px;
   padding: 0 10px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
   outline: 0;
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-white);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-white);
   font-size: 12px;
 }
 .contacts-form input:focus {
-  border-color: var(--a2t-accent);
+  border-color: var(--cs-mail-accent);
 }
 .contacts-form footer {
   grid-column: 1 / -1;

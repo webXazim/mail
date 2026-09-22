@@ -20,7 +20,7 @@ type ReceiptRow = {
   at: string
 }
 
-const receiptsKey = 'harbor-mail:read-receipts'
+const receiptsKey = 'cs-mail:read-receipts'
 
 const readReceipts = (): ReadReceipt[] => {
   try {
@@ -97,7 +97,7 @@ export type ReceiptRequest = { id: string; mailId: string; recipient: string; at
 
 type RequestRow = { id: string; mailId: string; recipient: string; at: string }
 
-const requestsKey = 'harbor-mail:receipt-requests'
+const requestsKey = 'cs-mail:receipt-requests'
 
 const readRequests = (): ReceiptRequest[] => {
   try {

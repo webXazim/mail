@@ -1,3 +1,7 @@
 target
+.cs-mail-target
 .git
+.gitignore
+*.log
 .env
+.env.*

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Filter, Plus, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Filter, Plus, Trash2, X } from 'lucide-react'
 import {
   rulesApi,
   type FilterRule,
@@ -8,6 +8,7 @@ import {
 } from '../../services/rules'
 import { labelsApi } from '../../services/labels'
 import { foldersApi } from '../../services/folders'
+import type { RealtimeEvent } from '../../services/ws'
 
 const conditionFields = [
   { id: 'from', label: 'From contains' },
@@ -93,12 +94,38 @@ export function FiltersSettings() {
   const [draft, setDraft] = useState<FilterRule | null>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(''), 2200)
     return () => window.clearTimeout(timer)
   }, [notice])
+
+  useEffect(() => {
+    let active = true
+    setBusy(true)
+    rulesApi
+      .refresh()
+      .then((next) => active && setRules(next))
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Could not load rules')
+      })
+      .finally(() => active && setBusy(false))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (detail?.kind !== 'resource-changed' || detail.payload.resource !== 'automation') return
+      void rulesApi.refresh().then(setRules).catch(() => {})
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [])
 
   const startNew = () => setDraft(emptyRule())
   const closeEditor = () => {
@@ -145,24 +172,69 @@ export function FiltersSettings() {
     ),
   )
 
-  const saveRule = () => {
+  const saveRule = async () => {
     if (!draft || !valid) {
       setError('Give the rule a name and add at least one condition and one action.')
       return
     }
-    const saved = draft.id
-      ? rulesApi.update(draft)
-      : rulesApi.add({ ...draft, id: `rule-${Date.now()}` })
-    setRules(saved)
-    setDraft(null)
+    setBusy(true)
     setError('')
-    setNotice(draft.id ? 'Rule updated' : 'Rule created')
+    try {
+      const saved = draft.id
+        ? await rulesApi.update(draft)
+        : await rulesApi.add({ ...draft, id: `demo-${Date.now()}` })
+      setRules(saved)
+      setDraft(null)
+      setNotice(draft.id ? 'Rule updated' : 'Rule created')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save the rule')
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const removeRule = (id: string) => {
-    setRules(rulesApi.remove(id))
-    if (draft?.id === id) setDraft(null)
-    setNotice('Rule removed')
+  const removeRule = async (id: string) => {
+    setBusy(true)
+    setError('')
+    try {
+      setRules(await rulesApi.remove(id))
+      if (draft?.id === id) setDraft(null)
+      setNotice('Rule removed')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not remove the rule')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleRule = async (id: string, enabled: boolean) => {
+    setBusy(true)
+    setError('')
+    try {
+      setRules(await rulesApi.toggle(id, enabled))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not update the rule')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const moveRule = async (id: string, direction: -1 | 1) => {
+    const index = rules.findIndex((rule) => rule.id === id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= rules.length) return
+    const ids = rules.map((rule) => rule.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    setBusy(true)
+    setError('')
+    try {
+      setRules(await rulesApi.reorder(ids))
+      setNotice('Rule order updated')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not reorder rules')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const activeLabelOptions = labelsApi.list()
@@ -172,7 +244,7 @@ export function FiltersSettings() {
   ]
 
   return (
-    <div>
+    <div aria-busy={busy}>
       <div className="settings-section rule-section-head">
         <div>
           <h3>Incoming mail rules</h3>
@@ -182,7 +254,7 @@ export function FiltersSettings() {
           </p>
         </div>
         {!draft && (
-          <button type="button" className="secondary-button" onClick={startNew}>
+          <button type="button" className="secondary-button" onClick={startNew} disabled={busy}>
             <Plus size={15} />
             New rule
           </button>
@@ -458,7 +530,7 @@ export function FiltersSettings() {
             <button type="button" className="secondary-button" onClick={closeEditor}>
               Cancel
             </button>
-            <button type="button" className="primary-button" onClick={saveRule} disabled={!valid}>
+            <button type="button" className="primary-button" onClick={() => void saveRule()} disabled={!valid || busy}>
               <Filter size={15} />
               Save rule
             </button>
@@ -472,7 +544,8 @@ export function FiltersSettings() {
             type="checkbox"
             aria-label={`Enable rule ${rule.name}`}
             checked={rule.enabled}
-            onChange={(event) => setRules(rulesApi.toggle(rule.id, event.target.checked))}
+            disabled={busy}
+            onChange={(event) => void toggleRule(rule.id, event.target.checked)}
           />
           <div className="rule-row__text">
             <strong>{rule.name}</strong>
@@ -482,14 +555,33 @@ export function FiltersSettings() {
             </small>
           </div>
           <div className="row-actions rule-row__actions">
-            <button type="button" className="secondary-button" onClick={() => setDraft(rule)}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Move rule ${rule.name} up`}
+              disabled={busy || rules[0]?.id === rule.id}
+              onClick={() => void moveRule(rule.id, -1)}
+            >
+              <ArrowUp size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Move rule ${rule.name} down`}
+              disabled={busy || rules[rules.length - 1]?.id === rule.id}
+              onClick={() => void moveRule(rule.id, 1)}
+            >
+              <ArrowDown size={15} />
+            </button>
+            <button type="button" className="secondary-button" onClick={() => setDraft(rule)} disabled={busy}>
               Edit
             </button>
             <button
               type="button"
               className="icon-button"
               aria-label={`Delete rule ${rule.name}`}
-              onClick={() => removeRule(rule.id)}
+              disabled={busy}
+              onClick={() => void removeRule(rule.id)}
             >
               <Trash2 size={15} />
             </button>
@@ -497,6 +589,7 @@ export function FiltersSettings() {
         </div>
       ))}
 
+      {!draft && error && <p className="settings-notice">{error}</p>}
       {rules.length === 0 && !draft && (
         <p className="settings-hint">
           No rules yet — create one so incoming mail lands where you want it.

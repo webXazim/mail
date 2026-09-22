@@ -72,7 +72,7 @@ export type Faq = { q: string; a: string }
 export const faqs: Faq[] = [
   {
     q: 'Can I use my own domain?',
-    a: 'Yes. Add your domain in the Admin center, verify the DNS records, and mail flows to your Harbor Mailboxes.',
+    a: 'Yes. Add your domain in the Admin center, verify the DNS records, and mail flows to your CS Mail mailboxes.',
   },
   {
     q: 'How long does email stay on your servers?',
@@ -88,7 +88,7 @@ export const faqs: Faq[] = [
   },
   {
     q: 'Do you read my mail for ads?',
-    a: 'Never. Harbor Mail is not an advertising product. Your content is used only to deliver, search, and route your mail.',
+    a: 'Never. CS Mail is not an advertising product. Your content is used only to deliver, search, and route your mail.',
   },
 ]
 

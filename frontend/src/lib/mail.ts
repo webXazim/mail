@@ -71,7 +71,8 @@ export const isCustomFolder = (folder: string): boolean => {
 export const folderPath = (folder: string): string => {
   const slug = folderSlug[folder as Mailbox]
   if (slug) return slug
-  return foldersApi.byName(folder)?.id ? `folders/${foldersApi.byName(folder)?.id}` : 'inbox'
+  const customId = foldersApi.byName(folder)?.id
+  return customId ? `folders/${encodeURIComponent(customId)}` : 'inbox'
 }
 
 export const categoryLabels: Record<string, string[]> = {
@@ -108,7 +109,7 @@ export const buildThread = (mail: Mail) => [
   },
   {
     sender: 'Alex Morgan',
-    email: 'alex@harbor.co',
+    email: 'alex@crescentsphere.com',
     initials: 'AM',
     color: 'teal',
     copy: `On ${mail.time}, ${mail.sender} <${mail.email}> wrote:\n\n${mail.preview}\n\nThanks for sending this over — I have worked through the points and the notes look ready for next steps.`,
@@ -283,7 +284,7 @@ const prefixSubject = (mail: Mail, prefix: 'Re:' | 'Fwd:') =>
     ? mail.subject
     : `${prefix} ${mail.subject}`
 
-export const selfEmail = 'alex@harbor.co'
+export const selfEmail = 'alex@crescentsphere.com'
 
 export const parseAddresses = (value: string): string[] =>
   value
@@ -313,13 +314,14 @@ export const buildForwardDraft = (mail: Mail): Partial<Draft> => ({
   to: '',
   subject: prefixSubject(mail, 'Fwd:'),
   body: `\n\n\n---------- Forwarded message ----------\nFrom: ${mail.sender} <${mail.email}>\nSubject: ${mail.subject}\nDate: ${mail.time}\n\n${mail.preview}`,
-  attachments: mail.attachment && mail.attachmentName ? [mail.attachmentName] : [],
+  // Received-message blobs must be re-uploaded before they can become outbound staged attachments.
+  attachments: [],
 })
 
 export const buildSentMail = (draft: Draft, time = 'Just now'): Mail => {
   const from = draft.from
   const sender = from?.name ?? 'Alex Morgan'
-  const email = from?.email ?? 'alex@harbor.co'
+  const email = from?.email ?? 'alex@crescentsphere.com'
   const initials =
     sender
       .split(/\s+/)

@@ -5,7 +5,7 @@
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
-  padding: calc(var(--a2t-header-h) + 10px) 24px 24px;
+  padding: calc(var(--cs-mail-header-h) + 10px) 24px 24px;
   background: rgba(6, 9, 11, 0.62);
   backdrop-filter: blur(4px);
 }
@@ -13,10 +13,10 @@
   display: flex;
   flex-direction: column;
   width: min(620px, 100%);
-  max-height: calc(100vh - var(--a2t-header-h) - 40px);
-  border: 1px solid var(--a2t-line-strong);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel-raised);
+  max-height: calc(100vh - var(--cs-mail-header-h) - 40px);
+  border: 1px solid var(--cs-mail-line-strong);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel-raised);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 .composer > header {
@@ -25,10 +25,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .composer > header strong {
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -39,8 +39,8 @@
   gap: 10px;
 }
 .composer > header small {
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.1em;
 }
@@ -54,9 +54,9 @@
   align-items: center;
   gap: 10px;
   padding: 10px 18px;
-  border-bottom: 1px solid var(--a2t-line-soft);
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -67,15 +67,15 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--a2t-silver);
-  font-family: var(--a2t-sans);
+  color: var(--cs-mail-silver);
+  font-family: var(--cs-mail-sans);
   font-size: 12.5px;
   letter-spacing: 0;
   text-transform: none;
   padding: 3px 0;
 }
 .composer form > label > input::placeholder {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .composer form > label > select {
   flex: 1;
@@ -83,37 +83,37 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--a2t-silver);
-  font-family: var(--a2t-sans);
+  color: var(--cs-mail-silver);
+  font-family: var(--cs-mail-sans);
   font-size: 12.5px;
   letter-spacing: 0;
   text-transform: none;
   padding: 3px 0;
 }
 .composer form > label > select:focus {
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
 }
 .composer-error {
   margin: 0;
   padding: 7px 18px 9px;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
   background: rgba(220, 38, 38, 0.08);
-  color: var(--a2t-danger);
+  color: var(--cs-mail-danger);
   font-size: 11px;
 }
 .field-link {
   flex: none;
   border: 0;
   background: transparent;
-  color: var(--a2t-accent);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-accent);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .field-link:hover {
-  color: var(--a2t-accent-hover);
+  color: var(--cs-mail-accent-hover);
 }
 .composer-editor {
   display: flex;
@@ -126,7 +126,7 @@
   align-items: center;
   gap: 2px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--a2t-line-soft);
+  border-bottom: 1px solid var(--cs-mail-line-soft);
 }
 .formatting button {
   display: grid;
@@ -134,13 +134,13 @@
   width: 30px;
   height: 28px;
   border: 0;
-  border-radius: var(--a2t-radius);
+  border-radius: var(--cs-mail-radius);
   background: transparent;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .formatting button:hover {
-  color: var(--a2t-white);
-  background: var(--a2t-panel);
+  color: var(--cs-mail-white);
+  background: var(--cs-mail-panel);
 }
 .formatting button strong,
 .formatting button em,
@@ -153,14 +153,14 @@
   gap: 6px;
   margin-left: auto;
   padding-left: 12px;
-  border-left: 1px solid var(--a2t-line-soft);
-  color: var(--a2t-copy-soft);
+  border-left: 1px solid var(--cs-mail-line-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
 }
 .composer-signature-toggle input {
-  accent-color: var(--a2t-accent);
+  accent-color: var(--cs-mail-accent);
 }
 .composer-editor__body {
   flex: 1;
@@ -169,14 +169,14 @@
   outline: 0;
   overflow-y: auto;
   background: transparent;
-  color: var(--a2t-silver);
-  font-family: var(--a2t-sans);
+  color: var(--cs-mail-silver);
+  font-family: var(--cs-mail-sans);
   font-size: 13.5px;
   line-height: 1.7;
 }
 .composer-editor__body:empty::before {
   content: 'Write a message...';
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .attachment-chip {
   display: inline-flex;
@@ -185,29 +185,29 @@
   width: max-content;
   margin: 4px 18px 10px;
   padding: 5px 9px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
-  color: var(--a2t-copy);
-  font-family: var(--a2t-mono);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-copy);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.08em;
 }
 .move-select {
   height: 30px;
   padding: 0 8px;
-  border: 1px solid var(--a2t-line);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
-  color: var(--a2t-copy);
-  font-family: var(--a2t-mono);
+  border: 1px solid var(--cs-mail-line);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-copy);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .move-select:hover,
 .move-select:focus {
-  border-color: var(--a2t-accent);
+  border-color: var(--cs-mail-accent);
 }
 .toolbar-pop {
   position: relative;
@@ -221,25 +221,25 @@
   flex-direction: column;
   min-width: 160px;
   padding: 6px;
-  border: 1px solid var(--a2t-line-strong);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel-raised);
+  border: 1px solid var(--cs-mail-line-strong);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel-raised);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 }
 .toolbar-menu button {
   padding: 9px 10px;
   border: 0;
   background: transparent;
-  color: var(--a2t-silver);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-silver);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.08em;
   text-align: left;
   text-transform: uppercase;
 }
 .toolbar-menu button:hover {
-  background: var(--a2t-panel);
-  color: var(--a2t-accent);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-accent);
 }
 .toolbar-menu--right {
   right: 0;
@@ -251,18 +251,18 @@
   gap: 6px;
   padding: 5px 8px;
   border: 1px solid transparent;
-  border-radius: var(--a2t-radius);
+  border-radius: var(--cs-mail-radius);
   background: transparent;
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 .toolbar-text-button:hover,
 .toolbar-text-button[aria-expanded='true'] {
-  border-color: var(--a2t-control-line);
-  color: var(--a2t-accent);
+  border-color: var(--cs-mail-control-line);
+  color: var(--cs-mail-accent);
 }
 .toolbar-count {
   display: grid;
@@ -270,8 +270,8 @@
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  background: var(--a2t-accent);
-  color: var(--a2t-ink);
+  background: var(--cs-mail-accent);
+  color: var(--cs-mail-ink);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0;
@@ -280,7 +280,7 @@
 .settings-hint {
   display: block;
   margin-top: 6px;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 10px;
 }
 .settings-panel > div {
@@ -288,25 +288,25 @@
 }
 .settings-section select {
   padding: 9px 12px;
-  border: 1px solid var(--a2t-control-line);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-control-line);
+  border-radius: var(--cs-mail-radius);
   outline: 0;
-  background: var(--a2t-panel-soft);
-  color: var(--a2t-paper);
-  font-family: var(--a2t-sans);
+  background: var(--cs-mail-panel-soft);
+  color: var(--cs-mail-paper);
+  font-family: var(--cs-mail-sans);
   font-size: 12.5px;
 }
 .settings-section select:focus {
-  border-color: var(--a2t-accent);
-  box-shadow: var(--a2t-focus);
+  border-color: var(--cs-mail-accent);
+  box-shadow: var(--cs-mail-focus);
 }
 .settings-notice {
   margin: 0 0 12px;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 11px;
 }
 .settings-notice--ok {
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }
 .row-actions {
   display: flex;
@@ -329,26 +329,26 @@
 }
 .labels-row select {
   padding: 7px 8px;
-  border: 1px solid var(--a2t-control-line);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-control-line);
+  border-radius: var(--cs-mail-radius);
   outline: 0;
-  background: var(--a2t-panel-soft);
-  color: var(--a2t-paper);
-  font-family: var(--a2t-sans);
+  background: var(--cs-mail-panel-soft);
+  color: var(--cs-mail-paper);
+  font-family: var(--cs-mail-sans);
   font-size: 12px;
 }
 .labels-row select:focus {
-  border-color: var(--a2t-accent);
-  box-shadow: var(--a2t-focus);
+  border-color: var(--cs-mail-accent);
+  box-shadow: var(--cs-mail-focus);
 }
 .labels-row input {
   min-width: 0;
 }
 
 .composer-editor--drag {
-  outline: 1px dashed var(--a2t-accent);
+  outline: 1px dashed var(--cs-mail-accent);
   outline-offset: -3px;
-  background: color-mix(in srgb, var(--a2t-accent) 6%, transparent);
+  background: color-mix(in srgb, var(--cs-mail-accent) 6%, transparent);
 }
 .chips {
   display: flex;
@@ -362,10 +362,10 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .attachment-chip button:hover {
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }
 
 button.compose-send {
@@ -376,6 +376,6 @@ button.compose-send {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
   font-size: 11px;
 }

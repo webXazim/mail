@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Mail as MailIcon, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Download, FileUp, Mail as MailIcon, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { contactsService, type Contact } from '../services/contacts'
 import { useMail } from '../state/mail/MailContext'
+import type { RealtimeEvent } from '../services/ws'
 
 const initials = (contact: Contact) =>
   contact.name
@@ -21,27 +22,118 @@ export function ContactsPage() {
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState('')
+  const [searchResults, setSearchResults] = useState<Contact[] | null>(null)
+  const [total, setTotal] = useState(list.length)
+  const [hasMore, setHasMore] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [searchTotal, setSearchTotal] = useState(0)
+  const [searchHasMore, setSearchHasMore] = useState(false)
+  const [searchCursor, setSearchCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      const rows = await contactsService.refresh()
-      if (!cancelled) setList(rows)
-    })()
+    void contactsService
+      .page()
+      .then((page) => {
+        if (cancelled) return
+        contactsService.save(page.contacts)
+        setList(page.contacts)
+        setTotal(page.total)
+        setHasMore(page.hasMore)
+        setNextCursor(page.nextCursor)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load contacts')
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (!needle) return list
-    return list.filter((contact) =>
-      `${contact.name} ${contact.email} ${contact.company ?? ''} ${contact.phone ?? ''}`
-        .toLowerCase()
-        .includes(needle),
-    )
-  }, [list, query])
+  useEffect(() => {
+    const needle = query.trim()
+    if (!needle) {
+      setSearchResults(null)
+      setSearchTotal(0)
+      setSearchHasMore(false)
+      setSearchCursor(null)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void contactsService
+        .page(needle)
+        .then((page) => {
+          setSearchResults(page.contacts)
+          setSearchTotal(page.total)
+          setSearchHasMore(page.hasMore)
+          setSearchCursor(page.nextCursor)
+        })
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Search failed'))
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  const filtered = useMemo(() => searchResults ?? list, [list, searchResults])
+  const displayTotal = query.trim() ? searchTotal : total
+  const displayHasMore = query.trim() ? searchHasMore : hasMore
+
+  const reloadBase = useCallback(async () => {
+    const page = await contactsService.page()
+    contactsService.save(page.contacts)
+    setList(page.contacts)
+    setTotal(page.total)
+    setHasMore(page.hasMore)
+    setNextCursor(page.nextCursor)
+  }, [])
+
+  useEffect(() => {
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (detail?.kind !== 'resource-changed' || detail.payload.resource !== 'contacts') return
+      const needle = query.trim()
+      if (!needle) {
+        void reloadBase().catch(() => {})
+        return
+      }
+      void contactsService.page(needle).then((page) => {
+        setSearchResults(page.contacts)
+        setSearchTotal(page.total)
+        setSearchHasMore(page.hasMore)
+        setSearchCursor(page.nextCursor)
+      }).catch(() => {})
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [query, reloadBase])
+
+  const loadMore = async () => {
+    const needle = query.trim()
+    const cursor = needle ? searchCursor : nextCursor
+    if (!cursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await contactsService.page(needle, cursor)
+      if (needle) {
+        setSearchResults((current) => [...(current ?? []), ...page.contacts])
+        setSearchHasMore(page.hasMore)
+        setSearchCursor(page.nextCursor)
+        setSearchTotal(page.total)
+      } else {
+        const merged = [...list, ...page.contacts]
+        contactsService.save(merged)
+        setList(merged)
+        setHasMore(page.hasMore)
+        setNextCursor(page.nextCursor)
+        setTotal(page.total)
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load more contacts')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const update = (patch: Partial<typeof emptyForm>) =>
     setForm((current) => ({ ...current, ...patch }))
@@ -82,18 +174,60 @@ export function ContactsPage() {
     const contact: Contact = {
       name: form.name.trim() || email.split('@')[0],
       email,
-      company: form.company.trim() || undefined,
-      phone: form.phone.trim() || undefined,
+      company: form.company.trim(),
+      phone: form.phone.trim(),
     }
-    const next = editing
-      ? await contactsService.update(editing.email, contact)
-      : await contactsService.add(contact)
-    setList(next)
-    cancel()
+    try {
+      if (editing) await contactsService.update(editing.email, contact)
+      else await contactsService.add(contact)
+      setQuery('')
+      setSearchResults(null)
+      await reloadBase()
+      cancel()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save contact')
+    }
   }
 
   const remove = (contact: Contact) => {
-    void contactsService.remove(contact.email).then(setList)
+    setError('')
+    void contactsService
+      .remove(contact.email)
+      .then(() => {
+        setQuery('')
+        setSearchResults(null)
+        return reloadBase()
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to remove contact'))
+  }
+
+  const exportContacts = () => {
+    setError('')
+    void contactsService
+      .exportCsv()
+      .then(({ filename, content }) => {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        link.click()
+        URL.revokeObjectURL(url)
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to export contacts'))
+  }
+
+  const importContacts = (file: File) => {
+    setError('')
+    void file
+      .text()
+      .then((content) => contactsService.importCsv(content, true))
+      .then(() => {
+        setQuery('')
+        setSearchResults(null)
+        return reloadBase()
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to import contacts'))
   }
 
   return (
@@ -102,12 +236,34 @@ export function ContactsPage() {
         <div>
           <p className="eyebrow">Address book</p>
           <h1>Contacts</h1>
-          <p className="contacts-head__count">{list.length} live contacts</p>
+          <p className="contacts-head__count">{total} live contacts</p>
         </div>
-        <button type="button" className="primary-button" onClick={startAdd}>
-          <Plus size={15} />
-          New contact
-        </button>
+        <div className="row-actions">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            aria-label="Import contacts CSV"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) importContacts(file)
+              event.currentTarget.value = ''
+            }}
+          />
+          <button type="button" className="secondary-button" onClick={() => fileRef.current?.click()}>
+            <FileUp size={15} />
+            Import
+          </button>
+          <button type="button" className="secondary-button" onClick={exportContacts}>
+            <Download size={15} />
+            Export
+          </button>
+          <button type="button" className="primary-button" onClick={startAdd}>
+            <Plus size={15} />
+            New contact
+          </button>
+        </div>
       </header>
 
       <div className="contacts-body">
@@ -120,6 +276,8 @@ export function ContactsPage() {
             aria-label="Search contacts"
           />
         </div>
+        {query.trim() && <p className="settings-hint">{displayTotal} matching contact{displayTotal === 1 ? '' : 's'}</p>}
+        {error && !adding && !editing && <p className="composer-error">{error}</p>}
 
         {(adding || editing) && (
           <form className="contacts-form" onSubmit={save}>
@@ -185,10 +343,10 @@ export function ContactsPage() {
         )}
 
         <ul className="contacts-list">
-          {filtered.map((contact) => (
+          {filtered.map((contact, index) => (
             <li key={contact.email}>
               <span
-                className={`avatar avatar--${['coral', 'teal', 'purple', 'orange', 'blue', 'green'][list.indexOf(contact) % 6]}`}
+                className={`avatar avatar--${['coral', 'teal', 'purple', 'orange', 'blue', 'green'][index % 6]}`}
               >
                 {initials(contact)}
               </span>
@@ -239,6 +397,13 @@ export function ContactsPage() {
             </li>
           )}
         </ul>
+        {displayHasMore && (
+          <div className="row-actions">
+            <button type="button" className="secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

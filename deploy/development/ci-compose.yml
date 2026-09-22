@@ -1,0 +1,36 @@
+name: cs-mail-ci-smoke
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: csmail
+      POSTGRES_PASSWORD: csmail
+      POSTGRES_DB: csmail
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U csmail -d csmail"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../../backend
+    environment:
+      CS_MAIL_LISTEN_ADDR: 0.0.0.0:8080
+      CS_MAIL_PUBLIC_ORIGIN: http://127.0.0.1:8080
+      CS_MAIL_CORS_ORIGINS: http://127.0.0.1:8080
+      CS_MAIL_DATABASE_URL: postgres://csmail:csmail@db:5432/csmail
+      CS_MAIL_JWT_SECRET: ci-only-secret-XXXXXXXXXXXXXXXXXXXXXXXXXX
+      CS_MAIL_REQUIRE_VERIFICATION: "false"
+      CS_MAIL_DEV_RETURN_TOKEN_LINKS: "false"
+      CS_MAIL_COOKIE_SECURE: "false"
+      CS_MAIL_MAIL_ADMIN_URL: ""
+      CS_MAIL_PROVIDER_NAMESPACE: cs-mail
+      CS_MAIL_PROVISIONING_KEY: ci-only-provisioning-key-XXXXXXXXXXXXXXXX
+      CS_MAIL_TOTP_KEY: ci-only-totp-key-XXXXXXXXXXXXXXXXXXXXXXXXXX
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy

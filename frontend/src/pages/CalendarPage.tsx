@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   CalendarDays,
   CalendarPlus,
@@ -19,7 +19,9 @@ import {
   timeMinutes,
   type CalendarEvent,
   type EventCategory,
+  type EventRecurrence,
 } from '../services/calendar'
+import type { RealtimeEvent } from '../services/ws'
 
 const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -64,14 +66,21 @@ export function CalendarPage() {
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      const rows = await calendarApi.refresh()
-      if (!cancelled) setEvents(rows)
-    })()
+    const visible = monthsOfYear(cursor.getFullYear(), cursor.getMonth())
+    const start = localDate(visible[0])
+    const end = localDate(visible[visible.length - 1])
+    void calendarApi
+      .refresh(start, end)
+      .then((rows) => {
+        if (!cancelled) setEvents(rows)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setNotice(reason instanceof Error ? reason.message : 'Unable to load calendar')
+      })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [cursor])
 
   const year = cursor.getFullYear()
   const month = cursor.getMonth()
@@ -94,46 +103,74 @@ export function CalendarPage() {
     window.setTimeout(() => setNotice(''), 3200)
   }
 
+  const refreshVisible = useCallback(async () => {
+    const visible = monthsOfYear(cursor.getFullYear(), cursor.getMonth())
+    return calendarApi.refresh(localDate(visible[0]), localDate(visible[visible.length - 1]))
+  }, [cursor])
+
+  useEffect(() => {
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (detail?.kind !== 'resource-changed' || detail.payload.resource !== 'calendar') return
+      void refreshVisible().then(setEvents).catch(() => {})
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [refreshVisible])
+
   const openNew = (date: string) => setEditor({ event: null, draft: blankDraft(date) })
   const openEvent = (event: CalendarEvent) => setEditor({ event, draft: { ...event } })
 
   const save = async (draft: Omit<CalendarEvent, 'id'>, existing: CalendarEvent | null) => {
     const normalized = { ...draft, title: draft.title.trim() || 'Untitled event' }
-    const next = existing
-      ? await calendarApi.update(existing.id, normalized)
-      : await calendarApi.add(normalized)
-    setEvents(next)
-    setEditor(null)
-    showNotice(existing ? 'Event updated' : 'Event created')
+    try {
+      if (existing) await calendarApi.update(existing.id, normalized)
+      else await calendarApi.add(normalized)
+      setEvents(await refreshVisible())
+      setEditor(null)
+      showNotice(existing ? 'Event updated' : 'Event created')
+    } catch (reason) {
+      showNotice(reason instanceof Error ? reason.message : 'Unable to save event')
+    }
   }
 
   const remove = async (event: CalendarEvent) => {
-    setEvents(await calendarApi.remove(event.id))
-    setEditor(null)
-    showNotice('Event deleted')
+    try {
+      await calendarApi.remove(event.id)
+      setEvents(await refreshVisible())
+      setEditor(null)
+      showNotice('Event deleted')
+    } catch (reason) {
+      showNotice(reason instanceof Error ? reason.message : 'Unable to delete event')
+    }
   }
 
   const downloadIcs = (event: CalendarEvent) => {
-    const blob = new Blob([calendarApi.icsExport(event)], { type: 'text/calendar' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${event.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`
-    link.click()
-    URL.revokeObjectURL(url)
-    showNotice('Calendar file downloaded')
+    void calendarApi
+      .exportIcs(event)
+      .then(({ filename, content }) => {
+        const blob = new Blob([content], { type: 'text/calendar' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        link.click()
+        URL.revokeObjectURL(url)
+        showNotice('Calendar file downloaded')
+      })
+      .catch((reason: unknown) => showNotice(reason instanceof Error ? reason.message : 'Unable to export event'))
   }
 
   const importIcs = async (file: File) => {
-    const imported = calendarApi.icsImport(await file.text())
-    if (!imported.length) {
-      showNotice('No events found in that file')
-      return
+    try {
+      const before = new Set(calendarApi.list().map((event) => event.id))
+      const next = await calendarApi.importIcs(await file.text())
+      const imported = next.filter((event) => !before.has(event.id)).length
+      setEvents(await refreshVisible())
+      showNotice(`Calendar import completed${imported ? ` · ${imported} new event${imported === 1 ? '' : 's'}` : ''}`)
+    } catch (reason) {
+      showNotice(reason instanceof Error ? reason.message : 'Unable to import calendar')
     }
-    let next = calendarApi.list()
-    for (const event of imported) next = await calendarApi.add(event)
-    setEvents(next)
-    showNotice(`Imported ${imported.length} event${imported.length === 1 ? '' : 's'}`)
   }
 
   const goMonth = (amount: number) => {
@@ -142,8 +179,9 @@ export function CalendarPage() {
     setViewDate(localDate(target))
   }
   const goToday = () => {
-    setCursor((current) => new Date(current.getFullYear(), current.getMonth(), 1))
-    setViewDate(localDate(new Date()))
+    const now = new Date()
+    setCursor(new Date(now.getFullYear(), now.getMonth(), 1))
+    setViewDate(localDate(now))
   }
 
   return (
@@ -393,6 +431,7 @@ function EventEditor({
               <input
                 type="date"
                 value={draft.date}
+                disabled={Boolean(editing?.recurrence)}
                 onChange={(event) => update({ date: event.target.value })}
                 aria-label="Event date"
               />
@@ -444,6 +483,31 @@ function EventEditor({
               </select>
             </label>
             <label>
+              Repeat
+              <select
+                value={draft.recurrence?.frequency ?? 'none'}
+                onChange={(event) => {
+                  const frequency = event.target.value
+                  update({
+                    recurrence:
+                      frequency === 'none'
+                        ? null
+                        : { frequency: frequency as EventRecurrence['frequency'], interval: 1 },
+                  })
+                }}
+                aria-label="Event recurrence"
+              >
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </label>
+            {editing?.recurrence && (
+              <p className="settings-hint">This is a repeating series. Changes and deletion apply to the full series.</p>
+            )}
+            <label>
               Location
               <input
                 value={draft.location}
@@ -457,7 +521,7 @@ function EventEditor({
               <input
                 value={attendees}
                 onChange={(event) => setAttendees(event.target.value)}
-                placeholder="nora@harbor.co, priya@harbor.co"
+                placeholder="nora@crescentsphere.com, priya@crescentsphere.com"
                 aria-label="Event attendees"
               />
             </label>

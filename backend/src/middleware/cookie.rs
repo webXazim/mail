@@ -6,7 +6,7 @@ use crate::state::AppState;
 /// read it, which removes the localStorage XSS-theft vector. SameSite=Lax
 /// keeps it off cross-site POSTs (CSRF), and `Secure` is turned on once the
 /// deployment serves TLS.
-pub const SESSION_COOKIE: &str = "harbor_session";
+pub const SESSION_COOKIE: &str = "cs_mail_session";
 
 pub fn build_session_cookie(state: &AppState, token: &str, max_age_secs: i64) -> String {
     let secure = if state.cookie_secure { " Secure;" } else { "" };

@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, BadgeCheck, KeyRound, UserPlus } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthShell } from '../components/AuthShell'
 import { authApi } from '../services/auth'
 import { auditApi } from '../services/audit'
 
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const token = searchParams.get('token') || ''
   const [error, setError] = useState('')
   const [sentTo, setSentTo] = useState('')
@@ -36,6 +37,12 @@ export function VerifyEmailPage() {
     try {
       await authApi.verifyEmail(token)
       auditApi.add('security', 'Email verified', 'You confirmed your email address')
+      const returnTo = sessionStorage.getItem('cs-mail:return-to')
+      if (returnTo) {
+        sessionStorage.removeItem('cs-mail:return-to')
+        navigate(returnTo, { replace: true })
+        return
+      }
       setVerified(true)
     } catch (cause) {
       setError(
@@ -49,7 +56,7 @@ export function VerifyEmailPage() {
     <AuthShell
       eyebrow="Account access"
       title="Verify your email"
-      copy="Confirm the email address on your account to keep your mailbox secure."
+      copy="Confirm the login email on your CS Mail account before creating or joining a business."
       asideIcon={<UserPlus size={20} />}
       foot={
         <Link to="/login" className="text-button">
@@ -64,7 +71,7 @@ export function VerifyEmailPage() {
             <BadgeCheck size={22} />
           </span>
           <strong>Email verified</strong>
-          <p>Your email address is confirmed. You can now sign in to your mailbox.</p>
+          <p>Your login email is confirmed. Sign in to create a business or accept an invitation.</p>
           <Link className="primary-button auth-submit" to="/login">
             Go to sign in
             <ArrowRight size={16} />
@@ -97,7 +104,7 @@ export function VerifyEmailPage() {
               name="email"
               type="email"
               autoComplete="email"
-              placeholder="you@company.com"
+              placeholder="you@example.com"
               required
             />
           </label>

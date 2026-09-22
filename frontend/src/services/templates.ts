@@ -7,7 +7,7 @@ export type Template = {
   body: string
 }
 
-const templatesKey = 'harbor-mail:templates'
+const templatesKey = 'cs-mail:templates'
 
 export const seedTemplates: Template[] = [
   {

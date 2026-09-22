@@ -83,83 +83,83 @@ impl Metrics {
         let reg = self.registry.lock().expect("metrics poisoned");
         let mut out = String::with_capacity(2048);
 
-        out.push_str("# HELP harbor_http_requests_total Requests by route and status.\n");
-        out.push_str("# TYPE harbor_http_requests_total counter\n");
+        out.push_str("# HELP cs_mail_http_requests_total Requests by route and status.\n");
+        out.push_str("# TYPE cs_mail_http_requests_total counter\n");
         for ((route, status), count) in &reg.requests {
             out.push_str(&format!(
-                "harbor_http_requests_total{{path=\"{}\",status=\"{}\"}} {}\n",
+                "cs_mail_http_requests_total{{path=\"{}\",status=\"{}\"}} {}\n",
                 escape(route),
                 status,
                 count
             ));
         }
 
-        out.push_str("# HELP harbor_http_request_duration_seconds Request latency.\n");
-        out.push_str("# TYPE harbor_http_request_duration_seconds histogram\n");
+        out.push_str("# HELP cs_mail_http_request_duration_seconds Request latency.\n");
+        out.push_str("# TYPE cs_mail_http_request_duration_seconds histogram\n");
         for (route, buckets) in &reg.buckets {
             for (i, le) in BUCKETS.iter().enumerate() {
                 out.push_str(&format!(
-                    "harbor_http_request_duration_seconds_bucket{{path=\"{}\",le=\"{}\"}} {}\n",
+                    "cs_mail_http_request_duration_seconds_bucket{{path=\"{}\",le=\"{}\"}} {}\n",
                     escape(route),
                     le,
                     buckets[i]
                 ));
             }
             out.push_str(&format!(
-                "harbor_http_request_duration_seconds_bucket{{path=\"{}\",le=\"+Inf\"}} {}\n",
+                "cs_mail_http_request_duration_seconds_bucket{{path=\"{}\",le=\"+Inf\"}} {}\n",
                 escape(route),
                 buckets[BUCKETS.len() - 1]
             ));
             let sum = reg.duration_sum.get(route).copied().unwrap_or(0.0);
             let count = reg.duration_count.get(route).copied().unwrap_or(0);
             out.push_str(&format!(
-                "harbor_http_request_duration_seconds_sum{{path=\"{}\"}} {}\n",
+                "cs_mail_http_request_duration_seconds_sum{{path=\"{}\"}} {}\n",
                 escape(route),
                 sum
             ));
             out.push_str(&format!(
-                "harbor_http_request_duration_seconds_count{{path=\"{}\"}} {}\n",
+                "cs_mail_http_request_duration_seconds_count{{path=\"{}\"}} {}\n",
                 escape(route),
                 count
             ));
         }
 
-        out.push_str("# HELP harbor_http_responses_5xx_total Server errors by route.\n");
-        out.push_str("# TYPE harbor_http_responses_5xx_total counter\n");
+        out.push_str("# HELP cs_mail_http_responses_5xx_total Server errors by route.\n");
+        out.push_str("# TYPE cs_mail_http_responses_5xx_total counter\n");
         for (route, count) in &reg.errors {
             out.push_str(&format!(
-                "harbor_http_responses_5xx_total{{path=\"{}\"}} {}\n",
+                "cs_mail_http_responses_5xx_total{{path=\"{}\"}} {}\n",
                 escape(route),
                 count
             ));
         }
 
-        out.push_str("# HELP harbor_smtp_sends_total Outgoing delivery outcomes.\n");
-        out.push_str("# TYPE harbor_smtp_sends_total counter\n");
+        out.push_str("# HELP cs_mail_smtp_sends_total Outgoing delivery outcomes.\n");
+        out.push_str("# TYPE cs_mail_smtp_sends_total counter\n");
         out.push_str(&format!(
-            "harbor_smtp_sends_total{{result=\"ok\"}} {}\n",
+            "cs_mail_smtp_sends_total{{result=\"ok\"}} {}\n",
             self.sends_ok.load(Ordering::Relaxed)
         ));
         out.push_str(&format!(
-            "harbor_smtp_sends_total{{result=\"failed\"}} {}\n",
+            "cs_mail_smtp_sends_total{{result=\"failed\"}} {}\n",
             self.sends_failed.load(Ordering::Relaxed)
         ));
         out.push_str(&format!(
-            "harbor_smtp_sends_total{{result=\"suppressed\"}} {}\n",
+            "cs_mail_smtp_sends_total{{result=\"suppressed\"}} {}\n",
             self.suppressed_dropped.load(Ordering::Relaxed)
         ));
         out.push_str(&format!(
-            "harbor_smtp_sends_total{{result=\"rate_limited\"}} {}\n",
+            "cs_mail_smtp_sends_total{{result=\"rate_limited\"}} {}\n",
             self.rate_limited.load(Ordering::Relaxed)
         ));
 
-        out.push_str("# HELP harbor_db_pool_connections SQLx pool gauge.\n");
-        out.push_str("# TYPE harbor_db_pool_connections gauge\n");
+        out.push_str("# HELP cs_mail_db_pool_connections SQLx pool gauge.\n");
+        out.push_str("# TYPE cs_mail_db_pool_connections gauge\n");
         out.push_str(&format!(
-            "harbor_db_pool_connections{{state=\"open\"}} {pool_size}\n"
+            "cs_mail_db_pool_connections{{state=\"open\"}} {pool_size}\n"
         ));
         out.push_str(&format!(
-            "harbor_db_pool_connections{{state=\"idle\"}} {pool_idle}\n"
+            "cs_mail_db_pool_connections{{state=\"idle\"}} {pool_idle}\n"
         ));
 
         out
@@ -193,15 +193,15 @@ mod tests {
         m.record_send_failed();
         let text = m.render(10, 7);
 
-        assert!(text.contains("harbor_http_requests_total{path=\"/api/send\",status=\"200\"} 1"));
-        assert!(text.contains("harbor_http_requests_total{path=\"/api/send\",status=\"500\"} 1"));
-        assert!(text.contains("harbor_http_responses_5xx_total{path=\"/api/send\"} 1"));
+        assert!(text.contains("cs_mail_http_requests_total{path=\"/api/send\",status=\"200\"} 1"));
+        assert!(text.contains("cs_mail_http_requests_total{path=\"/api/send\",status=\"500\"} 1"));
+        assert!(text.contains("cs_mail_http_responses_5xx_total{path=\"/api/send\"} 1"));
         // 0.03 falls in the le="0.05" bucket; both requests are <= le="10".
         assert!(text.contains("le=\"0.05\"} 1"));
         assert!(text.contains("le=\"10\"} 2"));
-        assert!(text.contains("harbor_http_request_duration_seconds_count{path=\"/api/send\"} 2"));
-        assert!(text.contains("harbor_smtp_sends_total{result=\"ok\"} 1"));
-        assert!(text.contains("harbor_db_pool_connections{state=\"idle\"} 7"));
+        assert!(text.contains("cs_mail_http_request_duration_seconds_count{path=\"/api/send\"} 2"));
+        assert!(text.contains("cs_mail_smtp_sends_total{result=\"ok\"} 1"));
+        assert!(text.contains("cs_mail_db_pool_connections{state=\"idle\"} 7"));
     }
 
     #[test]

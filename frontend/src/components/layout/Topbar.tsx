@@ -3,9 +3,9 @@ import { ArrowLeft, CircleHelp, Menu, Search, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
-type TopbarProps = { onOpenMobile: () => void; mobileOpen: boolean; onHelp: () => void }
+type TopbarProps = { onOpenMobile: () => void; mobileOpen: boolean; onHelp: () => void; mailEnabled?: boolean }
 
-export function Topbar({ onOpenMobile, mobileOpen, onHelp }: TopbarProps) {
+export function Topbar({ onOpenMobile, mobileOpen, onHelp, mailEnabled = true }: TopbarProps) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
@@ -73,6 +73,26 @@ export function Topbar({ onOpenMobile, mobileOpen, onHelp }: TopbarProps) {
       <kbd aria-hidden="true">/</kbd>
     </>
   )
+  if (!mailEnabled) {
+    return (
+      <header className="topbar">
+        <button
+          className="icon-button mobile-menu"
+          onClick={onOpenMobile}
+          aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={mobileOpen}
+          aria-controls="sidebar"
+        >
+          <Menu size={18} />
+        </button>
+        <div className="topbar-context">
+          <strong>Business setup</strong>
+          <span>Verify a domain before creating a mailbox</span>
+        </div>
+      </header>
+    )
+  }
+
   if (isMobile && onSearchScreen) {
     return (
       <header className="topbar topbar--searching">

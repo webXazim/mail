@@ -1,26 +1,23 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Download, FileText, Landmark, Star } from 'lucide-react'
-import { downloadTextFile } from '../lib/files'
-import { invoiceToText } from '../lib/invoices'
-import { useProfile } from '../services/profile'
+import { ArrowLeft, Check, FileText, Landmark, Save, Star } from 'lucide-react'
 import {
   billingApi,
   friendlyError,
   formatPrice,
-  invoiceFromOrder,
   paymentMethodLabel,
   splitBytes,
   summaryText,
+  type BillingProfileRow,
   type BillingSummary,
   type OrderRow,
   type PlanView,
 } from '../services/billing'
 
 const statusLabel: Record<OrderRow['status'], string> = {
-  pending: 'Awaiting payment',
-  submitted: 'Verifying payment',
-  paid: 'Active',
+  pending: 'Payment due',
+  submitted: 'Payment under review',
+  paid: 'Paid',
   cancelled: 'Cancelled',
   rejected: 'Rejected',
 }
@@ -28,13 +25,11 @@ const statusLabel: Record<OrderRow['status'], string> = {
 function instructionsFor(method: string, settings: BillingSummary['settings']): string {
   switch (method) {
     case 'bank':
-      return settings.bank_details || 'Use the bank transfer details of Harbor Mail when paying.'
+      return settings.bank_details || 'Use the bank transfer details of CS Mail when paying.'
     case 'paypal':
       return settings.paypal_email
         ? `Pay via PayPal to ${settings.paypal_email} — put your order id in the note.`
         : 'Pay via PayPal to the address your admin provides.'
-    case 'card':
-      return 'Card payments are arranged after you place the order — our team shares a checkout link and confirms when it is received.'
     default:
       return (
         settings.instructions || 'Pay for your order using the instructions your admin provides.'
@@ -44,33 +39,38 @@ function instructionsFor(method: string, settings: BillingSummary['settings']): 
 
 export function BillingPage() {
   const navigate = useNavigate()
-  const profile = useProfile()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
   const [plans, setPlans] = useState<PlanView[]>([])
   const [tab, setTab] = useState<'plan' | 'invoices'>('plan')
   const [ordering, setOrdering] = useState(false)
   const [chosenPlan, setChosenPlan] = useState('')
+  const [mailboxCount, setMailboxCount] = useState(1)
   const [method, setMethod] = useState('bank')
   const [note, setNote] = useState('')
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [reference, setReference] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
-  const [downloaded, setDownloaded] = useState<string[]>([])
+  const [billingProfile, setBillingProfile] = useState<BillingProfileRow | null>(null)
 
   const reload = async () => {
     const [next, active] = await Promise.all([billingApi.summary(), billingApi.plans()])
     setSummary(next)
+    setBillingProfile(next.billing_profile)
     setPlans(active)
-    setChosenPlan((current) => current || active[1]?.code || active[0]?.code || '')
+    const defaultPlan = active[1] ?? active[0]
+    setChosenPlan((current) => current || defaultPlan?.code || '')
+    setMailboxCount((current) => Math.max(current, next.mailbox_limit, defaultPlan?.mailbox_limit ?? 1))
     billingApi.refreshInvoices()
   }
 
   useEffect(() => {
-    void billingApi.summary().then(setSummary)
+    void billingApi.summary().then((next) => { setSummary(next); setBillingProfile(next.billing_profile) })
     void billingApi.plans().then((active) => {
       setPlans(active)
-      setChosenPlan((current) => current || active[1]?.code || active[0]?.code || '')
+      const defaultPlan = active[1] ?? active[0]
+      setChosenPlan((current) => current || defaultPlan?.code || '')
+      setMailboxCount((current) => Math.max(current, defaultPlan?.mailbox_limit ?? 1))
     })
     void billingApi.refreshInvoices()
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -89,8 +89,8 @@ export function BillingPage() {
   const pairedOrders = useMemo(() => {
     if (!summary) return []
     return summary.orders
-      .filter((order) => order.status === 'paid')
-      .sort((a, b) => (a.paid_at ?? a.created_at).localeCompare(b.paid_at ?? b.created_at))
+      .filter((order) => Boolean(order.invoice_number))
+      .sort((a, b) => (a.issued_at ?? a.created_at).localeCompare(b.issued_at ?? b.created_at))
       .reverse()
   }, [summary])
 
@@ -103,18 +103,25 @@ export function BillingPage() {
   }
 
   const current = summary.current_plan
-  const storageTotal = summary.quota_bytes || current.mailbox_bytes
-  const storageUsed = profile?.storage?.used_bytes ?? 0
-  const storagePct = storageTotal > 0 ? Math.min(100, (storageUsed / storageTotal) * 100) : 0
+  const storageTotal = summary.storage_pool_bytes || current.storage_pool_bytes || summary.quota_bytes || current.mailbox_bytes
+  const storageAllocated = summary.storage_allocated_bytes ?? 0
+  const storagePct = storageTotal > 0 ? Math.min(100, (storageAllocated / storageTotal) * 100) : 0
   const { value: storageValue, unit: storageUnit } = splitBytes(storageTotal)
+  const selectedPlan = activePlans.find((plan) => plan.code === chosenPlan) ?? activePlans[0]
+  const selectedExtraCount = selectedPlan ? Math.max(0, mailboxCount - selectedPlan.mailbox_limit) : 0
+  const selectedSubtotal = selectedPlan ? selectedPlan.price_cents + selectedExtraCount * selectedPlan.extra_mailbox_price_cents : 0
+  const selectedTaxBps = summary.settings.seller_vat_number ? summary.settings.tax_rate_bps : 0
+  const selectedTax = Math.round(selectedSubtotal * selectedTaxBps / 10000)
 
   const placeOrder = async (event: FormEvent) => {
     event.preventDefault()
     if (!chosenPlan || !method) return
     setBusy(true)
     try {
-      await billingApi.createOrder(chosenPlan, method, note.trim())
-      showNotice('Order placed — send the payment, then mark it paid below.')
+      const order = await billingApi.createOrder(chosenPlan, mailboxCount, method, note.trim())
+      showNotice(summary.instant_activation
+        ? `${order.plan_name} activated immediately for testing. Invoice ${order.invoice_number ?? ''} was issued and payment is still due.`
+        : `Invoice ${order.invoice_number ?? ''} issued. Pay it and submit the reference for activation.`)
       setOrdering(false)
       setNote('')
       await reload()
@@ -132,7 +139,7 @@ export function BillingPage() {
       await billingApi.submitPaid(order.id, order.payment_method, reference.trim())
       setSubmittingId(null)
       setReference('')
-      showNotice('Reference submitted — we will verify and activate your plan.')
+      showNotice(summary.instant_activation ? 'Payment reference submitted for review. Your test plan remains active.' : 'Payment reference submitted — activation follows verification.')
       await reload()
     } catch (error) {
       showNotice(friendlyError(error))
@@ -145,7 +152,7 @@ export function BillingPage() {
     setBusy(true)
     try {
       await billingApi.cancelOrder(order.id)
-      showNotice('Order cancelled.')
+      showNotice(summary.instant_activation ? 'Invoice cancelled. The test plan remains active until you order another plan.' : 'Order cancelled.')
       await reload()
     } catch (error) {
       showNotice(friendlyError(error))
@@ -154,22 +161,27 @@ export function BillingPage() {
     }
   }
 
-  const downloadInvoice = (order: OrderRow) => {
-    const invoice = invoiceFromOrder(order)
-    if (!invoice) return
-    downloadTextFile(`${invoice.id}.txt`, invoiceToText(invoice))
-    setDownloaded((current) => [...current, invoice.id])
-    window.setTimeout(
-      () => setDownloaded((current) => current.filter((id) => id !== invoice.id)),
-      3000,
-    )
+  const saveBillingProfile = async () => {
+    if (!billingProfile) return
+    setBusy(true)
+    try {
+      const next = await billingApi.updateProfile(billingProfile)
+      setBillingProfile(next)
+      setSummary((current) => current ? { ...current, billing_profile: next } : current)
+      showNotice('Billing details saved. New invoices will snapshot these details.')
+    } catch (error) {
+      showNotice(friendlyError(error))
+    } finally {
+      setBusy(false)
+    }
   }
+
 
   return (
     <div className="settings-page" role="region" aria-label="Billing">
       <header className="calendar-head">
         <div>
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>Billing</h1>
         </div>
         <div className="calendar-head__actions">
@@ -220,7 +232,7 @@ export function BillingPage() {
             <div className="admin-section-head">
               <h2>Current plan</h2>
               <span className="admin-section-count">
-                {current.price} per seat / {current.interval}
+                {current.price} base / {current.interval} · {summary.mailbox_limit} mailbox{summary.mailbox_limit === 1 ? '' : 'es'} purchased
               </span>
             </div>
             <div className="billing-plan">
@@ -239,55 +251,101 @@ export function BillingPage() {
               </button>
             </div>
             <div className="storage">
-              <span>Storage used</span>
-              <strong>
-                {profile?.storage
-                  ? `${profile.storage.pct.toFixed(0)}%`
-                  : `${storageValue} ${storageUnit}`}
-              </strong>
+              <span>Storage allocated</span>
+              <strong>{storagePct.toFixed(0)}% of {storageValue} {storageUnit}</strong>
               <div className="storage-bar">
                 <span style={{ width: `${storagePct}%` }} />
               </div>
             </div>
           </section>
 
+          <section className="settings-section">
+            <div className="admin-section-head">
+              <div>
+                <h2>Billing details</h2>
+                <p className="settings-hint">These details are snapshotted onto new invoices.</p>
+              </div>
+              <button type="button" className="secondary-button" disabled={busy || !billingProfile} onClick={() => void saveBillingProfile()}>
+                <Save size={14} /> Save details
+              </button>
+            </div>
+            {billingProfile && (
+              <div className="settings-grid">
+                <label>Legal / business name<input value={billingProfile.legal_name} onChange={(event) => setBillingProfile({ ...billingProfile, legal_name: event.target.value })} /></label>
+                <label>Billing email<input type="email" value={billingProfile.billing_email} onChange={(event) => setBillingProfile({ ...billingProfile, billing_email: event.target.value })} /></label>
+                <label>VAT number<input value={billingProfile.vat_number} onChange={(event) => setBillingProfile({ ...billingProfile, vat_number: event.target.value })} /></label>
+                <label>CR number<input value={billingProfile.cr_number} onChange={(event) => setBillingProfile({ ...billingProfile, cr_number: event.target.value })} /></label>
+                <label>Address<input value={billingProfile.address_line1} onChange={(event) => setBillingProfile({ ...billingProfile, address_line1: event.target.value })} /></label>
+                <label>City<input value={billingProfile.city} onChange={(event) => setBillingProfile({ ...billingProfile, city: event.target.value })} /></label>
+                <label>Postal code<input value={billingProfile.postal_code} onChange={(event) => setBillingProfile({ ...billingProfile, postal_code: event.target.value })} /></label>
+                <label>Country<input value={billingProfile.country} onChange={(event) => setBillingProfile({ ...billingProfile, country: event.target.value })} /></label>
+              </div>
+            )}
+          </section>
+
           {ordering && (
             <form className="settings-section" onSubmit={placeOrder}>
               <h2>Order a plan</h2>
               <p className="settings-hint">
-                Choose a plan and a payment method. You fund the order yourself (bank transfer,
-                PayPal or card) and an admin verifies the payment to activate the plan.
+                {summary.instant_activation
+                  ? 'Testing mode is enabled: placing the order activates the plan immediately and issues an invoice. Payment remains due and can still be submitted for manual review.'
+                  : 'Choose a plan and payment method. The invoice is issued immediately; the plan activates after manual payment verification.'}
               </p>
               {activePlans.map((plan) => (
                 <button
                   type="button"
                   className={`plan-option ${chosenPlan === plan.code ? 'plan-option--active' : ''}`}
                   key={plan.code}
-                  onClick={() => setChosenPlan(plan.code)}
+                  onClick={() => {
+                    setChosenPlan(plan.code)
+                    setMailboxCount(Math.max(plan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats))
+                  }}
                   aria-pressed={chosenPlan === plan.code}
                 >
                   <span>
                     <strong>{plan.name}</strong>
                     <small>
-                      {splitBytes(plan.mailbox_bytes).value} {splitBytes(plan.mailbox_bytes).unit}{' '}
-                      per mailbox · {plan.max_recipients} recipients ·{' '}
-                      {summaryText(plan.daily_send_limit)}
+                      {plan.mailbox_limit} included · {splitBytes(plan.mailbox_bytes).value} {splitBytes(plan.mailbox_bytes).unit}{' '}
+                      per mailbox · extra mailbox {formatPrice(plan.extra_mailbox_price_cents, plan.currency)} / {plan.interval}
                     </small>
                   </span>
                   <span className="plan-option__price">
                     <strong>{plan.price}</strong>
-                    <small>per seat / {plan.interval}</small>
+                    <small>base / {plan.interval}</small>
                   </span>
                   {chosenPlan === plan.code && <Check size={15} />}
                 </button>
               ))}
+              {selectedPlan && (
+                <>
+                  <label>
+                    Mailboxes
+                    <input
+                      type="number"
+                      min={Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)}
+                      max={selectedPlan.max_mailboxes}
+                      value={mailboxCount}
+                      onChange={(event) => {
+                        const minimum = Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)
+                        const next = Number(event.target.value) || minimum
+                        setMailboxCount(Math.max(minimum, Math.min(selectedPlan.max_mailboxes, next)))
+                      }}
+                      aria-label="Mailbox quantity"
+                    />
+                    <small>{selectedPlan.mailbox_limit} included; up to {selectedPlan.max_mailboxes}. Each additional mailbox is {formatPrice(selectedPlan.extra_mailbox_price_cents, selectedPlan.currency)} / {selectedPlan.interval}.</small>
+                  </label>
+                  <div className="billing-pay-instructions">
+                    <strong>Order total before payment</strong>
+                    <p>Base {formatPrice(selectedPlan.price_cents, selectedPlan.currency)} + {selectedExtraCount} additional mailbox{selectedExtraCount === 1 ? '' : 'es'} = {formatPrice(selectedSubtotal, selectedPlan.currency)} subtotal{selectedTaxBps > 0 ? ` + ${formatPrice(selectedTax, selectedPlan.currency)} VAT` : ''}. Total {formatPrice(selectedSubtotal + selectedTax, selectedPlan.currency)}.</p>
+                  </div>
+                </>
+              )}
               <label>
                 Payment method
                 <select value={method} onChange={(event) => setMethod(event.target.value)}>
                   <option value="bank">Bank transfer</option>
-                  <option value="paypal">PayPal</option>
-                  <option value="card">Card</option>
-                  <option value="other">Other</option>
+                  {summary.settings.paypal_email && <option value="paypal">PayPal</option>}
+                  <option value="other">Other manual payment</option>
                 </select>
               </label>
               <div className="billing-pay-instructions">
@@ -336,7 +394,7 @@ export function BillingPage() {
               <div className="billing-row" key={order.id}>
                 <div>
                   <strong>
-                    {order.plan_name} · {formatPrice(order.amount_cents, order.currency)}
+                    {order.plan_name} · {formatPrice(order.total_cents, order.currency)}
                   </strong>
                   <small>
                     {paymentMethodLabel(order.payment_method)} ·{' '}
@@ -345,6 +403,7 @@ export function BillingPage() {
                       day: 'numeric',
                       year: 'numeric',
                     })}
+                    {` · ${order.mailbox_count} mailbox${order.mailbox_count === 1 ? '' : 'es'}`}
                     {order.invoice_number ? ` · ${order.invoice_number}` : ''}
                     {order.admin_note ? ` — ${order.admin_note}` : ''}
                   </small>
@@ -417,7 +476,7 @@ export function BillingPage() {
           </div>
           {pairedOrders.length === 0 && (
             <p className="settings-hint">
-              Paid orders appear here as invoices once an admin confirms the payment.
+              Issued invoices appear here immediately when a plan is ordered.
             </p>
           )}
           {pairedOrders.map((order) => {
@@ -427,42 +486,30 @@ export function BillingPage() {
                 <div>
                   <strong>{invoiceId}</strong>
                   <small>
-                    {order.paid_at
-                      ? new Date(order.paid_at).toLocaleDateString([], {
+                    {order.issued_at
+                      ? new Date(order.issued_at).toLocaleDateString([], {
                           month: 'long',
                           day: 'numeric',
                           year: 'numeric',
                         })
                       : ''}
                     {' · '}
-                    {formatPrice(order.amount_cents, order.currency)} · {order.plan_name} ·{' '}
+                    {formatPrice(order.total_cents, order.currency)} · {order.plan_name} · {order.mailbox_count} mailbox{order.mailbox_count === 1 ? '' : 'es'} ·{' '}
                     {paymentMethodLabel(order.payment_method)}
                   </small>
                 </div>
-                <span className="billing-paid">
-                  <Check size={13} />
-                  Paid
+                <span className={order.invoice_status === 'paid' ? 'billing-paid' : ''}>
+                  {order.invoice_status === 'paid' && <Check size={13} />}
+                  {order.invoice_status === 'paid' ? 'Paid' : order.invoice_status === 'void' ? 'Void' : 'Due'}
                 </span>
                 <div className="admin-actions">
-                  {downloaded.includes(invoiceId) ? (
-                    <small className="settings-notice settings-notice--ok">Downloaded</small>
-                  ) : (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => downloadInvoice(order)}
-                    >
-                      <Download size={13} />
-                      Download
-                    </button>
-                  )}
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => navigate(`/mail/billing/invoices/${invoiceId}`)}
                   >
                     <FileText size={13} />
-                    View receipt
+                    View invoice
                   </button>
                 </div>
               </div>

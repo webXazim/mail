@@ -8,100 +8,86 @@ export type LegalDoc = {
   sections: LegalSection[]
 }
 
+const updated = '21 September 2026'
+const legalEmail = 'legal@crescentsphere.com'
+const privacyEmail = 'privacy@crescentsphere.com'
+const abuseEmail = 'abuse@crescentsphere.com'
+const securityEmail = 'security@crescentsphere.com'
+
 const terms: LegalDoc = {
   id: 'terms',
   title: 'Terms of Service',
-  updated: '1 September 2026',
+  updated,
   intro:
-    'These Terms of Service ("Terms") govern your access to and use of the Harbor Mail platform and related services (collectively, the "Services") provided by Harbor Mail, Inc. ("Harbor," "we," or "us"). By creating an account or using the Services, you agree to be bound by these Terms.',
+    'These Terms of Service govern access to and use of CS Mail and its related services. By creating an account or using the service, you agree to these terms and to the policies referenced below.',
   sections: [
     {
       id: 'eligibility',
-      heading: '1. Eligibility',
+      heading: '1. Eligibility and accounts',
       body: [
-        'You may use the Services only if you are at least 18 years old (or the age of majority in your jurisdiction) and capable of forming a binding contract. You represent that all registration information you submit is truthful, accurate, and that you will keep it current.',
-        'If you are using the Services on behalf of an organization, you represent that you have the authority to bind that organization to these Terms.',
-      ],
-    },
-    {
-      id: 'accounts',
-      heading: '2. Accounts',
-      body: [
-        'You are responsible for maintaining the confidentiality of your account credentials and for all activity that occurs under your account. Notify Harbor immediately of any unauthorized use.',
-        'We reserve the right to suspend or terminate accounts that are being used in violation of these Terms or that pose a security risk to the platform.',
+        'You must be legally capable of entering into a binding agreement in your jurisdiction. Information supplied during registration must be accurate and kept current.',
+        'You are responsible for protecting your credentials and for activity performed through your account. Contact us promptly if you believe an account has been compromised.',
       ],
     },
     {
       id: 'acceptable-use',
-      heading: '3. Acceptable Use',
+      heading: '2. Acceptable use',
       body: [
-        'You agree not to use the Services to send spam, distribute malware, engage in phishing, harass others, or violate any applicable law. Detailed requirements are set out in our Acceptable Use Policy, which is incorporated into these Terms by reference.',
-      ],
-    },
-    {
-      id: 'privacy',
-      heading: '4. Privacy',
-      body: [
-        'Our collection and use of personal information is governed by our Privacy Policy. By using the Services, you consent to the processing practices described therein.',
+        'You may not use CS Mail for spam, phishing, malware distribution, harassment, unlawful activity, infringement, credential theft, or attempts to disrupt or gain unauthorized access to systems or accounts.',
+        'The Acceptable Use Policy is part of these Terms. We may restrict or suspend activity when necessary to protect users, mail reputation, service availability, or comply with applicable law.',
       ],
     },
     {
       id: 'content',
-      heading: '5. Your Content',
+      heading: '3. Your content',
       body: [
-        'You retain ownership of all data, messages, files, and other content you submit through the Services ("Your Content"). You grant Harbor a limited license to host, transmit, and display Your Content solely for the purpose of providing the Services to you.',
-        'You are solely responsible for the legality of Your Content. Harbor does not pre-screen content but reserves the right to remove material that violates these Terms.',
+        'You retain ownership of messages, attachments, contacts and other content you submit. You authorize us to process that content only as needed to provide, secure, maintain and support the service.',
+        'You are responsible for ensuring that content you send or store is lawful and that you have the rights required to use it.',
       ],
     },
     {
-      id: 'service-level',
-      heading: '6. Service Level',
+      id: 'availability',
+      heading: '4. Service availability',
       body: [
-        'Harbor Mail targets 99.9% monthly uptime for production services. Scheduled maintenance windows are communicated in advance. Service level commitments and remedies are detailed in the Service Level Agreement available at /legal/sla.',
+        'Service health and incident information is published on the CS Mail Status page when available. Maintenance, upstream failures, abuse mitigation or security work may temporarily affect access.',
+        'Any specific service-level commitment applies only when it is expressly included in a separate agreement for your account.',
       ],
     },
     {
-      id: 'fees',
-      heading: '7. Fees and Billing',
+      id: 'billing',
+      heading: '5. Plans and billing',
       body: [
-        'Fees for paid plans are quoted in USD and billed in advance on a monthly or annual cycle depending on your selection. Fees are non-refundable except as required by law or as expressly stated in these Terms.',
-        "Harbor reserves the right to change pricing with 30 days' notice. Changes take effect at the start of the next billing cycle after notice.",
+        'Paid plan prices, included limits and the active billing method are shown in the product before an order is submitted. Charges, renewals, refunds and cancellation rights are governed by the terms shown for the applicable order and by mandatory law.',
+        'We may change future pricing or plan limits after reasonable notice. Changes do not retroactively alter already completed billing periods unless required by law.',
       ],
     },
     {
       id: 'termination',
-      heading: '8. Termination',
+      heading: '6. Suspension, cancellation and deletion',
       body: [
-        'You may cancel your account at any time from Settings. Upon termination, your right to use the Services ceases immediately. Harbor will make your data available for export for 30 days following termination, after which it will be deleted.',
+        'You may cancel or request deletion through the controls made available in CS Mail. We may suspend or terminate access for serious abuse, security risk, non-payment, legal requirements or material breach of these Terms.',
+        'Deletion is subject to operational backup rotation and any retention that is legally required. The product should not be used as the sole copy of information you are required to preserve.',
       ],
     },
     {
-      id: 'warranty',
-      heading: '9. Warranty Disclaimer',
+      id: 'disclaimer',
+      heading: '7. Disclaimer and liability',
       body: [
-        'THE SERVICES ARE PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. HARBOR DISCLAIMS ALL WARRANTIES, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.',
-      ],
-    },
-    {
-      id: 'liability',
-      heading: '10. Limitation of Liability',
-      body: [
-        "TO THE MAXIMUM EXTENT PERMITTED BY LAW, HARBOR SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS OR REVENUES, WHETHER INCURRED DIRECTLY OR INDIRECTLY. HARBOR'S TOTAL LIABILITY FOR ANY CLAIMS ARISING FROM THESE TERMS SHALL NOT EXCEED THE AMOUNT YOU PAID TO HARBOR IN THE 12 MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM.",
+        'To the extent permitted by applicable law, CS Mail is provided on an as-available basis without warranties that cannot be disclaimed by contract.',
+        'Nothing in these Terms excludes liability that cannot legally be excluded or limited. Any contractual limitation that applies to a paid account will be interpreted subject to applicable consumer and commercial law.',
       ],
     },
     {
       id: 'changes',
-      heading: '11. Changes to These Terms',
+      heading: '8. Changes',
       body: [
-        'We may update these Terms from time to time. Material changes will be communicated via email or in-app notice at least 30 days before taking effect. Continued use of the Services after the effective date constitutes acceptance of the updated Terms.',
+        'We may update these Terms to reflect product, security, legal or operational changes. Material changes will be communicated through an appropriate service channel before they take effect where required.',
       ],
     },
     {
       id: 'contact',
-      heading: '12. Contact',
-      body: [
-        'Questions about these Terms should be directed to legal@harbor.co or Harbor Mail, Inc., 1 Harbor Way, San Francisco, CA 94111.',
-      ],
+      heading: '9. Contact',
+      body: [`Questions about these Terms can be sent to ${legalEmail}.`],
     },
   ],
 }
@@ -109,97 +95,70 @@ const terms: LegalDoc = {
 const privacy: LegalDoc = {
   id: 'privacy',
   title: 'Privacy Policy',
-  updated: '1 September 2026',
+  updated,
   intro:
-    'This Privacy Policy describes how Harbor Mail, Inc. ("Harbor," "we," or "us") collects, uses, and protects your personal information when you use the Harbor Mail platform and related services (the "Services").',
+    'This Privacy Policy explains the categories of information CS Mail processes to operate the service and the controls available to users. It does not claim certifications, hosting regions or subprocessors that are not explicitly published by the service operator.',
   sections: [
     {
-      id: 'information-collected',
-      heading: '1. Information We Collect',
+      id: 'information',
+      heading: '1. Information we process',
       body: [
-        'Account information: name, email address, password (hashed), and billing details when you create an account.',
-        'Message content: emails, attachments, and metadata (sender, recipients, subject, timestamps) transmitted through the Services.',
-        'Usage data: interaction logs, device information, browser type, IP address, and access times collected automatically.',
-        'Payment information: processed by our third-party payment processor and not stored on Harbor servers.',
+        'Account data may include your name, email address, authentication records, plan, quota and support history.',
+        'Mail data includes message content, recipients, attachments, mailbox metadata and delivery information needed to store, search, send and receive email.',
+        'Operational data may include IP address, user agent, timestamps, security events, audit records and diagnostic information used to protect and maintain the service.',
       ],
     },
     {
-      id: 'use',
-      heading: '2. How We Use Your Information',
+      id: 'purpose',
+      heading: '2. Why we process information',
       body: [
-        'To provide, maintain, and improve the Services, including message delivery, storage, search, and synchronization.',
-        'To detect and prevent security threats, fraud, and abuse of the platform.',
-        'To send service-related communications such as security alerts, policy updates, and billing notices.',
-        'To comply with legal obligations and enforce our terms.',
+        'We process information to provide mailbox functionality, authenticate users, prevent abuse, enforce plan limits, deliver support, maintain reliability and meet applicable legal obligations.',
+        'CS Mail does not require selling personal information to advertisers in order to provide the service.',
       ],
     },
     {
       id: 'sharing',
-      heading: '3. Sharing and Disclosure',
+      heading: '3. Service providers and disclosure',
       body: [
-        'We do not sell your personal information. We share information only with service providers who assist in operating the platform (infrastructure, payment processing, analytics) and only under contractual obligations that protect your data.',
-        'We may disclose information when required by law, valid legal process, or to protect the rights and safety of Harbor and its users.',
+        'Information may be processed by infrastructure, payment, security or support providers when those services are used to operate CS Mail. Access should be limited to what is necessary for the relevant function.',
+        'Information may also be disclosed when required by valid legal process or when reasonably necessary to investigate abuse, fraud, security incidents or threats to users and systems.',
       ],
     },
     {
       id: 'security',
-      heading: '4. Data Security',
+      heading: '4. Security',
       body: [
-        'All data is encrypted in transit (TLS 1.2+) and at rest (AES-256). We maintain SOC 2 Type II compliance and undergo annual third-party security audits.',
-        'Access to production systems is restricted to authorized personnel via role-based access controls and requires multi-factor authentication.',
+        'CS Mail uses authenticated sessions, password hashing, role-based authorization, audit logging, rate limits and transport security controls in its production architecture. No internet service can guarantee absolute security.',
+        'Security-sensitive credentials and deployment secrets should be stored outside the source repository and restricted to the services that need them.',
       ],
     },
     {
       id: 'retention',
-      heading: '5. Data Retention',
+      heading: '5. Retention and deletion',
       body: [
-        'Your account data is retained for as long as your account is active. Upon account deletion, data is purged within 30 days, except where retention is required by law or necessary for legitimate business purposes.',
-        'Backup data is rotated on a 90-day cycle and encrypted at rest.',
+        'Operational records are retained only for periods needed for service delivery, security, dispute handling, backup rotation and legal obligations. Different data categories may therefore have different retention periods.',
+        'Account deletion removes active account data through the product workflow. Backup copies expire through the normal backup-retention process rather than being edited in place.',
       ],
     },
     {
       id: 'rights',
-      heading: '6. Your Rights',
+      heading: '6. Your choices and rights',
       body: [
-        'Depending on your jurisdiction, you may have the right to access, correct, port, or delete your personal information. You can exercise most of these rights directly from Settings.',
-        'For requests not covered by Settings, contact privacy@harbor.co. We will respond within 30 days.',
+        'Depending on your jurisdiction, you may have rights to access, correct, export, object to processing of, or delete personal information. Product controls should be used where available.',
+        `Privacy requests that cannot be completed in-product can be sent to ${privacyEmail}.`,
       ],
     },
     {
       id: 'cookies',
-      heading: '7. Cookies and Tracking',
+      heading: '7. Cookies and local storage',
       body: [
-        'Harbor Mail uses strictly necessary cookies for authentication and session management. We do not use advertising or third-party tracking cookies.',
-        'Analytics data is collected in aggregate and does not identify individual users.',
-      ],
-    },
-    {
-      id: 'transfers',
-      heading: '8. International Transfers',
-      body: [
-        'Data is processed in data centers located in the United States and the European Economic Area. Transfers outside the EEA are governed by Standard Contractual Clauses (SCCs) approved by the European Commission.',
-      ],
-    },
-    {
-      id: 'children',
-      heading: "9. Children's Privacy",
-      body: [
-        'The Services are not directed to children under 16. We do not knowingly collect personal information from children.',
-      ],
-    },
-    {
-      id: 'changes',
-      heading: '10. Changes to This Policy',
-      body: [
-        'We may update this Privacy Policy from time to time. Material changes will be communicated at least 30 days before taking effect via email or in-app notice.',
+        'CS Mail uses a secure session cookie for authentication. Browser storage may also be used for presentation preferences, cached interface state and an explicitly enabled development/demo mode; authenticated server data remains authoritative.',
       ],
     },
     {
       id: 'contact',
-      heading: '11. Contact',
-      body: [
-        'For questions about this Privacy Policy or to exercise your data rights, contact our Data Protection Officer at privacy@harbor.co or Harbor Mail, Inc., 1 Harbor Way, San Francisco, CA 94111.',
-      ],
+      heading: '8. Contact',
+      body: [`Privacy questions can be sent to ${privacyEmail}.`],
     },
   ],
 }
@@ -207,191 +166,133 @@ const privacy: LegalDoc = {
 const aup: LegalDoc = {
   id: 'aup',
   title: 'Acceptable Use Policy',
-  updated: '1 September 2026',
+  updated,
   intro:
-    'This Acceptable Use Policy ("AUP") sets out the standards of conduct required when using the Harbor Mail platform. It supplements and is incorporated into the Terms of Service.',
+    'This Acceptable Use Policy protects CS Mail users, recipients, infrastructure and mail reputation. It supplements the Terms of Service.',
   sections: [
     {
-      id: 'prohibited-content',
-      heading: '1. Prohibited Content',
+      id: 'prohibited',
+      heading: '1. Prohibited activity',
       body: [
-        'You may not use the Services to send, store, or distribute content that is illegal, harmful, threatening, abusive, harassing, defamatory, or that infringes the intellectual property rights of any third party.',
-        'You may not distribute malware, phishing content, or links to malicious sites.',
+        'Do not use the service for phishing, malware, credential harvesting, unlawful threats, harassment, impersonation, infringement, unauthorized access, denial-of-service activity or attempts to bypass service security controls.',
       ],
     },
     {
       id: 'spam',
-      heading: '2. Spam and Unsolicited Mail',
+      heading: '2. Spam and bulk mail',
       body: [
-        'Harbor has a zero-tolerance spam policy. You may not send unsolicited bulk messages, purchased mailing lists, or messages that generate excessive complaints. Violations result in immediate account suspension.',
-        'Transactional and marketing emails must comply with CAN-SPAM, CASL, and GDPR requirements including opt-out mechanisms and sender identification.',
+        'Do not send unsolicited bulk or deceptive email, use purchased or harvested recipient lists, falsify sender identity, or continue mailing recipients who have validly opted out.',
+        'Senders are responsible for complying with the anti-spam and electronic-communications laws that apply to their recipients and use case.',
       ],
     },
     {
-      id: 'security',
-      heading: '3. Security',
+      id: 'limits',
+      heading: '3. Technical limits',
       body: [
-        'You may not attempt to gain unauthorized access to the Services, other accounts, or connected systems. You may not probe, scan, or test the vulnerability of the platform without written authorization.',
-        'You must not use the Services to send phishing messages or distribute credentials-harvesting content.',
-      ],
-    },
-    {
-      id: 'network',
-      heading: '4. Network Abuse',
-      body: [
-        'You may not use the Services to conduct denial-of-service attacks, relay spam through open mail servers, or engage in any form of network abuse.',
+        'You may not intentionally evade recipient, attachment, quota, rate, warm-up or abuse controls. Automated activity must stay within published limits and must not degrade service for others.',
       ],
     },
     {
       id: 'enforcement',
-      heading: '5. Enforcement',
+      heading: '4. Enforcement',
       body: [
-        'Harbor monitors platform activity for violations. We may suspend or terminate access, remove content, and report violations to law enforcement authorities without notice.',
-        'We will investigate credible reports of AUP violations and take appropriate action within 24 hours.',
+        'We may throttle, quarantine, suspend or terminate activity when evidence indicates abuse, compromise or material risk. Actions are recorded through the service audit workflow where applicable.',
       ],
     },
     {
       id: 'reporting',
-      heading: '6. Reporting Violations',
-      body: [
-        'Report suspected violations to abuse@harbor.co with supporting evidence. Reports are reviewed within one business day.',
-      ],
+      heading: '5. Reporting',
+      body: [`Send abuse reports and supporting evidence to ${abuseEmail}.`],
     },
   ],
 }
 
 const security: LegalDoc = {
   id: 'security',
-  title: 'Security & Compliance',
-  updated: '1 September 2026',
+  title: 'Security',
+  updated,
   intro:
-    'Harbor Mail is built from the ground up to protect the confidentiality, integrity, and availability of your communications. This page describes our security practices and compliance posture.',
+    'This page summarizes security controls implemented by the CS Mail application. It intentionally avoids claiming certifications, audit reports, cloud providers or encryption properties that have not been independently established for a specific deployment.',
   sections: [
     {
-      id: 'encryption',
-      heading: '1. Encryption',
+      id: 'account',
+      heading: '1. Account security',
       body: [
-        'All data in transit is protected by TLS 1.2 or higher. Data at rest is encrypted using AES-256 with keys managed through AWS KMS.',
-        'Message content is encrypted end-to-end in transit between clients using TLS mutual authentication.',
+        'Passwords are hashed before storage. Refresh credentials are kept in HttpOnly cookies, session rotation detects replay, optional two-factor authentication is supported, and administrators can revoke sessions or suspend accounts.',
       ],
     },
     {
-      id: 'infrastructure',
-      heading: '2. Infrastructure',
+      id: 'application',
+      heading: '2. Application controls',
       body: [
-        'Harbor Mail runs on AWS in isolated VPCs across multiple availability zones. Infrastructure is provisioned using Terraform and managed through immutable deployment pipelines.',
-        'Production systems are scanned continuously for vulnerabilities and patched within 48 hours of critical CVE disclosure.',
+        'Server authorization is applied to mailbox, contacts, calendar, billing and administration APIs. Security-sensitive actions are audited. Authentication and public-abuse limits are shared across application replicas.',
+        'The API validates trusted proxy boundaries, restricts CORS, emits defensive browser headers and separates liveness from dependency readiness for safer deployments.',
       ],
     },
     {
-      id: 'access',
-      heading: '3. Access Controls',
+      id: 'operations',
+      heading: '3. Operational security',
       body: [
-        'Access to production systems requires multi-factor authentication, role-based access controls, and VPN with IP allowlisting.',
-        'All access is logged, auditable, and reviewed quarterly. No engineer has standing root access to production databases.',
+        'Production deployment guidance keeps database, mail-management, monitoring and API origin ports private to the host or internal network and places public traffic behind a TLS reverse proxy.',
+        'Backups cover PostgreSQL state and staged attachment bytes, include integrity hashes, and are paired with a non-destructive restore drill. Operators are responsible for protecting backup storage and testing recovery regularly.',
       ],
     },
     {
-      id: 'compliance',
-      heading: '4. Compliance',
+      id: 'monitoring',
+      heading: '4. Monitoring and incident handling',
       body: [
-        'Harbor Mail maintains SOC 2 Type II certification with annual third-party audits covering security, availability, and confidentiality trust services criteria.',
-        'GDPR compliance is maintained through our Data Processing Agreement (DPA), available upon request.',
-      ],
-    },
-    {
-      id: 'incident',
-      heading: '5. Incident Response',
-      body: [
-        'Harbor maintains a documented incident response plan with defined escalation procedures. Critical incidents are triaged within 15 minutes, with status updates published to status.harbor.co.',
-        'Affected users are notified within 72 hours of a confirmed breach, consistent with GDPR Article 33.',
-      ],
-    },
-    {
-      id: 'penetration',
-      heading: '6. Penetration Testing',
-      body: [
-        'Harbor engages independent third-party firms to conduct annual penetration tests and quarterly vulnerability assessments. Summary findings are available to enterprise customers under NDA.',
-      ],
-    },
-    {
-      id: 'data-processing',
-      heading: '7. Data Processing Agreement',
-      body: [
-        'Our DPA governs the processing of personal data on behalf of customers and includes Standard Contractual Clauses for international transfers. Contact legal@harbor.co to request a copy.',
-      ],
-    },
-    {
-      id: 'status',
-      heading: '8. Status and Uptime',
-      body: [
-        'Real-time platform status is published at status.harbor.co. Our SLA guarantees 99.9% monthly uptime with service credits for qualifying downtime.',
+        'The application exposes health and Prometheus-compatible metrics for deployment and monitoring systems. Customer-visible incidents can be published through the Status workflow.',
       ],
     },
     {
       id: 'contact',
-      heading: '9. Contact',
-      body: [
-        'For security inquiries, vulnerability reports, or DPA requests, contact security@harbor.co or visit harbor.co/security.',
-      ],
+      heading: '5. Security reports',
+      body: [`Security or vulnerability reports can be sent to ${securityEmail}. Please do not include secrets in an initial report.`],
     },
   ],
 }
 
 const abuse: LegalDoc = {
   id: 'abuse',
-  title: 'Abuse & DMCA Policy',
-  updated: '14 February 2026',
+  title: 'Abuse & Copyright Reports',
+  updated,
   intro:
-    'Harbor Mail acts on reports of abuse, spam, and copyright infringement involving our network. This page tells you how to send us a report, what we need in it, and how we respond. We treat every report as time-sensitive and confidential.',
+    'Use this process to report spam, phishing, malware, account compromise or copyright concerns involving CS Mail.',
   sections: [
     {
-      id: 'scope',
-      heading: '1. What this policy covers',
+      id: 'report',
+      heading: '1. What to send',
       body: [
-        'We investigate reports about accounts or mail that: send unsolicited bulk mail (spam), host phishing or malware, spread child sexual abuse material, or infringe copyright, trademark, or other rights. We also act on confirmed account compromise using this same channel.',
-        'Reports about material sent through a mailbox on our service should name the specific Harbor account (or the exact sender address) that you believe is involved.',
+        'Include the sender address, relevant message headers or message identifier, date and time, a description of the concern, and a contact address where we can follow up. Preserve the original message where practical.',
+        'For a copyright notice, identify the protected work and allegedly infringing material, provide your contact details, and include the statements and signature required by the law applicable to your notice.',
       ],
     },
     {
-      id: 'how-to-report',
-      heading: '2. How to report',
-      body: [
-        'Send reports to abuse@harbor.co. For copyright claims, send the DMCA notice to that same address with the subject line prefixed "DMCA:". We reply to confirm receipt, usually within one business day.',
-        'Include: (a) the exact message subject and sender address (or account), (b) a screenshot or quoted excerpt of the offending content, (c) the date/time you received it, and (d) a return contact email. For DMCA claims, also include a statement of good-faith belief plus a declaration, under penalty of perjury, that the information is accurate and you are the rights owner or their agent.',
-      ],
+      id: 'channel',
+      heading: '2. Reporting channel',
+      body: [`Send reports to ${abuseEmail}. Use a clear subject such as “Spam report”, “Phishing report” or “Copyright notice”.`],
     },
     {
       id: 'response',
-      heading: '3. Response and takedown',
+      heading: '3. Review and action',
       body: [
-        'We suspend the source account, quarantine the offending mailbox, and — where required — retain evidence for law enforcement. We apply a documented abuse and spam escalation path, and repeat offenders are permanently blocked.',
-        'We may share the minimum required details with law enforcement or the reporting party where the law requires it, and we always log the action to our audit trail.',
+        'Reports are reviewed against available evidence and applicable policy. Depending on the circumstances, action may include throttling, quarantine, account restriction, preservation of relevant evidence or other proportionate measures.',
       ],
     },
     {
-      id: 'data-deletion',
-      heading: '4. Data deletion and erasure',
-      body: [
-        'You may delete your Harbor Mail account and erase your data at any time from Settings, or by emailing privacy@harbor.co with the subject "Delete my account". Erasure destroys your mailbox in the mail store and removes your user record, along with every data row that belongs to it (sessions, contacts, calendar, aliases, and counters).',
-        'Audit-log entries retain a timestamped record of the erasure itself but no longer attribute it to a recoverable identity. Requests are processed within 30 days, and usually sooner.',
-      ],
+      id: 'privacy',
+      heading: '4. Account deletion',
+      body: [`Users can initiate account deletion from Settings. Additional privacy requests can be sent to ${privacyEmail}.`],
     },
   ],
 }
 
-export const legalDocs: Record<string, LegalDoc> = {
-  terms,
-  privacy,
-  aup,
-  security,
-  abuse,
-}
+export const legalDocs: Record<string, LegalDoc> = { terms, privacy, aup, security, abuse }
 
 export const legalNav: { id: string; label: string }[] = [
   { id: 'terms', label: 'Terms of Service' },
   { id: 'privacy', label: 'Privacy Policy' },
   { id: 'aup', label: 'Acceptable Use' },
   { id: 'security', label: 'Security' },
-  { id: 'abuse', label: 'Abuse & DMCA' },
+  { id: 'abuse', label: 'Abuse & Copyright' },
 ]

@@ -16,7 +16,6 @@ export type UserSettings = {
   unreadBadge: boolean
   digest: 'daily' | 'weekly' | 'never'
   sendReadReceipts: boolean
-  twoFactor: boolean
   safeLinks: boolean
 }
 
@@ -34,11 +33,10 @@ export const defaultSettings: UserSettings = {
   unreadBadge: true,
   digest: 'daily',
   sendReadReceipts: false,
-  twoFactor: true,
   safeLinks: true,
 }
 
-const settingsKey = 'harbor-mail:settings'
+const settingsKey = 'cs-mail:settings'
 
 export const applyTheme = (theme: UserSettings['theme']) => {
   document.documentElement.dataset.theme = theme

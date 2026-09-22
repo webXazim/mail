@@ -3,19 +3,19 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--a2t-bg);
+  background: var(--cs-mail-bg);
 }
 .error-page__card {
   width: min(420px, 100%);
   padding: 30px;
-  border: 1px solid var(--a2t-line-strong);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
-  color: var(--a2t-silver);
+  border: 1px solid var(--cs-mail-line-strong);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
+  color: var(--cs-mail-silver);
 }
 .error-page__card h1 {
   margin: 0;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.03em;

@@ -1,61 +1,124 @@
-import { tokenStore } from '../lib/api'
+import { ApiError, refreshSession, tokenStore } from '../lib/api'
+import type { DraftAttachment } from '../types'
 
-const localAttachmentKey = (name: string) => `harbor-mail:attachment:${name}`
+const localBlobs = new Map<string, Blob>()
+const localNames = new Map<string, string>()
 
-const toDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'))
-    reader.readAsDataURL(file)
-  })
+const localId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `local-${crypto.randomUUID()}`
+    : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-const persistLocalAttachment = async (file: File) => {
+const parseError = async (response: Response) => {
+  let message = `Upload failed (${response.status})`
+  let code = 'attachment_upload_failed'
   try {
-    localStorage.setItem(localAttachmentKey(file.name), await toDataUrl(file))
+    const body = (await response.json()) as { message?: string; error?: string }
+    if (body.message) message = body.message
+    if (body.error) code = body.error
   } catch {
-    /* data may exceed the local storage quota; upload still succeeds for this session */
+    /* non-JSON provider/proxy failure */
+  }
+  throw new ApiError(response.status, message, code, response.headers.get('x-request-id'))
+}
+
+async function remoteUpload(file: File): Promise<DraftAttachment> {
+  const send = async () => {
+    const access = tokenStore.getAccess()
+    const headers = new Headers({ 'Content-Type': file.type || 'application/octet-stream' })
+    if (access) headers.set('Authorization', `Bearer ${access}`)
+    return fetch(`/api/attachments?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers,
+      body: file,
+      credentials: 'include',
+    })
+  }
+
+  let response = await send()
+  if (response.status === 401 && (await refreshSession())) response = await send()
+  if (!response.ok) return parseError(response)
+  const data = (await response.json()) as { attachment: DraftAttachment }
+  return data.attachment
+}
+
+/**
+ * Upload a compose attachment. Authenticated sessions stream bytes directly to
+ * the API staging volume; demo mode keeps the Blob only in memory.
+ */
+export async function uploadAttachment(file: File): Promise<DraftAttachment> {
+  if (tokenStore.getAccess()) return remoteUpload(file)
+
+  const id = localId()
+  localBlobs.set(id, file)
+  localNames.set(file.name, id)
+  return {
+    id,
+    filename: file.name,
+    content_type: file.type || 'application/octet-stream',
+    size: file.size,
+    status: 'ready',
   }
 }
 
-export async function uploadAttachment(file: File) {
-  await persistLocalAttachment(file)
-  return { name: file.name, size: file.size, local: true }
+/** Demo/local reader helper. No attachment bytes are persisted in localStorage. */
+export function getLocalAttachment(idOrName: string): Promise<Blob | null> {
+  const id = localBlobs.has(idOrName) ? idOrName : localNames.get(idOrName)
+  return Promise.resolve(id ? localBlobs.get(id) ?? null : null)
 }
 
-export function getLocalAttachment(name: string): Promise<Blob | null> {
-  const dataUrl = localStorage.getItem(localAttachmentKey(name))
-  if (!dataUrl) return Promise.resolve(null)
-  return fetch(dataUrl)
-    .then((response) => (response.ok ? response.blob() : null))
-    .catch(() => null)
-}
-
-/** Fetch a stored mail attachment blob over the authenticated API. */
+/** Fetch a received-message Stalwart blob over the authenticated mailbox API. */
 export async function getRemoteAttachment(blobId: string): Promise<Blob | null> {
   try {
     const access = tokenStore.getAccess()
     const headers = access ? { Authorization: `Bearer ${access}` } : undefined
-    const response = await fetch(`/api/mail/attachment/${encodeURIComponent(blobId)}`, { headers })
+    const response = await fetch(`/api/mail/attachment/${encodeURIComponent(blobId)}`, {
+      headers,
+      credentials: 'include',
+    })
     return response.ok ? await response.blob() : null
   } catch {
     return null
   }
 }
 
-export type AttachmentPayload = {
-  filename: string
-  content_type: string
-  data_base64: string
+/** Fetch a staged outbound blob owned by the current account. */
+export async function getStagedAttachment(id: string): Promise<Blob | null> {
+  if (id.startsWith('local-')) return getLocalAttachment(id)
+  try {
+    const access = tokenStore.getAccess()
+    const headers = access ? { Authorization: `Bearer ${access}` } : undefined
+    const response = await fetch(`/api/attachments/${encodeURIComponent(id)}`, {
+      headers,
+      credentials: 'include',
+    })
+    return response.ok ? await response.blob() : null
+  } catch {
+    return null
+  }
 }
 
-/** The multipart payload for `/api/send` — pulls bytes we stashed on upload. */
-export function getAttachmentPayload(name: string): AttachmentPayload | null {
-  const dataUrl = localStorage.getItem(localAttachmentKey(name))
-  if (!dataUrl) return null
-  const comma = dataUrl.indexOf(',')
-  if (comma < 0) return null
-  const meta = dataUrl.slice(0, comma)
-  const mime = meta.match(/^data:([^;]+)/)?.[1] || 'application/octet-stream'
-  return { filename: name, content_type: mime, data_base64: dataUrl.slice(comma + 1) }
+/** Best-effort release of an unreferenced staged upload. Referenced blobs are
+ * intentionally kept by the backend until their draft/schedule is updated. */
+export async function deleteStagedAttachment(id: string): Promise<void> {
+  if (id.startsWith('local-')) {
+    localBlobs.delete(id)
+    for (const [name, value] of localNames) if (value === id) localNames.delete(name)
+    return
+  }
+
+  const send = async () => {
+    const access = tokenStore.getAccess()
+    const headers = access ? { Authorization: `Bearer ${access}` } : undefined
+    return fetch(`/api/attachments/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers,
+      credentials: 'include',
+    })
+  }
+  let response = await send()
+  if (response.status === 401 && (await refreshSession())) response = await send()
+  // 409 means a draft/scheduled row still references it; backend lifecycle
+  // cleanup will reclaim it after that reference is removed.
+  if (!response.ok && response.status !== 404 && response.status !== 409) await parseError(response)
 }

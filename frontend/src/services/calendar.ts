@@ -6,6 +6,13 @@ export type EventCategory = 'work' | 'meeting' | 'personal' | 'holiday' | 'remin
 
 export type EventInvitee = { email: string; status: 'pending' | 'accepted' | 'declined' }
 
+export type EventRecurrence = {
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  interval: number
+  until?: string
+  count?: number
+}
+
 export type CalendarEvent = {
   id: string
   title: string
@@ -17,6 +24,13 @@ export type CalendarEvent = {
   location: string
   category: EventCategory
   invitees: EventInvitee[]
+  recurrence?: EventRecurrence | null
+  timezoneOffsetMinutes?: number
+  version?: number
+  updatedAt?: string
+  seriesId?: string
+  seriesStartDate?: string
+  occurrenceIndex?: number
 }
 
 export const eventCategories: { id: EventCategory; label: string }[] = [
@@ -27,7 +41,7 @@ export const eventCategories: { id: EventCategory; label: string }[] = [
   { id: 'reminder', label: 'Reminder' },
 ]
 
-const calendarKey = 'harbor-mail:calendar'
+const calendarKey = 'cs-mail:calendar'
 
 export const localDate = (date: Date): string => {
   const year = date.getFullYear()
@@ -59,8 +73,8 @@ const seed = (): CalendarEvent[] => [
     location: 'Hangouts',
     category: 'work',
     invitees: [
-      { email: 'alex@harbor.co', status: 'accepted' },
-      { email: 'jonas@harbor.co', status: 'accepted' },
+      { email: 'alex@crescentsphere.com', status: 'accepted' },
+      { email: 'jonas@crescentsphere.com', status: 'accepted' },
     ],
   },
   {
@@ -73,7 +87,7 @@ const seed = (): CalendarEvent[] => [
     description: 'Walk through the onboarding flows.',
     location: 'Conference Room B',
     category: 'meeting',
-    invitees: [{ email: 'nora@harbor.co', status: 'pending' }],
+    invitees: [{ email: 'nora@crescentsphere.com', status: 'pending' }],
   },
   {
     id: 'ev-sync',
@@ -97,7 +111,7 @@ const seed = (): CalendarEvent[] => [
     description: '',
     location: 'The Blue Anchor',
     category: 'personal',
-    invitees: [{ email: 'priya@harbor.co', status: 'accepted' }],
+    invitees: [{ email: 'priya@crescentsphere.com', status: 'accepted' }],
   },
   {
     id: 'ev-rehearsal',
@@ -146,13 +160,23 @@ const seed = (): CalendarEvent[] => [
     location: 'Zoom',
     category: 'meeting',
     invitees: [
-      { email: 'priya@harbor.co', status: 'accepted' },
+      { email: 'priya@crescentsphere.com', status: 'accepted' },
       { email: 'meridian@example.com', status: 'pending' },
     ],
   },
 ]
 
-type EventRow = CalendarEvent
+type EventRow = CalendarEvent & {
+  version: number
+  updatedAt: string
+  timezoneOffsetMinutes: number
+}
+
+type EventPage = {
+  events: EventRow[]
+  hasMore: boolean
+  nextCursor: string | null
+}
 
 const rowToEvent = (row: EventRow): CalendarEvent => ({
   id: row.id,
@@ -165,96 +189,130 @@ const rowToEvent = (row: EventRow): CalendarEvent => ({
   location: row.location ?? '',
   category: row.category,
   invitees: Array.isArray(row.invitees) ? row.invitees : [],
+  recurrence: row.recurrence ?? null,
+  timezoneOffsetMinutes: row.timezoneOffsetMinutes ?? 0,
+  version: row.version,
+  updatedAt: row.updatedAt,
+  seriesId: row.seriesId ?? row.id,
+  seriesStartDate: row.seriesStartDate ?? row.date,
+  occurrenceIndex: row.occurrenceIndex ?? 0,
 })
 
-const payloadFor = (event: Omit<CalendarEvent, 'id'>) => ({
+const timezoneOffsetFor = (date: string): number => {
+  const target = new Date(`${date}T12:00:00`)
+  return -target.getTimezoneOffset()
+}
+
+const payloadFor = (event: Omit<CalendarEvent, 'id'>, version?: number) => ({
   title: event.title,
   date: event.date,
   allDay: event.allDay,
-  start: event.allDay && !event.start ? '00:00' : event.start,
-  end: event.allDay && !event.end ? '23:59' : event.end,
+  start: event.start,
+  end: event.end,
   description: event.description,
   location: event.location,
   category: event.category,
   invitees: event.invitees,
+  recurrence: event.recurrence ?? null,
+  timezoneOffsetMinutes: event.timezoneOffsetMinutes ?? timezoneOffsetFor(event.date),
+  ...(version ? { version } : {}),
 })
 
 const isServerId = (id: string) => !id.startsWith('ev-')
+const serverIdFor = (event: CalendarEvent) => event.seriesId ?? event.id
+
+const readCache = (): CalendarEvent[] => {
+  const fallback = () => (isRemoteMail() ? [] : seed())
+  try {
+    const raw = localStorage.getItem(calendarKey)
+    if (!raw) return fallback()
+    const parsed = JSON.parse(raw) as CalendarEvent[]
+    return Array.isArray(parsed) ? parsed : fallback()
+  } catch {
+    return fallback()
+  }
+}
+
+const saveCache = (events: CalendarEvent[]) => {
+  localStorage.setItem(calendarKey, JSON.stringify(events))
+}
+
+const remoteRange = async (start?: string, end?: string): Promise<CalendarEvent[]> => {
+  const rows: CalendarEvent[] = []
+  let cursor: string | null = null
+  do {
+    const params = new URLSearchParams({ limit: '200' })
+    if (start) params.set('start', start)
+    if (end) params.set('end', end)
+    params.set('timezoneOffsetMinutes', String(-new Date().getTimezoneOffset()))
+    if (cursor) params.set('cursor', cursor)
+    const page = await apiFetch<EventPage>(`/api/calendar/events?${params}`)
+    rows.push(...(page.events ?? []).map(rowToEvent))
+    cursor = page.hasMore ? page.nextCursor : null
+  } while (cursor)
+  return rows
+}
 
 export const calendarApi = {
-  /** Synchronous read from the local cache (seeded in demo mode). */
+  /** Local storage is only a presentation cache in authenticated mode. */
   list(): CalendarEvent[] {
-    const fallback = () => (isRemoteMail() ? [] : seed())
-    try {
-      const raw = localStorage.getItem(calendarKey)
-      if (!raw) return fallback()
-      const parsed = JSON.parse(raw) as CalendarEvent[]
-      return Array.isArray(parsed) ? parsed : fallback()
-    } catch {
-      return fallback()
-    }
+    return readCache()
   },
   save(next: CalendarEvent[]) {
-    localStorage.setItem(calendarKey, JSON.stringify(next))
+    saveCache(next)
   },
-  /** API-first refresh; falls back to the local cache when offline or in demo mode. */
-  async refresh(): Promise<CalendarEvent[]> {
+  async refresh(start?: string, end?: string): Promise<CalendarEvent[]> {
     if (!isRemoteMail()) return this.list()
-    try {
-      const result = await apiFetch<{ events: EventRow[] }>('/api/calendar/events')
-      const next = (result.events ?? []).map(rowToEvent)
-      this.save(next)
-      return next
-    } catch {
-      return this.list()
-    }
+    const next = await remoteRange(start, end)
+    saveCache(next)
+    return next
   },
   async add(event: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent[]> {
-    if (isRemoteMail()) {
-      try {
-        const row = await apiFetch<EventRow>('/api/calendar/events', {
-          method: 'POST',
-          body: JSON.stringify(payloadFor(event)),
-        })
-        const next = [...this.list(), rowToEvent(row)]
-        this.save(next)
-        return next
-      } catch {
-        // Offline: keep the optimistic local event.
-      }
+    if (!isRemoteMail()) {
+      const next = [...this.list(), { ...event, id: `ev-${Date.now()}` }]
+      saveCache(next)
+      return next
     }
-    const next = [...this.list(), { ...event, id: `ev-${Date.now()}` }]
-    this.save(next)
+    const row = await apiFetch<EventRow>('/api/calendar/events', {
+      method: 'POST',
+      body: JSON.stringify(payloadFor(event)),
+    })
+    const next = [...this.list(), rowToEvent(row)]
+    saveCache(next)
     return next
   },
   async update(id: string, patch: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent[]> {
-    if (isRemoteMail() && isServerId(id)) {
-      try {
-        const row = await apiFetch<EventRow>(`/api/calendar/events/${encodeURIComponent(id)}`, {
-          method: 'PUT',
-          body: JSON.stringify(payloadFor(patch)),
-        })
-        const next = this.list().map((event) => (event.id === id ? rowToEvent(row) : event))
-        this.save(next)
-        return next
-      } catch {
-        // Fall through to the local update so the UI stays responsive offline.
-      }
+    if (!isRemoteMail()) {
+      const next = this.list().map((event) => (event.id === id ? { ...patch, id } : event))
+      saveCache(next)
+      return next
     }
-    const next = this.list().map((event) => (event.id === id ? { ...patch, id } : event))
-    this.save(next)
+    const current = this.list().find((event) => event.id === id)
+    if (!current?.version) throw new Error('Refresh this event before editing it.')
+    const targetId = serverIdFor(current)
+    if (!isServerId(targetId)) throw new Error('Refresh this event before editing it.')
+    const seriesPatch = current.recurrence && current.seriesStartDate
+      ? { ...patch, date: current.seriesStartDate }
+      : patch
+    const row = await apiFetch<EventRow>(`/api/calendar/events/${encodeURIComponent(targetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payloadFor(seriesPatch, current.version)),
+    })
+    const next = this.list().map((event) =>
+      (event.seriesId ?? event.id) === targetId ? rowToEvent(row) : event,
+    )
+    saveCache(next)
     return next
   },
   async remove(id: string): Promise<CalendarEvent[]> {
-    if (isRemoteMail() && isServerId(id)) {
-      try {
-        await apiFetch(`/api/calendar/events/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      } catch {
-        // Fall through to the local removal so the UI stays responsive offline.
-      }
+    const current = this.list().find((event) => event.id === id)
+    const targetId = current ? serverIdFor(current) : id
+    if (isRemoteMail()) {
+      if (!isServerId(targetId) || !current?.version) throw new Error('Refresh this event before deleting it.')
+      await apiFetch(`/api/calendar/events/${encodeURIComponent(targetId)}?version=${encodeURIComponent(String(current.version))}`, { method: 'DELETE' })
     }
-    const next = this.list().filter((event) => event.id !== id)
-    this.save(next)
+    const next = this.list().filter((event) => (event.seriesId ?? event.id) !== targetId)
+    saveCache(next)
     return next
   },
   listOn(date: string) {
@@ -276,6 +334,35 @@ export const calendarApi = {
     })
     return next[next.length - 1]
   },
+  async exportIcs(event: CalendarEvent): Promise<{ filename: string; content: string }> {
+    const targetId = serverIdFor(event)
+    if (isRemoteMail() && isServerId(targetId)) {
+      return apiFetch<{ filename: string; content: string }>(`/api/calendar/events/${encodeURIComponent(targetId)}/ics`)
+    }
+    return {
+      filename: `${event.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`,
+      content: this.icsExport(event),
+    }
+  },
+  async importIcs(content: string): Promise<CalendarEvent[]> {
+    if (!isRemoteMail()) {
+      let next = this.list()
+      for (const event of this.icsImport(content)) {
+        next = await this.add(event)
+      }
+      return next
+    }
+    const result = await apiFetch<{ events: EventRow[] }>('/api/calendar/import', {
+      method: 'POST',
+      body: JSON.stringify({ content, timezoneOffsetMinutes: -new Date().getTimezoneOffset() }),
+    })
+    const imported = (result.events ?? []).map(rowToEvent)
+    const byId = new Map(this.list().map((event) => [event.id, event]))
+    for (const event of imported) byId.set(event.id, event)
+    const next = [...byId.values()]
+    saveCache(next)
+    return next
+  },
   icsExport(event: CalendarEvent): string {
     const fmt = (value: string) => value.replace(/-/g, '')
     const dateLine = (kind: 'START' | 'END', allDay: boolean, time: string) =>
@@ -292,9 +379,9 @@ export const calendarApi = {
     return [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Harbor Mail//Calendar 1.0//EN',
+      'PRODID:-//CS Mail//Calendar 1.0//EN',
       'BEGIN:VEVENT',
-      `UID:${event.id}@harbor.co`,
+      `UID:${event.id}@cs-mail`,
       `DTSTAMP:${stamp}T000000`,
       dateLine('START', event.allDay, event.start),
       dateLine('END', event.allDay, event.end || event.start),
@@ -308,14 +395,13 @@ export const calendarApi = {
       .filter((line) => line !== '')
       .join('\r\n')
   },
-  icsImport(content: string): CalendarEvent[] {
+  icsImport(content: string): Omit<CalendarEvent, 'id'>[] {
     const lines = content.replace(/\r/g, '').split('\n')
-    const events: CalendarEvent[] = []
+    const events: Omit<CalendarEvent, 'id'>[] = []
     let current: Partial<CalendarEvent> | null = null
     const clear = () => {
-      if (current && current.title && current.date) {
+      if (current?.title && current.date) {
         events.push({
-          id: `ev-import-${Date.now()}-${events.length}`,
           title: current.title,
           date: current.date,
           allDay: Boolean(current.allDay),
@@ -330,10 +416,7 @@ export const calendarApi = {
       current = null
     }
     const unescape = (value: string) =>
-      value
-        .replace(/\\\\/g, '\\')
-        .replace(/\\n/g, '\n')
-        .replace(/\\(;|,)/g, '$1')
+      value.replace(/\\\\/g, '\\').replace(/\\n/g, '\n').replace(/\\(;|,)/g, '$1')
     for (const line of lines) {
       if (line.startsWith('END:VEVENT')) clear()
       if (line.startsWith('BEGIN:VEVENT')) current = {}
@@ -345,17 +428,13 @@ export const calendarApi = {
       if (prop === 'LOCATION') current.location = value
       if (prop === 'DESCRIPTION') current.description = value
       if (prop === 'DTSTART') {
-        if (/;TZID/i.test(line) || value.includes('T')) current.allDay = false
+        current.allDay = !value.includes('T')
         const dateValue = value.slice(0, 8)
         current.date = `${dateValue.slice(0, 4)}-${dateValue.slice(4, 6)}-${dateValue.slice(6, 8)}`
-        const timeValue = value.slice(9, 13).replace(/(\d{2})(\d{2})/, '$1:$2')
-        if (timeValue.length === 5) current.start = timeValue
-        if (!value.includes('T')) current.allDay = true
+        if (value.includes('T')) current.start = value.slice(9, 13).replace(/(\d{2})(\d{2})/, '$1:$2')
       }
-      if (prop === 'DTEND') {
-        const timeValue = value.slice(9, 13).replace(/(\d{2})(\d{2})/, '$1:$2')
-        if (timeValue.length === 5) current.end = timeValue
-        if (!value.includes('T') && typeof current.allDay === 'undefined') current.allDay = true
+      if (prop === 'DTEND' && value.includes('T')) {
+        current.end = value.slice(9, 13).replace(/(\d{2})(\d{2})/, '$1:$2')
       }
     }
     return events

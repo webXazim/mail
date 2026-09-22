@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, History as HistoryIcon, Trash2 } from 'lucide-react'
-import { auditApi, type AccountAuditCategory } from '../services/audit'
+import { ArrowLeft, History as HistoryIcon } from 'lucide-react'
+import { auditApi, type AccountAuditCategory, type AccountAuditEntry } from '../services/audit'
 
 const timeFmt = (iso: string) =>
   new Date(iso).toLocaleString([], {
@@ -15,93 +15,98 @@ const filterLabel: Record<AccountAuditCategory, string> = {
   'sign-in': 'Sign-ins',
   security: 'Security',
   billing: 'Billing',
+  mail: 'Mail',
   general: 'General',
 }
 
 export function AuditLogPage() {
   const navigate = useNavigate()
-  const [entries, setEntries] = useState(() => auditApi.list())
+  const [entries, setEntries] = useState<AccountAuditEntry[]>(() => auditApi.list())
   const [category, setCategory] = useState<'all' | AccountAuditCategory>('all')
-  const [cleared, setCleared] = useState(false)
-  const visible =
-    category === 'all' ? entries : entries.filter((entry) => entry.category === category)
+  const [nextBefore, setNextBefore] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const clear = () => {
-    auditApi.clear()
-    setEntries([])
-    setCleared(true)
-  }
+  const load = useCallback(async (append = false) => {
+    try {
+      setError('')
+      const page = await auditApi.page(category, append ? nextBefore : null)
+      setEntries((current) => (append ? [...current, ...page.entries] : page.entries))
+      setHasMore(page.hasMore)
+      setNextBefore(page.nextBefore)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load account activity')
+    } finally {
+      setLoading(false)
+    }
+  }, [category, nextBefore])
+
+  useEffect(() => {
+    setLoading(true)
+    setNextBefore(null)
+    void load(false)
+  }, [category]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="settings-page" role="region" aria-label="Audit log">
       <header className="calendar-head">
         <div>
           <p className="eyebrow">Account / Activity</p>
-          <h1>Audit log</h1>
+          <h1>Activity log</h1>
         </div>
-        <div className="calendar-head__actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={clear}
-            disabled={entries.length === 0}
-          >
-            <Trash2 size={14} />
-            Clear log
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => navigate('/mail/inbox')}
-          >
-            <ArrowLeft size={14} />
-            Back to inbox
-          </button>
-        </div>
+        <button type="button" className="secondary-button" onClick={() => navigate('/mail/inbox')}>
+          <ArrowLeft size={14} />
+          Back to inbox
+        </button>
       </header>
 
-      {cleared ? (
-        <div className="list-state">
-          <HistoryIcon size={26} />
-          <strong>Log cleared</strong>
-          <span>Your activity log has been wiped.</span>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => navigate('/mail/settings')}
-          >
-            Back to settings
-          </button>
-        </div>
-      ) : (
-        <div className="settings-section">
-          <div className="admin-section-head">
-            <h2>Activity</h2>
-            <select
-              aria-label="Filter audit log"
-              value={category}
-              onChange={(event) => setCategory(event.target.value as typeof category)}
-            >
-              <option value="all">All activity</option>
-              {Object.entries(filterLabel).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+      <div className="settings-section">
+        <div className="admin-section-head">
+          <div>
+            <h2>Account activity</h2>
+            <p className="settings-hint">Security and account history is retained server-side and cannot be cleared from the browser.</p>
           </div>
-          {visible.map((entry) => (
-            <div className="billing-row" key={entry.id}>
-              <div>
-                <strong>{entry.action}</strong>
-                <small>{entry.detail}</small>
-              </div>
-              <span className="admin-audit-time">{timeFmt(entry.time)}</span>
-            </div>
-          ))}
-          {visible.length === 0 && <p className="settings-hint">No activity recorded yet.</p>}
+          <select
+            aria-label="Filter activity log"
+            value={category}
+            onChange={(event) => setCategory(event.target.value as typeof category)}
+          >
+            <option value="all">All activity</option>
+            {Object.entries(filterLabel).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
         </div>
-      )}
+
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {loading && entries.length === 0 ? (
+          <div className="list-state"><div className="loading-spinner" /><span>Loading activity…</span></div>
+        ) : entries.length ? (
+          <>
+            {entries.map((entry) => (
+              <div className="billing-row" key={entry.id}>
+                <div>
+                  <strong>{entry.action}</strong>
+                  {entry.detail && <small>{entry.detail}</small>}
+                </div>
+                <span className="admin-audit-time">{timeFmt(entry.time)}</span>
+              </div>
+            ))}
+            {hasMore && (
+              <button type="button" className="secondary-button" onClick={() => void load(true)}>
+                Load older activity
+              </button>
+            )}
+          </>
+        ) : (
+          <div className="list-state">
+            <HistoryIcon size={26} />
+            <strong>No activity in this category</strong>
+            <span>New account events will appear here automatically.</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

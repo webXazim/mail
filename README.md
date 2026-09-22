@@ -1,43 +1,82 @@
-# Harbor Mail
+# CS Mail
 
-A React email client with a Rust backend. The frontend runs in the browser —
-mail, settings, calendar, and billing persist to `localStorage`, so no backend
-server is required for the client-side demo.
+CS Mail is a public multi-tenant business-email SaaS built with React/Vite, Rust/Axum, PostgreSQL and a shared self-hosted Stalwart provider. The production web/API stack is isolated from Stalwart: CS Mail never starts a second mail server and never takes ownership of host mail ports 25/587/993.
 
-## Structure
+## Repository layout
 
+```text
+backend/                    Rust/Axum API + SQLx migrations
+frontend/                   React/Vite application
+deploy/production/          authoritative GitHub -> VPS production deployment
+deploy/development/         local/CI-only compose files
+deploy/monitoring/          Prometheus/Alertmanager configuration
+docs/                       current production and launch documentation
+.github/workflows/ci.yml    blocking release validation
 ```
-frontend/   React + Vite web app (src/, public/, styles, config)
-backend/    Rust API (Axum + SQLx + Postgres)
-```
 
-`frontend/` is self-contained: it has its own `package.json`, config files, and
-`node_modules`.
+There is intentionally **no Docker Compose file at the repository root**. This prevents an operator from accidentally starting the local Stalwart topology on the production VPS.
 
-## Run the frontend
+## Production deployment
+
+Production source is expected at `/opt/sites/cs-mail`; secrets/runtime state live outside Git under `/opt/cs-mail`.
+
+One-time host preparation after cloning the repository:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+sudo /opt/sites/cs-mail/deploy/production/bootstrap-vps.sh
+sudo nano /opt/cs-mail/.env.production
 ```
 
-- Dev server: http://localhost:5174 (proxies `/api` to http://localhost:8080)
-- Production build: `npm run build` (outputs to `frontend/dist/`), preview with `npm run preview`
+Normal deployments from GitHub:
 
-## Frontend scripts
+```bash
+cd /opt/sites/cs-mail
+sudo ./deploy/production/deploy-from-git.sh main
+```
 
-| Command             | Purpose                              |
-| ------------------- | ------------------------------------ |
-| `npm run dev`       | Start the Vite dev server            |
-| `npm run build`     | Type-check and build to `dist/`      |
-| `npm run preview`   | Preview the production build         |
-| `npm run typecheck` | Type-check the source                |
-| `npm run lint`      | Lint `src/`                          |
-| `npm run format`    | Format source files with Prettier    |
+The deploy pipeline:
 
-## Backend
+1. refuses a dirty Git checkout and fast-forwards from GitHub;
+2. verifies the release layout and static launch contract;
+3. builds/tests the frontend inside Node 22 Docker and extracts only `dist`;
+4. runs Rust fmt/Clippy/tests and builds the API from committed `Cargo.lock` with `--locked`;
+5. creates a pre-deploy PostgreSQL + attachment backup when a live stack exists;
+6. starts PostgreSQL and the release-tagged API (SQLx migrations run at API startup);
+7. publishes frontend assets atomically under `/opt/cs-mail/www/current`;
+8. validates/reloads Nginx and verifies loopback/public readiness, private admin access and public admin/metrics blocking;
+9. records the deployed Git/source digest under `/opt/cs-mail/runtime/current.env`;
+10. cleans old build cache/release artifacts without touching secrets or persistent data.
 
-Rust API in `backend/`. Run with Docker Compose from the repo root (builds from
-`./backend`), or run `cargo run` inside `backend/`. See `backend/.env.example`
-for configuration.
+Node.js and Rust do **not** need to be installed on the VPS host; Docker performs both builds.
+
+Useful commands:
+
+```bash
+sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/backup.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/certify-launch.sh /opt/cs-mail/.env.production /opt/cs-mail/.env.certification
+```
+
+Rollback is intentionally explicit because database migrations are forward-only:
+
+```bash
+sudo ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
+```
+
+See `deploy/production/README.md`, `docs/PRODUCTION.md` and `docs/LAUNCH.md`.
+
+## Platform state
+
+API contract: **v32**  
+Migration head: **0041_full_saas_control_plane.sql**
+
+The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. Public Nginx returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI through an SSH tunnel to `127.0.0.1:18081`.
+
+Acceptance testing currently keeps:
+
+```env
+CS_MAIL_BILLING_INSTANT_ACTIVATION=true
+```
+
+Switch it to `false` before real payment-gated public activation.

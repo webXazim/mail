@@ -10,24 +10,24 @@ const escapeFromLines = (body: string) =>
 
 const headerBlock = (mail: Mail): string => {
   const headerLines = [
-    `From alex@harbor.co ${mail.time}`,
+    `From alex@crescentsphere.com ${mail.time}`,
     `From: ${mail.sender} <${mail.email}>`,
     mail.to && mail.to.length ? `To: ${mail.to.join(', ')}` : '',
     mail.cc && mail.cc.length ? `Cc: ${mail.cc.join(', ')}` : '',
     `Subject: ${mail.subject}`,
     `Date: ${mail.time}`,
-    `X-Harbor-Id: ${mail.id}`,
-    `X-Harbor-Initials: ${mail.initials}`,
-    `X-Harbor-Sender: ${mail.sender}`,
-    `X-Harbor-Sender-Email: ${mail.email}`,
-    `X-Harbor-Color: ${mail.color}`,
-    `X-Harbor-Folder: ${mail.folder || 'Inbox'}`,
-    `X-Harbor-Label: ${mail.label}`,
-    `X-Harbor-Unread: ${mail.unread ? 'yes' : 'no'}`,
-    `X-Harbor-Starred: ${mail.starred ? 'yes' : 'no'}`,
-    `X-Harbor-Attachment: ${mail.attachment ? 'yes' : 'no'}`,
-    mail.attachmentName ? `X-Harbor-Attachment-Name: ${mail.attachmentName}` : '',
-    mail.snoozedUntil ? `X-Harbor-Snoozed-Until: ${mail.snoozedUntil}` : '',
+    `X-CS-Mail-Id: ${mail.id}`,
+    `X-CS-Mail-Initials: ${mail.initials}`,
+    `X-CS-Mail-Sender: ${mail.sender}`,
+    `X-CS-Mail-Sender-Email: ${mail.email}`,
+    `X-CS-Mail-Color: ${mail.color}`,
+    `X-CS-Mail-Folder: ${mail.folder || 'Inbox'}`,
+    `X-CS-Mail-Label: ${mail.label}`,
+    `X-CS-Mail-Unread: ${mail.unread ? 'yes' : 'no'}`,
+    `X-CS-Mail-Starred: ${mail.starred ? 'yes' : 'no'}`,
+    `X-CS-Mail-Attachment: ${mail.attachment ? 'yes' : 'no'}`,
+    mail.attachmentName ? `X-CS-Mail-Attachment-Name: ${mail.attachmentName}` : '',
+    mail.snoozedUntil ? `X-CS-Mail-Snoozed-Until: ${mail.snoozedUntil}` : '',
   ]
   return `${headerLines.filter((line) => line !== '').join('\n')}\n\n${escapeFromLines(mail.preview)}`
 }
@@ -41,6 +41,9 @@ const readHeader = (headers: string, header: string): string => {
   return line ? line.slice(line.indexOf(':') + 1).trim() : ''
 }
 
+const readProductHeader = (headers: string, suffix: string): string =>
+  readHeader(headers, `X-CS-Mail-${suffix}`) || readHeader(headers, `X-Harbor-${suffix}`)
+
 export const importFromMbox = (content: string): Mail[] => {
   const blocks = content
     .split(/\n(?=From )/)
@@ -48,27 +51,27 @@ export const importFromMbox = (content: string): Mail[] => {
   const mails: Mail[] = []
   for (const block of blocks) {
     const [headers = '', ...bodyParts] = block.split('\n\n')
-    const id = readHeader(headers, 'X-Harbor-Id')
+    const id = readProductHeader(headers, 'Id')
     if (!id) continue
     const toRaw = readHeader(headers, 'To')
     const ccRaw = readHeader(headers, 'Cc')
-    const color = readHeader(headers, 'X-Harbor-Color')
+    const color = readProductHeader(headers, 'Color')
     mails.push({
       id: id.startsWith('imported-') ? id : `imported-${id}`,
-      initials: readHeader(headers, 'X-Harbor-Initials') || '?',
-      sender: readHeader(headers, 'X-Harbor-Sender') || readHeader(headers, 'From'),
-      email: readHeader(headers, 'X-Harbor-Sender-Email'),
+      initials: readProductHeader(headers, 'Initials') || '?',
+      sender: readProductHeader(headers, 'Sender') || readHeader(headers, 'From'),
+      email: readProductHeader(headers, 'Sender-Email'),
       subject: readHeader(headers, 'Subject') || '(no subject)',
       preview: bodyParts.join('\n').replace(/^>/gm, '') || '(no body)',
       time: readHeader(headers, 'Date') || 'Just now',
-      label: readHeader(headers, 'X-Harbor-Label') || 'Updates',
+      label: readProductHeader(headers, 'Label') || 'Updates',
       color: safeColors.has(color) ? color : 'teal',
-      unread: readHeader(headers, 'X-Harbor-Unread') === 'yes',
-      starred: readHeader(headers, 'X-Harbor-Starred') === 'yes',
-      folder: readHeader(headers, 'X-Harbor-Folder') || 'Inbox',
-      attachment: readHeader(headers, 'X-Harbor-Attachment') === 'yes',
-      attachmentName: readHeader(headers, 'X-Harbor-Attachment-Name') || undefined,
-      snoozedUntil: readHeader(headers, 'X-Harbor-Snoozed-Until') || undefined,
+      unread: readProductHeader(headers, 'Unread') === 'yes',
+      starred: readProductHeader(headers, 'Starred') === 'yes',
+      folder: readProductHeader(headers, 'Folder') || 'Inbox',
+      attachment: readProductHeader(headers, 'Attachment') === 'yes',
+      attachmentName: readProductHeader(headers, 'Attachment-Name') || undefined,
+      snoozedUntil: readProductHeader(headers, 'Snoozed-Until') || undefined,
       to: toRaw
         ? toRaw
             .split(',')

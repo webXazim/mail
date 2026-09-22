@@ -9,6 +9,16 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 /// for the shared sending reputation, not a per-customer entitlement.
 pub const PER_DOMAIN_DAILY: i64 = 50_000;
 
+/// Shared-infrastructure burst ceiling. This is deliberately independent of
+/// customer plan limits so a compromised tenant cannot burn domain/IP
+/// reputation in a single hour.
+pub const PER_DOMAIN_HOURLY: i64 = 5_000;
+
+/// Automatic safe-mode caps after deliverability signals put a business into
+/// `restricted` state. Operators can set lower/higher explicit overrides.
+pub const RESTRICTED_ORG_DAILY: i64 = 1_000;
+pub const RESTRICTED_ORG_HOURLY: i64 = 100;
+
 /// Absolute ceiling on one message's recipient list, regardless of plan.
 pub const HARD_MAX_RECIPIENTS: usize = 100;
 
@@ -38,6 +48,32 @@ pub fn effective_daily(plan_daily_limit: i64, account_age_days: i64) -> i64 {
     match warmup_daily(account_age_days) {
         0 => plan_daily_limit,
         warmup => plan_daily_limit.min(warmup),
+    }
+}
+
+
+/// Hourly mailbox burst ceiling derived from the effective daily allowance.
+/// Unlimited/warm accounts still receive a finite anti-compromise burst cap.
+pub fn mailbox_hourly(daily_limit: i64, account_age_days: i64) -> i64 {
+    let daily = effective_daily(daily_limit, account_age_days);
+    let base = if daily <= 0 { 1_000 } else { (daily + 5) / 6 };
+    base.clamp(10, 1_000)
+}
+
+/// Organization burst ceiling. `0` in the commercial plan means unlimited per
+/// day, not unlimited per second/hour.
+pub fn organization_hourly(daily_limit: i64) -> i64 {
+    let base = if daily_limit <= 0 { 5_000 } else { (daily_limit + 7) / 8 };
+    base.clamp(25, 5_000)
+}
+
+/// Apply an operator cap even when the plan allowance is otherwise unlimited.
+pub fn capped_limit(entitlement: i64, operator_cap: Option<i32>) -> i64 {
+    match operator_cap.map(i64::from) {
+        Some(cap) if cap > 0 && entitlement > 0 => entitlement.min(cap),
+        Some(cap) if cap > 0 => cap,
+        Some(0) => 0,
+        _ => entitlement,
     }
 }
 
@@ -121,5 +157,19 @@ mod tests {
         assert_eq!(per_message(100), HARD_MAX_RECIPIENTS);
         // A plan configured above the ceiling is clamped down.
         assert_eq!(per_message(5_000), HARD_MAX_RECIPIENTS);
+    }
+
+    #[test]
+    fn operator_cap_restricts_unlimited_allowance() {
+        assert_eq!(capped_limit(0, Some(250)), 250);
+        assert_eq!(capped_limit(1000, Some(250)), 250);
+        assert_eq!(capped_limit(1000, None), 1000);
+    }
+
+    #[test]
+    fn hourly_burst_is_always_finite() {
+        assert!(mailbox_hourly(0, 90) > 0);
+        assert!(organization_hourly(0) > 0);
+        assert!(mailbox_hourly(10_000, 1) <= warmup_daily(1));
     }
 }

@@ -10,9 +10,9 @@ export type Account = {
   provider: string
 }
 
-const accountsKey = 'harbor-mail:accounts'
-const identityKey = 'harbor-mail:primary-identity'
-const mailboxKeyFor = (accountId: string) => `harbor-mail:mailbox:${accountId}`
+const accountsKey = 'cs-mail:accounts'
+const identityKey = 'cs-mail:primary-identity'
+const mailboxKeyFor = (accountId: string) => `cs-mail:mailbox:${accountId}`
 
 export const primaryAccountId = 'account-primary'
 export const unifiedViewId = 'unified'
@@ -56,14 +56,14 @@ function readIdentity(): { name: string; email: string } | null {
 export function primaryAccount(): Account {
   const identity = readIdentity()
   const name = identity?.name || 'Alex Morgan'
-  const email = identity?.email || 'alex@harbor.co'
+  const email = identity?.email || 'alex@crescentsphere.com'
   return {
     id: primaryAccountId,
     name,
     email,
     initials: nameInitials(name),
     color: 'teal',
-    provider: 'Harbor Mail',
+    provider: 'CS Mail',
   }
 }
 
@@ -116,8 +116,8 @@ export function seedAccountMailbox(accountId: string, email: string): Mail[] {
     {
       id: `${accountId}-n4`,
       initials: 'HB',
-      sender: 'Harbor Mail',
-      email: 'no-reply@harbor.co',
+      sender: 'CS Mail',
+      email: 'no-reply@crescentsphere.com',
       subject: 'Your March statement is ready',
       preview: 'View this month policy details and billing summary.',
       time: 'Mar 06',
@@ -147,6 +147,7 @@ export const accountsApi = {
     account: Account
     mailbox: Mail[]
   } {
+    if (isRemoteMail()) throw new Error('External account linking is not enabled on this deployment')
     const email = input.email.trim().toLowerCase()
     if (!email.includes('@') || input.password.length < 6)
       throw new Error('Enter a valid email and a password of at least 6 characters')
@@ -160,7 +161,7 @@ export const accountsApi = {
       email,
       initials: nameInitials(name),
       color: relatedColors[(existing.length - 1) % relatedColors.length],
-      provider: 'Harbor Mail',
+      provider: 'CS Mail',
     }
     // Linked credentials can't be provisioned yet, so a remote session gets an
     // empty mailbox instead of fabricated mail.
@@ -170,6 +171,7 @@ export const accountsApi = {
     return { account, mailbox }
   },
   remove(id: string): Account[] {
+    if (isRemoteMail()) return this.list()
     if (id === primaryAccountId) return this.list()
     const next = this.list().filter((account) => account.id !== id)
     localStorage.setItem(accountsKey, JSON.stringify(next.slice(1)))

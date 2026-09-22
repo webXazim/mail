@@ -36,7 +36,7 @@ const badges = [
   { label: 'Encrypted in transit', detail: 'TLS 1.2+' },
   { label: 'Encrypted at rest', detail: 'AES-256' },
   { label: 'Compliance', detail: 'SOC 2 Type II' },
-  { label: 'Uptime target', detail: '99.9% SLA' },
+  { label: 'Service health', detail: 'Live status' },
 ]
 
 export function SecurityPage() {

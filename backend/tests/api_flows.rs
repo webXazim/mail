@@ -17,18 +17,21 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use harbor_api::metrics::Metrics;
-use harbor_api::middleware::rate_limit::RateLimiter;
-use harbor_api::router::build_router;
-use harbor_api::services::provisioning::MailBridge;
-use harbor_api::services::smtp::SmtpConfig;
-use harbor_api::state::AppState;
-use harbor_api::ws::EventHub;
+use cs_mail_api::metrics::Metrics;
+use cs_mail_api::middleware::rate_limit::RateLimiter;
+use cs_mail_api::router::build_router;
+use cs_mail_api::services::provisioning::ProvisioningService;
+use cs_mail_api::services::smtp::SmtpConfig;
+use cs_mail_api::services::stalwart::{StalwartConfig, StalwartService};
+use cs_mail_api::state::AppState;
+use cs_mail_api::ws::EventHub;
 
 struct TestApp {
     app: Router,
     db: PgPool,
 }
+
+const TEST_PROVISIONING_KEY: &str = "integration-provisioning-key-0123456789";
 
 /// Build the app against a throwaway database, or `None` to skip the suite.
 async fn test_app() -> Option<TestApp> {
@@ -48,22 +51,69 @@ async fn test_app() -> Option<TestApp> {
         jwt_secret: "integration-test-secret".into(),
         jwt_access_ttl_secs: 900,
         jwt_refresh_ttl_secs: 2_592_000,
+        delivery_event_secret: None,
         cors_origins: vec![],
         hub: EventHub::new(),
+        realtime_instance_id: Uuid::new_v4(),
+        realtime_poll_secs: 2,
+        realtime_lease_secs: 60,
+        realtime_batch_size: 20,
+        realtime_event_retention_secs: 604_800,
         public_origin: "http://localhost:5174".into(),
         // No verification gate and no Stalwart bridge: flows stay hermetic.
         require_verification: false,
         return_token_links: true,
         cookie_secure: false,
-        mail: MailBridge::new(
-            String::new(),
-            String::new(),
-            String::new(),
-            "example.test".into(),
-            0,
-        ),
-        smtp: SmtpConfig::default(),
-        rate: RateLimiter::new(),
+        stalwart: StalwartService::new(StalwartConfig {
+            admin_url: String::new(),
+            admin_username: String::new(),
+            admin_secret: String::new(),
+            admin_bearer_token: None,
+            mail_jmap_username: String::new(),
+            mail_jmap_secret: String::new(),
+            default_domain: "example.test".into(),
+            ownership_namespace: "cs-mail".into(),
+            request_timeout: std::time::Duration::from_secs(1),
+            read_retries: 0,
+            retry_base_delay: std::time::Duration::from_millis(1),
+            smtp: SmtpConfig::default(),
+        })
+        .expect("build disabled test mail provider"),
+        provisioning: ProvisioningService::new(
+            TEST_PROVISIONING_KEY.into(),
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(60),
+            3,
+            5,
+        )
+        .expect("build provisioning service"),
+        two_factor_key: "integration-two-factor-key-0123456789".into(),
+        mail_client_host: "mail.example.test".into(),
+        mail_client_imap_port: 993,
+        mail_client_smtp_port: 587,
+        mail_client_max_app_passwords: 5,
+        mail_import_max_bytes: 64 * 1024 * 1024,
+        mail_import_message_max_bytes: 16 * 1024 * 1024,
+        mail_import_poll_secs: 1,
+        mail_import_lease_secs: 60,
+        schedule_poll_secs: 1,
+        schedule_lease_secs: 60,
+        schedule_retry_base_secs: 1,
+        schedule_max_attempts: 3,
+        schedule_batch_size: 10,
+        attachment_store_dir: std::env::temp_dir().join(format!(
+            "cs-mail-api-flows-{}",
+            Uuid::new_v4()
+        )),
+        attachment_staging_quota_bytes: 1024 * 1024 * 1024,
+        attachment_upload_ttl_secs: 86_400,
+        attachment_draft_ttl_secs: 2_592_000,
+        attachment_consumed_grace_secs: 3_600,
+        attachment_cleanup_secs: 900,
+        billing_instant_activation: true,
+        rate: RateLimiter::new(db.clone(), "integration-test-rate-limit-key-material-32bytes", vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()]),
         metrics: Arc::new(Metrics::new()),
     };
 
@@ -134,13 +184,13 @@ async fn send_headers(app: &Router, request: Request<Body>) -> (StatusCode, Opti
 fn session_cookie(set_cookie: &str) -> String {
     let first = set_cookie.split(';').next().unwrap_or("");
     first
-        .strip_prefix("harbor_session=")
-        .expect("harbor_session cookie")
+        .strip_prefix("cs_mail_session=")
+        .expect("cs_mail_session cookie")
         .to_string()
 }
 
 fn with_cookie(request: &mut Request<Body>, cookie_value: &str) {
-    let value = format!("harbor_session={cookie_value}");
+    let value = format!("cs_mail_session={cookie_value}");
     request
         .headers_mut()
         .insert(header::COOKIE, value.parse::<axum::http::HeaderValue>().unwrap());
@@ -165,6 +215,79 @@ async fn register(app: &Router) -> (String, String, String) {
     (token, id, email)
 }
 
+/// Explicitly attach a hosted mailbox for integration flows that exercise mail
+/// features. Upgrade 19 intentionally makes `register()` platform-only, so
+/// tests must opt into mailbox authority instead of relying on login email.
+async fn attach_test_mailbox(db: &PgPool, user_id: &str, email: &str) -> Uuid {
+    let user_id = Uuid::parse_str(user_id).expect("test user id");
+    let organization_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM organizations WHERE is_system=TRUE LIMIT 1",
+    )
+    .fetch_one(db)
+    .await
+    .expect("system organization");
+
+    sqlx::query(
+        "INSERT INTO organization_memberships(organization_id,user_id,role,status)
+         VALUES($1,$2,'member','active')
+         ON CONFLICT(organization_id,user_id) DO UPDATE
+         SET status='active',updated_at=now()",
+    )
+    .bind(organization_id)
+    .bind(user_id)
+    .execute(db)
+    .await
+    .expect("test mailbox membership");
+
+    sqlx::query(
+        "INSERT INTO organization_domains(organization_id,domain,status,is_system,activated_at)
+         VALUES($1,'example.test','active',TRUE,now())
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(organization_id)
+    .execute(db)
+    .await
+    .expect("test mailbox domain");
+
+    let domain_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM organization_domains WHERE lower(domain::text)='example.test'",
+    )
+    .fetch_one(db)
+    .await
+    .expect("test mailbox domain id");
+
+    let local_part = email.split('@').next().expect("test local part");
+    let mailbox_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO mailboxes(
+           organization_id,domain_id,user_id,address,local_part,display_name,status,
+           is_primary_for_user,sync_status,quota_bytes
+         ) VALUES($1,$2,$3,$4,$5,'Integration','active',TRUE,'ready',5368709120)
+         RETURNING id",
+    )
+    .bind(organization_id)
+    .bind(domain_id)
+    .bind(user_id)
+    .bind(email)
+    .bind(local_part)
+    .fetch_one(db)
+    .await
+    .expect("test mailbox row");
+
+    sqlx::query(
+        "UPDATE users
+         SET active_organization_id=$1,primary_mailbox_id=$2,mail_sync_status='ready',updated_at=now()
+         WHERE id=$3",
+    )
+    .bind(organization_id)
+    .bind(mailbox_id)
+    .bind(user_id)
+    .execute(db)
+    .await
+    .expect("attach primary test mailbox");
+
+    mailbox_id
+}
+
 #[tokio::test]
 async fn auth_contacts_and_calendar_flow() {
     let Some(t) = test_app().await else {
@@ -173,6 +296,27 @@ async fn auth_contacts_and_calendar_flow() {
     };
 
     let (access, user_id, email) = register(&t.app).await;
+
+    // Upgrade 19: public registration creates a platform identity only.
+    // A login such as Gmail/Outlook must never be interpreted as a hosted
+    // mailbox or queued for provider provisioning before business/domain setup.
+    let (primary_mailbox_id, mail_sync_status): (Option<Uuid>, String) = sqlx::query_as(
+        "SELECT primary_mailbox_id, mail_sync_status FROM users WHERE id=$1",
+    )
+    .bind(Uuid::parse_str(&user_id).unwrap())
+    .fetch_one(&t.db)
+    .await
+    .expect("platform identity row");
+    assert!(primary_mailbox_id.is_none());
+    assert_eq!(mail_sync_status, "none");
+    let provisioning_jobs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM provisioning_jobs WHERE user_id=$1",
+    )
+    .bind(Uuid::parse_str(&user_id).unwrap())
+    .fetch_one(&t.db)
+    .await
+    .expect("platform registration provisioning count");
+    assert_eq!(provisioning_jobs, 0);
 
     // Duplicate signup is rejected.
     let (status, _) = send(
@@ -235,6 +379,7 @@ async fn auth_contacts_and_calendar_flow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "contact create: {created}");
     let contact_id = created["id"].as_str().expect("contact id").to_string();
+    let contact_version = created["version"].as_i64().expect("contact version");
 
     let (status, list) = send(&t.app, req("GET", "/api/contacts", Some(&access), None)).await;
     assert_eq!(status, StatusCode::OK);
@@ -246,18 +391,31 @@ async fn auth_contacts_and_calendar_flow() {
             "PUT",
             &format!("/api/contacts/{contact_id}"),
             Some(&access),
-            Some(json!({ "phone": "+1-555-0100" })),
+            Some(json!({ "phone": "+1-555-0100", "version": contact_version })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "contact update: {updated}");
     assert_eq!(updated["phone"], "+1-555-0100");
+    let updated_contact_version = updated["version"].as_i64().expect("updated contact version");
+
+    let (status, _) = send(
+        &t.app,
+        req(
+            "PUT",
+            &format!("/api/contacts/{contact_id}"),
+            Some(&access),
+            Some(json!({ "phone": "+1-555-0199", "version": contact_version })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "stale contact versions must not overwrite newer state");
 
     let (status, _) = send(
         &t.app,
         req(
             "DELETE",
-            &format!("/api/contacts/{contact_id}"),
+            &format!("/api/contacts/{contact_id}?version={updated_contact_version}"),
             Some(&access),
             None,
         ),
@@ -277,13 +435,21 @@ async fn auth_contacts_and_calendar_flow() {
                 "date": "2026-01-15",
                 "start": "09:00",
                 "end": "09:15",
-                "category": "meeting"
+                "category": "meeting",
+                "timezoneOffsetMinutes": 180,
+                "invitees": [
+                    {"email": "person@example.test", "status": "pending"},
+                    {"email": "PERSON@example.test", "status": "pending"}
+                ],
+                "recurrence": {"frequency": "weekly", "interval": 1, "count": 2}
             })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "calendar create: {event}");
     let event_id = event["id"].as_str().expect("event id").to_string();
+    let event_version = event["version"].as_i64().expect("event version");
+    assert_eq!(event["invitees"].as_array().unwrap().len(), 1, "attendee addresses dedupe case-insensitively");
 
     let (status, events) = send(
         &t.app,
@@ -293,17 +459,246 @@ async fn auth_contacts_and_calendar_flow() {
     assert_eq!(status, StatusCode::OK);
     assert!(events["events"].as_array().is_some_and(|a| !a.is_empty()));
 
+    let (status, recurring) = send(
+        &t.app,
+        req(
+            "GET",
+            "/api/calendar/events?start=2026-01-15&end=2026-01-22&timezoneOffsetMinutes=180",
+            Some(&access),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "recurring range: {recurring}");
+    assert_eq!(recurring["events"].as_array().unwrap().len(), 2);
+    assert_eq!(recurring["events"][1]["seriesId"].as_str(), Some(event_id.as_str()));
+
+    let update_body = json!({
+        "title": "Standup updated",
+        "date": "2026-01-15",
+        "start": "09:00",
+        "end": "09:15",
+        "category": "meeting",
+        "timezoneOffsetMinutes": 180,
+        "invitees": [{"email": "person@example.test", "status": "accepted"}],
+        "recurrence": {"frequency": "weekly", "interval": 1, "count": 2},
+        "version": event_version
+    });
+    let (status, changed) = send(
+        &t.app,
+        req(
+            "PUT",
+            &format!("/api/calendar/events/{event_id}"),
+            Some(&access),
+            Some(update_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "calendar update: {changed}");
+    assert_eq!(changed["title"], "Standup updated");
+    let changed_version = changed["version"].as_i64().expect("updated event version");
+
+    let (status, _) = send(
+        &t.app,
+        req(
+            "PUT",
+            &format!("/api/calendar/events/{event_id}"),
+            Some(&access),
+            Some(update_body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "stale event versions must not overwrite newer state");
+
     let (status, _) = send(
         &t.app,
         req(
             "DELETE",
-            &format!("/api/calendar/events/{event_id}"),
+            &format!("/api/calendar/events/{event_id}?version={changed_version}"),
             Some(&access),
             None,
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn scheduled_creation_is_idempotent_and_dead_letters_redrive() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (access, user_id, email) = register(&t.app).await;
+    attach_test_mailbox(&t.db, &user_id, &email).await;
+    let send_key = Uuid::new_v4();
+    let idem = format!("schedule:{send_key}");
+    let body = json!({
+        "send_at": "2032-01-15T09:00:00Z",
+        "to": [{ "name": "Receiver", "email": "receiver@example.test" }],
+        "cc": [],
+        "bcc": [],
+        "subject": "Idempotent schedule",
+        "body_text": "Only one row should exist",
+        "attachments": [],
+        "send_key": send_key,
+    });
+
+    let mut first = req("POST", "/api/scheduled", Some(&access), Some(body.clone()));
+    first
+        .headers_mut()
+        .insert("idempotency-key", idem.parse().unwrap());
+    let (status, created) = send(&t.app, first).await;
+    assert_eq!(status, StatusCode::CREATED, "schedule create: {created}");
+    let id = created["id"].as_str().expect("scheduled id").to_string();
+
+    let mut second = req("POST", "/api/scheduled", Some(&access), Some(body.clone()));
+    second
+        .headers_mut()
+        .insert("idempotency-key", idem.parse().unwrap());
+    let (status, duplicate) = send(&t.app, second).await;
+    assert_eq!(status, StatusCode::OK, "schedule retry: {duplicate}");
+    assert_eq!(duplicate["id"].as_str(), Some(id.as_str()));
+
+    let mut changed = body;
+    changed["subject"] = json!("Different content");
+    let mut third = req("POST", "/api/scheduled", Some(&access), Some(changed));
+    third
+        .headers_mut()
+        .insert("idempotency-key", idem.parse().unwrap());
+    let (status, _) = send(&t.app, third).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scheduled_sends WHERE idempotency_key = $1",
+    )
+    .bind(&idem)
+    .fetch_one(&t.db)
+    .await
+    .expect("scheduled row count");
+    assert_eq!(count, 1);
+
+    sqlx::query(
+        "UPDATE scheduled_sends
+         SET status = 'dead', attempt_count = 12, error = 'temporary provider failure',
+             completed_at = now(), next_attempt_at = NULL
+         WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&id).unwrap())
+    .execute(&t.db)
+    .await
+    .expect("dead-letter row");
+
+    let (status, redrive) = send(
+        &t.app,
+        req(
+            "POST",
+            &format!("/api/scheduled/{id}/retry"),
+            Some(&access),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "schedule redrive: {redrive}");
+    assert_eq!(redrive["status"], "retry");
+
+    let (status, cancelled) = send(
+        &t.app,
+        req(
+            "DELETE",
+            &format!("/api/scheduled/{id}"),
+            Some(&access),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "schedule cancel: {cancelled}");
+    assert_eq!(cancelled["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn organization_membership_isolation() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (owner_token, owner_id, _owner_email) = register(&t.app).await;
+    let (other_token, other_id, _other_email) = register(&t.app).await;
+
+    let (status, created) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/organizations",
+            Some(&owner_token),
+            Some(json!({ "name": "Isolation Test Business" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create business: {created}");
+    let organization_id = created["id"].as_str().expect("organization id");
+
+    let owner_membership: Option<String> = sqlx::query_scalar(
+        "SELECT role FROM organization_memberships WHERE organization_id=$1 AND user_id=$2",
+    )
+    .bind(Uuid::parse_str(organization_id).unwrap())
+    .bind(Uuid::parse_str(&owner_id).unwrap())
+    .fetch_optional(&t.db)
+    .await
+    .expect("owner membership query");
+    assert_eq!(owner_membership.as_deref(), Some("owner"));
+
+    // Guessing a valid organization UUID never grants tenant access.
+    let (status, _) = send(
+        &t.app,
+        req(
+            "GET",
+            &format!("/api/organizations/{organization_id}"),
+            Some(&other_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(
+        &t.app,
+        req(
+            "GET",
+            &format!("/api/organizations/{organization_id}/members"),
+            Some(&other_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(
+        &t.app,
+        req(
+            "POST",
+            &format!("/api/organizations/{organization_id}/activate"),
+            Some(&other_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Neither public registration was silently enrolled into the protected
+    // CrescentSphere system organization.
+    for user_id in [owner_id, other_id] {
+        let protected_memberships: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM organization_memberships om
+             JOIN organizations o ON o.id=om.organization_id
+             WHERE om.user_id=$1 AND o.is_system=TRUE",
+        )
+        .bind(Uuid::parse_str(&user_id).unwrap())
+        .fetch_one(&t.db)
+        .await
+        .expect("protected membership count");
+        assert_eq!(protected_memberships, 0);
+    }
 }
 
 #[tokio::test]
@@ -324,7 +719,7 @@ async fn role_gate_and_metrics_scrape() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Promote server-side, then a fresh login carries the admin role.
-    sqlx::query("UPDATE users SET role = 'admin' WHERE email = $1")
+    sqlx::query("UPDATE users SET role = 'admin', platform_role='platform_admin' WHERE email = $1")
         .bind(&email)
         .execute(&t.db)
         .await
@@ -352,7 +747,7 @@ async fn role_gate_and_metrics_scrape() {
     assert_eq!(status, StatusCode::OK, "admin users: {users}");
     assert!(users["users"].as_array().is_some());
 
-    // Metrics scrape is public and exposes the Harbor series.
+    // Metrics scrape is public and exposes the CS Mail series.
     let response = t
         .app
         .clone()
@@ -362,8 +757,8 @@ async fn role_gate_and_metrics_scrape() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.contains("harbor_http_requests_total"));
-    assert!(text.contains("harbor_db_pool_connections"));
+    assert!(text.contains("cs_mail_http_requests_total"));
+    assert!(text.contains("cs_mail_db_pool_connections"));
 }
 
 #[tokio::test]
@@ -374,7 +769,7 @@ async fn admin_provisions_and_resets_user() {
     };
 
     let (member_token, _id, admin_email) = register(&t.app).await;
-    sqlx::query("UPDATE users SET role = 'admin' WHERE email = $1")
+    sqlx::query("UPDATE users SET role = 'admin', platform_role='platform_admin' WHERE email = $1")
         .bind(&admin_email)
         .execute(&t.db)
         .await
@@ -447,6 +842,23 @@ async fn admin_provisions_and_resets_user() {
     assert_eq!(row["role"], "admin");
     assert_eq!(row["plan"], "solo");
     assert_eq!(row["quota_bytes"], 4i64 * 1024 * 1024 * 1024);
+    assert_eq!(row["quota_source"], "override");
+
+    // Resetting the explicit exception returns the mailbox to the authoritative
+    // Solo plan quota instead of preserving a hidden per-user number.
+    let (status, reset_quota) = send(
+        &t.app,
+        req(
+            "PATCH",
+            &format!("/api/admin/users/{user_id}"),
+            Some(&admin_token),
+            Some(json!({ "reset_quota_override": true })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "reset plan quota: {reset_quota}");
+    assert_eq!(reset_quota["quota_source"], "plan");
+    assert_eq!(reset_quota["quota_bytes"], 5i64 * 1024 * 1024 * 1024);
 
     // Admin resets the password; the new one signs in immediately.
     let (status, patched) = send(
@@ -550,7 +962,7 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(plans["plans"].as_array().unwrap().len(), 3);
 
-    // Place an order for Team, then mark it paid with a bank reference.
+    // Place an order for Team. Upgrade 29 test mode activates it immediately, while the invoice remains due until manual payment is reviewed.
     let (status, order) = send(
         &t.app,
         req(
@@ -563,7 +975,17 @@ async fn billing_manual_payment_flow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "create order: {order}");
     assert_eq!(order["status"], "pending");
-    assert_eq!(order["amount_cents"], 800);
+    assert_eq!(order["amount_cents"], 7900);
+    assert_eq!(order["invoice_status"], "issued");
+    assert_eq!(order["activation_mode"], "test_instant");
+    assert!(order["invoice_number"].as_str().is_some_and(|v| v.starts_with("INV-")));
+
+    // The plan is already active before a payment reference is submitted.
+    let (status, immediate_profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(immediate_profile["plan"], "team");
+    assert_eq!(immediate_profile["storage"]["total_bytes"], 25i64 * 1024 * 1024 * 1024);
+
     let order_id = order["id"].as_str().unwrap().to_string();
 
     let (status, submitted) = send(
@@ -584,9 +1006,9 @@ async fn billing_manual_payment_flow() {
     let (status, _) = send(&t.app, req("GET", "/api/admin/orders", Some(&token), None)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // Admin reviews the order: approve activates Team on the customer account.
+    // Admin reviews the payment. In instant-test mode this marks the invoice paid without re-applying the subscription.
     let (_member_token, _id, admin_email) = register(&t.app).await;
-    sqlx::query("UPDATE users SET role = 'admin' WHERE email = $1")
+    sqlx::query("UPDATE users SET role = 'admin', platform_role='platform_admin' WHERE email = $1")
         .bind(&admin_email)
         .execute(&t.db)
         .await
@@ -632,10 +1054,12 @@ async fn billing_manual_payment_flow() {
         .unwrap()
         .starts_with("INV-"));
 
-    // The customer's plan is now team, and the invoice appears in their list.
+    // The customer remains on Team, and the invoice appears in their list.
     let (status, profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["plan"], "team");
+    assert_eq!(profile["storage"]["total_bytes"], 25i64 * 1024 * 1024 * 1024);
+    assert_eq!(profile["entitlements"]["quota_source"], "plan");
 
     let (status, invoices) = send(
         &t.app,
@@ -645,7 +1069,7 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(invoices["invoices"].as_array().unwrap().len(), 1);
 
-    // A reject path: create a second order and turn it down.
+    // A reject path: create a second order and turn its invoice down. The plan was already activated for acceptance testing and is not rolled back by payment review.
     let (status, order2) = send(
         &t.app,
         req(
@@ -653,7 +1077,7 @@ async fn billing_manual_payment_flow() {
             "/api/billing/orders",
             Some(&token),
             Some(
-                json!({ "plan_code": "business", "payment_method": "paypal", "customer_note": "" }),
+                json!({ "plan_code": "business", "payment_method": "bank", "customer_note": "" }),
             ),
         ),
     )
@@ -672,8 +1096,12 @@ async fn billing_manual_payment_flow() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(rejected["status"], "rejected");
+    assert_eq!(rejected["invoice_status"], "void");
+    let (status, after_reject_profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after_reject_profile["plan"], "business", "test activation is independent from later payment rejection");
 
-    // Customer withdraws an open order (cancel leg, WS4.4): a fresh Team order
+    // Customer withdraws an open invoice: a fresh Team order
     // is opened, then cancelled before the admin acts. The approved plan is NOT
     // touched — it stays ``team`` until the admin assigns another.
     let (status, order3) = send(
@@ -682,7 +1110,7 @@ async fn billing_manual_payment_flow() {
             "POST",
             "/api/billing/orders",
             Some(&token),
-            Some(json!({ "plan_code": "team", "payment_method": "paypal", "customer_note": "" })),
+            Some(json!({ "plan_code": "team", "payment_method": "bank", "customer_note": "" })),
         ),
     )
     .await;
@@ -704,12 +1132,12 @@ async fn billing_manual_payment_flow() {
     assert_eq!(cancelled["status"], "cancelled");
     assert_eq!(cancelled["plan_code"], "team");
 
-    // The approved plan survived the cancel: the member is still on ``team``.
+    // The test-activated plan survives invoice cancellation: the member is still on Team.
     let (status, profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(profile["plan"], "team", "cancel must not downgrade the approved plan");
+    assert_eq!(profile["plan"], "team", "cancelling an unpaid test invoice must not roll back the test plan");
 
-    // A cancelled (never-paid) order contributes no invoice.
+    // Issued invoices remain part of the audit trail even when rejected/cancelled; their invoice status becomes void.
     let (status, invoices) = send(
         &t.app,
         req("GET", "/api/billing/invoices", Some(&token), None),
@@ -718,8 +1146,8 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         invoices["invoices"].as_array().unwrap().len(),
-        1,
-        "only the approved order invoices"
+        3,
+        "paid and void issued invoices remain visible"
     );
 
     // Admin plan CRUD: create, patch, deactivate. The code is unique per run
@@ -735,13 +1163,19 @@ async fn billing_manual_payment_flow() {
                 "code": reseller_code, "name": "Reseller", "price_cents": 1500,
                 "mailbox_bytes": 107374182400i64, "max_attachment_bytes": 10485760,
                 "max_recipients": 200, "daily_send_limit": 5000, "seats": 10,
-                "features": ["10 mailboxes"], "sort_order": 4, "active": true
+                "features": ["10 mailboxes"],
+                "feature_flags": {
+                    "mail": true, "attachments": true, "scheduled_send": true,
+                    "read_receipts": true, "contacts": false, "calendar": true
+                },
+                "sort_order": 4, "active": true
             })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "create plan: {created}");
-    assert_eq!(created["plan"]["price"], "$15.00");
+    assert_eq!(created["plan"]["price"], "SAR 15.00");
+    assert_eq!(created["plan"]["feature_flags"]["contacts"], false);
 
     let (status, updated) = send(
         &t.app,
@@ -760,6 +1194,7 @@ async fn billing_manual_payment_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "patch plan: {updated}");
     assert_eq!(updated["plan"]["name"], "Reseller Plus");
+    assert_eq!(updated["plan"]["feature_flags"]["contacts"], false);
 
     let (status, _) = send(
         &t.app,
@@ -960,6 +1395,18 @@ async fn customer_self_service_erasure() {
     assert_eq!(status, StatusCode::OK, "self erase: {erased}");
     assert_eq!(erased["ok"], true, "erase body: {erased}");
 
+    // Platform-only accounts have no provider mailbox, so self-erasure must
+    // not fabricate a Stalwart deletion job from the login email.
+    let delete_jobs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM provisioning_jobs
+         WHERE target_email = $1 AND operation = 'delete_mailbox'",
+    )
+    .bind(&email)
+    .fetch_one(&t.db)
+    .await
+    .expect("platform identity deletion job count");
+    assert_eq!(delete_jobs, 0);
+
     // The access token is now inert — the row it referenced is gone.
     let (status, _) = send(&t.app, req("GET", "/api/me", Some(&access), None)).await;
     assert_eq!(
@@ -998,4 +1445,264 @@ async fn login_probe(app: &Router, email: &str) -> (StatusCode, Option<String>, 
         ),
     )
     .await
+}
+
+#[tokio::test]
+async fn two_factor_enrollment_and_login_flow() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (access, _user_id, email) = register(&t.app).await;
+
+    let (status, setup) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/account/2fa/setup",
+            Some(&access),
+            Some(json!({ "current_password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "2fa setup: {setup}");
+    assert!(setup["qr_svg"].as_str().is_some_and(|svg| svg.contains("<svg")));
+    let secret = setup["secret"].as_str().expect("setup secret");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let code = cs_mail_api::services::two_factor::code_at(secret, now).expect("totp code");
+
+    let (status, confirmed) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/account/2fa/confirm",
+            Some(&access),
+            Some(json!({ "code": code })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "2fa confirm: {confirmed}");
+    let recovery_codes = confirmed["recovery_codes"]
+        .as_array()
+        .expect("recovery codes")
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(recovery_codes.len(), 10);
+
+    let (status, challenge) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": email, "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "2fa login challenge: {challenge}");
+    assert_eq!(challenge["two_factor_required"], true);
+    let challenge_token = challenge["challenge_token"].as_str().unwrap().to_string();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let code = cs_mail_api::services::two_factor::code_at(secret, now).expect("totp code");
+    let (status, set_cookie, verified) = send_headers(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/2fa/verify",
+            None,
+            Some(json!({ "challenge_token": challenge_token, "code": code })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "2fa verify: {verified}");
+    assert!(verified["access"].as_str().is_some());
+    assert!(set_cookie.as_deref().is_some_and(|value| value.contains("cs_mail_session=")));
+
+    // A completed challenge is one-time even when the code is still within its
+    // valid 30-second TOTP window.
+    let (status, _) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/2fa/verify",
+            None,
+            Some(json!({ "challenge_token": challenge["challenge_token"], "code": code })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Recovery codes are accepted once and reduce the remaining-code count.
+    let (status, challenge) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": email, "password": "Str0ng-Pass!23" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    // A successful TOTP time-step cannot be replayed through a fresh login
+    // challenge while the same code remains within the verifier drift window.
+    let (status, _) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/2fa/verify",
+            None,
+            Some(json!({
+                "challenge_token": challenge["challenge_token"],
+                "code": code
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, recovered) = send(
+        &t.app,
+        req(
+            "POST",
+            "/api/auth/2fa/verify",
+            None,
+            Some(json!({
+                "challenge_token": challenge["challenge_token"],
+                "code": recovery_codes[0]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "2fa recovery login: {recovered}");
+    assert_eq!(recovered["recovery_code_used"], true);
+    let recovered_access = recovered["access"].as_str().unwrap();
+    let (status, factor_status) = send(
+        &t.app,
+        req("GET", "/api/account/2fa/status", Some(recovered_access), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(factor_status["recovery_codes_remaining"], 9);
+}
+
+#[tokio::test]
+async fn sender_identity_and_idempotent_draft_flow() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let (access, user_id, email) = register(&t.app).await;
+    attach_test_mailbox(&t.db, &user_id, &email).await;
+    let (status, body) = send(&t.app, req("GET", "/api/identities", Some(&access), None)).await;
+    assert_eq!(status, StatusCode::OK, "identities failed: {body}");
+    let identities = body["identities"].as_array().expect("identity array");
+    assert_eq!(identities.len(), 1);
+    assert_eq!(identities[0]["email"].as_str(), Some(email.as_str()));
+    assert_eq!(identities[0]["primary"].as_bool(), Some(true));
+    let identity_id = identities[0]["id"].as_str().expect("identity id");
+
+    let (status, updated) = send(
+        &t.app,
+        req(
+            "PUT",
+            &format!("/api/identities/{identity_id}"),
+            Some(&access),
+            Some(json!({
+                "display_name": "Production Sender",
+                "reply_to": email,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "identity update failed: {updated}");
+    assert_eq!(updated["display_name"].as_str(), Some("Production Sender"));
+
+    let client_key = Uuid::new_v4();
+    let first_payload = json!({
+        "client_key": client_key,
+        "identity_id": identity_id,
+        "subject": "autosave one",
+        "body_text": "first body",
+        "to": [], "cc": [], "bcc": [], "attachments": []
+    });
+    let (status, first) = send(
+        &t.app,
+        req("POST", "/api/drafts", Some(&access), Some(first_payload)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "draft create failed: {first}");
+    let draft_id = first["id"].as_str().expect("draft id").to_string();
+    let send_key = first["send_key"].as_str().expect("server send key").to_string();
+
+    let second_payload = json!({
+        "client_key": client_key,
+        "identity_id": identity_id,
+        "subject": "autosave two",
+        "body_text": "latest body",
+        "to": [], "cc": [], "bcc": [], "attachments": []
+    });
+    let (status, second) = send(
+        &t.app,
+        req("POST", "/api/drafts", Some(&access), Some(second_payload)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "idempotent draft save failed: {second}");
+    assert_eq!(second["id"].as_str(), Some(draft_id.as_str()));
+    assert_eq!(second["subject"].as_str(), Some("autosave two"));
+    assert_eq!(second["send_key"].as_str(), Some(send_key.as_str()));
+
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM mail_drafts WHERE client_key = $1",
+    )
+    .bind(client_key)
+    .fetch_one(&t.db)
+    .await
+    .expect("count idempotent draft rows");
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn launch_certification_ledger_rejects_false_pass() {
+    let Some(t) = test_app().await else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run integration tests");
+        return;
+    };
+
+    let release_hash = "a".repeat(64);
+    let report_hash = "b".repeat(64);
+    let ok = sqlx::query(
+        "INSERT INTO launch_certification_runs(
+           release_label,release_sha256,status,report_sha256,report_path,
+           mandatory_passed,mandatory_failed,completed_at
+         ) VALUES ('integration-certification',$1,'passed',$2,'/tmp/report.json',12,0,now())",
+    )
+    .bind(&release_hash)
+    .bind(&report_hash)
+    .execute(&t.db)
+    .await;
+    assert!(ok.is_ok(), "valid passed certification should be accepted: {ok:?}");
+
+    let false_pass = sqlx::query(
+        "INSERT INTO launch_certification_runs(
+           release_label,release_sha256,status,report_sha256,report_path,
+           mandatory_passed,mandatory_failed,completed_at
+         ) VALUES ('integration-false-pass',$1,'passed',$2,'/tmp/report.json',11,1,now())",
+    )
+    .bind(&release_hash)
+    .bind(&report_hash)
+    .execute(&t.db)
+    .await;
+    assert!(false_pass.is_err(), "a passed certification with mandatory failures must be rejected");
 }

@@ -1,13 +1,29 @@
 import type { Draft } from '../types'
 import { apiFetch } from '../lib/api'
-import { getAttachmentPayload } from './attachments'
 import { composeToDraft, isRemoteMail, parseRecipients, type RemoteCompose } from './remote-mail'
 
-export type ScheduledMessage = { id: string; draft: Draft; at: string }
+export type ScheduledStatus = 'pending' | 'processing' | 'retry' | 'dead'
+export type ScheduledMessage = {
+  id: string
+  draft: Draft
+  at: string
+  status?: ScheduledStatus
+  error?: string
+  attemptCount?: number
+  nextAttemptAt?: string
+}
 
-type ScheduledRow = { id: string; send_at: string; compose: RemoteCompose }
+type ScheduledRow = {
+  id: string
+  send_at: string
+  compose: RemoteCompose
+  status?: ScheduledStatus
+  error?: string | null
+  attempt_count?: number
+  next_attempt_at?: string | null
+}
 
-const scheduleKey = 'harbor-mail:scheduled'
+const scheduleKey = 'cs-mail:scheduled'
 
 /** Server rows use UUID ids; locally-queued (offline/demo) rows use `scheduled-`. */
 const isServerId = (id: string) => !id.startsWith('scheduled-')
@@ -15,7 +31,12 @@ const isServerId = (id: string) => !id.startsWith('scheduled-')
 const readCache = (): ScheduledMessage[] => {
   try {
     const raw = JSON.parse(localStorage.getItem(scheduleKey) || '[]')
-    return Array.isArray(raw) ? (raw as ScheduledMessage[]) : []
+    if (!Array.isArray(raw)) return []
+    return raw.map((item) => ({
+      ...item,
+      status: item.status || 'pending',
+      attemptCount: Number(item.attemptCount || 0),
+    })) as ScheduledMessage[]
   } catch {
     return []
   }
@@ -35,72 +56,70 @@ const draftToCompose = (draft: Draft): RemoteCompose => ({
   bcc: parseRecipients(draft.bcc),
   subject: draft.subject,
   body_text: draft.body,
-  attachments: draft.attachments
-    .map(getAttachmentPayload)
-    .filter((payload): payload is NonNullable<typeof payload> => payload !== null),
+  attachments: draft.attachments.map((attachment) => ({ id: attachment.id })),
+  identity_id: draft.identityId,
+  client_key: draft.clientKey,
+  send_key: draft.sendKey,
 })
 
 const rowToMessage = (row: ScheduledRow): ScheduledMessage => ({
   id: row.id,
   at: row.send_at,
   draft: { ...composeToDraft(row.compose), scheduledAt: row.send_at },
+  status: row.status || 'pending',
+  error: row.error || undefined,
+  attemptCount: row.attempt_count ?? 0,
+  nextAttemptAt: row.next_attempt_at || undefined,
 })
 
 export const scheduleApi = {
-  /** Synchronous read from the local cache. */
+  /** Synchronous read from the local display cache. */
   list(): ScheduledMessage[] {
     return readCache()
   },
-  /**
-   * API-first refresh. Server rows replace previous server rows, while
-   * locally-queued sends (offline fallback) are preserved for the client to
-   * deliver so nothing is lost when the API call failed.
-   */
+  /** Server-authoritative refresh. Demo mode may use the local queue, but an
+   * authenticated production session never invents a client-side scheduled send. */
   async refresh(): Promise<ScheduledMessage[]> {
     if (!isRemoteMail()) return this.list()
-    try {
-      const result = await apiFetch<{ scheduled: ScheduledRow[] }>('/api/scheduled')
-      const local = this.list().filter((message) => !isServerId(message.id))
-      const next = [...local, ...(result.scheduled ?? []).map(rowToMessage)]
-      writeCache(next)
-      return next
-    } catch {
-      return this.list()
-    }
+    const result = await apiFetch<{ scheduled: ScheduledRow[] }>('/api/scheduled')
+    const next = (result.scheduled ?? []).map(rowToMessage)
+    writeCache(next)
+    return next
   },
   async enqueue(message: ScheduledMessage): Promise<ScheduledMessage> {
     if (isRemoteMail()) {
-      try {
-        const row = await apiFetch<ScheduledRow>('/api/scheduled', {
-          method: 'POST',
-          body: JSON.stringify({ send_at: message.at, ...draftToCompose(message.draft) }),
-        })
-        const next = [
-          ...this.list().filter((existing) => existing.id !== message.id && existing.id !== row.id),
-          rowToMessage(row),
-        ]
-        writeCache(next)
-        return next[next.length - 1]
-      } catch {
-        // Offline: keep the optimistic local queue so the client can send it.
-      }
+      // A compose version already owns a durable send key. Prefixing that UUID
+      // gives schedule creation a stable idempotency key across lost responses,
+      // refreshes and multi-device retries without reusing the eventual delivery key.
+      const idempotencyKey = `schedule:${message.draft.sendKey || crypto.randomUUID()}`
+      const row = await apiFetch<ScheduledRow>('/api/scheduled', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ send_at: message.at, ...draftToCompose(message.draft) }),
+      })
+      const next = [
+        ...this.list().filter((existing) => existing.id !== message.id && existing.id !== row.id),
+        rowToMessage(row),
+      ]
+      writeCache(next)
+      return next[next.length - 1]
     }
-    writeCache([...this.list(), message])
+    writeCache([...this.list(), { ...message, status: message.status || 'pending', attemptCount: 0 }])
     return message
   },
   async remove(id: string): Promise<void> {
     if (isRemoteMail() && isServerId(id)) {
-      try {
-        await apiFetch(`/api/scheduled/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      } catch {
-        // Fall through to the local removal so the UI stays responsive offline.
-      }
+      await apiFetch(`/api/scheduled/${encodeURIComponent(id)}`, { method: 'DELETE' })
     }
     writeCache(this.list().filter((message) => message.id !== id))
   },
+  async retry(id: string): Promise<void> {
+    if (!isRemoteMail() || !isServerId(id)) return
+    await apiFetch(`/api/scheduled/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+  },
   /**
-   * Only client-queued sends fire here. With a live session the backend worker
-   * delivers server rows, so returning [] for them avoids double-sending.
+   * Only client-queued sends fire here. With a live session the leased backend
+   * worker delivers server rows, so returning [] for them avoids double-sending.
    */
   dueItems(now = Date.now()): ScheduledMessage[] {
     return this.list().filter(

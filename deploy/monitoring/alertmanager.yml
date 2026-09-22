@@ -1,4 +1,4 @@
-# Harbor Alertmanager config (compose: docker-compose.yml::alertmanager, L190
+# CS Mail Alertmanager config (compose: docker-compose.yml::alertmanager, L190
 # gate, `docker compose --profile monitoring up -d prometheus alertmanager`).
 #
 # Routing lives in deploy/monitoring/alertmanager.yml (this file) and the
@@ -16,18 +16,20 @@ route:
   repeat_interval: 4h
 
   # Deliver everything to a single receiver that records alerts in a local
-  # queue + sends to the ops channel. All Harbor alerts are ops-facing: DO NOT
+  # queue + sends to the ops channel. All CS Mail alerts are ops-facing: DO NOT
   # send any of them straight to a user-facing endpoint.
-  receiver: harbor-ops
+  receiver: cs-mail-ops
 
 receivers:
-  - name: harbor-ops
+  - name: cs-mail-ops
     webhook_configs:
-      # Ops intake stub — a real webhook URL is provisioned per deployment via
-      # the compose env (HARBOR_ALERT_WEBHOOK). Kept localhost-default so the
-      # monitoring profile boots standalone in dev without an external service.
-      - url: 'http://127.0.0.1:9099/harbor-alerts'
+      # Never ship a localhost/dummy receiver in production. The
+      # file is mounted read-only by deploy/production/docker-compose.yml and
+      # contains exactly one HTTPS webhook URL. Alertmanager reads it as a
+      # secret and does not expose the URL in its rendered configuration.
+      - url_file: /run/secrets/cs_mail_alert_webhook_url
         send_resolved: true
+        timeout: 10s
 
 # No inhibit rules needed yet: the alert rules are deliberately independent
 # (latency / 5xx / DB pool / SMTP delivery fire on their own series), so

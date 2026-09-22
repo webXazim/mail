@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -19,16 +19,24 @@ import {
 } from 'lucide-react'
 import { settingsApi, type UserSettings } from '../services/settings'
 import { primaryAccount } from '../services/accounts'
-import { auditApi } from '../services/audit'
+import type { RealtimeEvent } from '../services/ws'
 import { AccountsSettings } from '../components/settings/AccountsSettings'
 import { FiltersSettings } from '../components/settings/FiltersSettings'
 import { IdentitiesSettings } from '../components/settings/IdentitiesSettings'
 import { MailSettings } from '../components/settings/MailSettings'
+import { MailClientsSettings } from '../components/settings/MailClientsSettings'
 import { SpamSettings } from '../components/settings/SpamSettings'
+import {
+  securityApi,
+  type AccountSession,
+  type TwoFactorSetup,
+  type TwoFactorStatus,
+} from '../services/security'
 
 type Tab =
   | 'account'
   | 'accounts'
+  | 'clients'
   | 'mail'
   | 'filters'
   | 'spam'
@@ -40,6 +48,7 @@ type Tab =
 const tabs: { id: Tab; label: string; icon: typeof UserRound }[] = [
   { id: 'account', label: 'Account', icon: UserRound },
   { id: 'accounts', label: 'Accounts', icon: UsersRound },
+  { id: 'clients', label: 'Mail clients', icon: KeyRound },
   { id: 'mail', label: 'Mail', icon: Mailbox },
   { id: 'filters', label: 'Filters', icon: Filter },
   { id: 'spam', label: 'Spam', icon: ShieldCheck },
@@ -49,20 +58,15 @@ const tabs: { id: Tab; label: string; icon: typeof UserRound }[] = [
   { id: 'legal', label: 'Legal', icon: FileText },
 ]
 
-const sessions = [
-  { id: 1, name: 'Chrome on macOS', location: 'San Francisco, US', active: true },
-  { id: 2, name: 'iOS Mail', location: 'San Francisco, US', active: false },
-  { id: 3, name: 'Firefox on Windows', location: 'Berlin, DE', active: false },
-]
-
 const notificationSupported = () => typeof window !== 'undefined' && 'Notification' in window
 
 export function SettingsPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [tab, setTab] = useState<Tab>(() =>
-    searchParams.get('tab') === 'accounts' ? 'accounts' : 'account',
-  )
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = searchParams.get('tab') as Tab | null
+    return requested && tabs.some((item) => item.id === requested) ? requested : 'account'
+  })
   const [settings, setSettings] = useState<UserSettings>(() => settingsApi.load())
   const [saved, setSaved] = useState(false)
   const [permission, setPermission] = useState<'granted' | 'denied' | 'default' | 'unsupported'>(
@@ -74,6 +78,17 @@ export function SettingsPage() {
   const [password, setPassword] = useState({ current: '', next: '', confirm: '' })
   const [passwordNotice, setPasswordNotice] = useState('')
   const [endNotice, setEndNotice] = useState('')
+  const [sessions, setSessions] = useState<AccountSession[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
+  const [sessionsError, setSessionsError] = useState('')
+  const [twoFactor, setTwoFactor] = useState<TwoFactorStatus | null>(null)
+  const [twoFactorLoading, setTwoFactorLoading] = useState(true)
+  const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null)
+  const [twoFactorSetupPassword, setTwoFactorSetupPassword] = useState('')
+  const [twoFactorCode, setTwoFactorCode] = useState('')
+  const [twoFactorCurrentPassword, setTwoFactorCurrentPassword] = useState('')
+  const [twoFactorNotice, setTwoFactorNotice] = useState('')
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
 
   const back = () => navigate('/mail/inbox')
 
@@ -95,6 +110,107 @@ export function SettingsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (detail?.kind !== 'resource-changed') return
+      if (detail.payload.resource !== 'settings' && detail.payload.resource !== 'profile') return
+      void settingsApi.refresh().then(setSettings).catch(() => {})
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [])
+
+  const refreshSessions = useCallback(async () => {
+    setSessionsLoading(true)
+    setSessionsError('')
+    try {
+      setSessions(await securityApi.sessions())
+    } catch (error) {
+      setSessions([])
+      setSessionsError(error instanceof Error ? error.message : 'Could not load active sessions')
+    } finally {
+      setSessionsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshSessions()
+  }, [refreshSessions])
+
+  const refreshTwoFactor = useCallback(async () => {
+    setTwoFactorLoading(true)
+    try {
+      setTwoFactor(await securityApi.twoFactorStatus())
+    } catch (error) {
+      setTwoFactorNotice(error instanceof Error ? error.message : 'Could not load two-factor status')
+    } finally {
+      setTwoFactorLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshTwoFactor()
+  }, [refreshTwoFactor])
+
+  const startTwoFactorSetup = async () => {
+    setTwoFactorNotice('')
+    setRecoveryCodes([])
+    try {
+      const setup = await securityApi.startTwoFactorSetup(twoFactorSetupPassword)
+      setTwoFactorSetup(setup)
+      setTwoFactorCode('')
+      setTwoFactorSetupPassword('')
+    } catch (error) {
+      setTwoFactorNotice(error instanceof Error ? error.message : 'Could not start two-factor setup')
+    }
+  }
+
+  const confirmTwoFactor = async () => {
+    setTwoFactorNotice('')
+    try {
+      const result = await securityApi.confirmTwoFactor(twoFactorCode)
+      setRecoveryCodes(result.recovery_codes)
+      setTwoFactorSetup(null)
+      setTwoFactorCode('')
+      setTwoFactorNotice(result.message)
+      await Promise.all([refreshTwoFactor(), refreshSessions()])
+    } catch (error) {
+      setTwoFactorNotice(error instanceof Error ? error.message : 'Could not verify authentication code')
+    }
+  }
+
+  const disableTwoFactor = async () => {
+    setTwoFactorNotice('')
+    try {
+      const result = await securityApi.disableTwoFactor(twoFactorCurrentPassword, twoFactorCode)
+      setTwoFactorCurrentPassword('')
+      setTwoFactorCode('')
+      setRecoveryCodes([])
+      setTwoFactorNotice(result.message)
+      await Promise.all([refreshTwoFactor(), refreshSessions()])
+    } catch (error) {
+      setTwoFactorNotice(error instanceof Error ? error.message : 'Could not disable two-factor authentication')
+    }
+  }
+
+  const regenerateRecoveryCodes = async () => {
+    setTwoFactorNotice('')
+    try {
+      const result = await securityApi.regenerateRecoveryCodes(
+        twoFactorCurrentPassword,
+        twoFactorCode,
+      )
+      setRecoveryCodes(result.recovery_codes)
+      setTwoFactorCurrentPassword('')
+      setTwoFactorCode('')
+      setTwoFactorNotice('New recovery codes generated. Previous recovery codes no longer work.')
+      await refreshTwoFactor()
+    } catch (error) {
+      setTwoFactorNotice(error instanceof Error ? error.message : 'Could not regenerate recovery codes')
+    }
+  }
+
   const update = (patch: Partial<UserSettings>) =>
     setSettings((current) => {
       const next = { ...current, ...patch }
@@ -114,23 +230,25 @@ export function SettingsPage() {
     if (result === 'granted') update({ desktopNotifications: true })
   }
 
-  const changePassword = (event: FormEvent) => {
+  const changePassword = async (event: FormEvent) => {
     event.preventDefault()
-    if (password.current !== 'current-password') {
-      setPasswordNotice('Current password is incorrect')
-      return
-    }
-    if (password.next.length < 8) {
-      setPasswordNotice('New password must be at least 8 characters')
+    setPasswordNotice('')
+    if (password.next.length < 12) {
+      setPasswordNotice('New password must be at least 12 characters')
       return
     }
     if (password.next !== password.confirm) {
       setPasswordNotice('New passwords do not match')
       return
     }
-    auditApi.add('security', 'Password changed', 'Changed from the security settings')
-    setPasswordNotice('Password updated')
-    setPassword({ current: '', next: '', confirm: '' })
+    try {
+      const result = await securityApi.changePassword(password.current, password.next)
+      setPasswordNotice(result.message || 'Password updated')
+      setPassword({ current: '', next: '', confirm: '' })
+      await refreshSessions()
+    } catch (error) {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not update password')
+    }
   }
 
   const permissionLabel =
@@ -146,7 +264,7 @@ export function SettingsPage() {
     <div className="settings-page" role="region" aria-label="Settings">
       <header className="calendar-head">
         <div>
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h1>Settings</h1>
         </div>
         <div className="calendar-head__actions">
@@ -202,7 +320,7 @@ export function SettingsPage() {
             <textarea
               value={settings.signature}
               onChange={(event) => update({ signature: event.target.value })}
-              placeholder={'Alex Morgan\nProduct & Operations\nHarbor Mail'}
+              placeholder={'Alex Morgan\nProduct & Operations\nCS Mail'}
             />
             <small className="settings-hint">Added to the bottom of new messages.</small>
           </div>
@@ -304,6 +422,8 @@ export function SettingsPage() {
 
       {tab === 'accounts' && <AccountsSettings />}
 
+      {tab === 'clients' && <MailClientsSettings />}
+
       {tab === 'mail' && <MailSettings />}
 
       {tab === 'filters' && <FiltersSettings />}
@@ -364,7 +484,7 @@ export function SettingsPage() {
                 </strong>
                 <small>
                   {notificationSupported()
-                    ? 'Harbor Mail will surface alerts in this browser.'
+                    ? 'CS Mail will surface alerts in this browser.'
                     : 'This browser does not support app notifications.'}
                 </small>
               </div>
@@ -434,7 +554,7 @@ export function SettingsPage() {
             </label>
             {passwordNotice && (
               <p
-                className={`settings-notice ${passwordNotice === 'Password updated' ? 'settings-notice--ok' : ''}`}
+                className={`settings-notice ${passwordNotice.startsWith('Password updated') ? 'settings-notice--ok' : ''}`}
               >
                 {passwordNotice}
               </p>
@@ -444,16 +564,166 @@ export function SettingsPage() {
               Update password
             </button>
           </form>
+          <div className="settings-section">
+            <h2>Two-factor authentication</h2>
+            {twoFactorLoading && <p className="settings-hint">Loading two-factor status…</p>}
+            {!twoFactorLoading && twoFactor && (
+              <div className="billing-plan">
+                <div>
+                  <strong>{twoFactor.enabled ? 'Enabled' : 'Not enabled'}</strong>
+                  <small>
+                    {twoFactor.enabled
+                      ? `${twoFactor.recovery_codes_remaining} recovery code${twoFactor.recovery_codes_remaining === 1 ? '' : 's'} remaining`
+                      : 'Protect sign-in with a TOTP authenticator app'}
+                  </small>
+                </div>
+                {twoFactor.enabled && (
+                  <span className="billing-paid">
+                    <ShieldCheck size={13} /> Active
+                  </span>
+                )}
+              </div>
+            )}
+
+            {!twoFactor?.enabled && !twoFactorSetup && (
+              <div className="settings-security-action">
+                <label>
+                  Current password
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={twoFactorSetupPassword}
+                    onChange={(event) => setTwoFactorSetupPassword(event.target.value)}
+                    placeholder="Confirm your password"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!twoFactorSetupPassword}
+                  onClick={startTwoFactorSetup}
+                >
+                  <ShieldCheck size={15} /> Set up authenticator
+                </button>
+              </div>
+            )}
+
+            {twoFactorSetup && (
+              <div className="two-factor-setup">
+                <p className="settings-hint">
+                  Scan this QR code with your authenticator app, then enter the six-digit code to confirm setup.
+                </p>
+                <img
+                  className="two-factor-qr"
+                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(twoFactorSetup.qr_svg)}`}
+                  alt="QR code for adding CS Mail to an authenticator app"
+                />
+                <label>
+                  Manual setup key
+                  <input value={twoFactorSetup.secret} readOnly spellCheck={false} />
+                </label>
+                <label>
+                  Authenticator code
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={twoFactorCode}
+                    onChange={(event) => setTwoFactorCode(event.target.value)}
+                    placeholder="123456"
+                  />
+                </label>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!twoFactorCode.trim()}
+                    onClick={confirmTwoFactor}
+                  >
+                    Confirm and enable
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setTwoFactorSetup(null)
+                      setTwoFactorCode('')
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {twoFactor?.enabled && (
+              <div className="settings-security-action">
+                <p className="settings-hint">
+                  To disable two-factor authentication or replace your recovery codes, confirm both your password and an authenticator/recovery code.
+                </p>
+                <label>
+                  Current password
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={twoFactorCurrentPassword}
+                    onChange={(event) => setTwoFactorCurrentPassword(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Authenticator or recovery code
+                  <input
+                    type="text"
+                    autoComplete="one-time-code"
+                    value={twoFactorCode}
+                    onChange={(event) => setTwoFactorCode(event.target.value)}
+                  />
+                </label>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={!twoFactorCurrentPassword || !twoFactorCode.trim()}
+                    onClick={regenerateRecoveryCodes}
+                  >
+                    Generate new recovery codes
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={!twoFactorCurrentPassword || !twoFactorCode.trim()}
+                    onClick={disableTwoFactor}
+                  >
+                    Disable two-factor
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {recoveryCodes.length > 0 && (
+              <div className="two-factor-recovery">
+                <strong>Save these recovery codes now</strong>
+                <p className="settings-hint">
+                  Each code works once. Store them somewhere secure; CS Mail will not show this set again.
+                </p>
+                <div className="two-factor-recovery-grid">
+                  {recoveryCodes.map((code) => (
+                    <code key={code}>{code}</code>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void navigator.clipboard?.writeText(recoveryCodes.join('\n'))}
+                >
+                  Copy recovery codes
+                </button>
+              </div>
+            )}
+            {twoFactorNotice && <p className="settings-notice">{twoFactorNotice}</p>}
+          </div>
           <div className="settings-section settings-options">
-            <h2>Sign-in & verification</h2>
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.twoFactor}
-                onChange={(event) => update({ twoFactor: event.target.checked })}
-              />{' '}
-              Require two-factor authentication
-            </label>
+            <h2>Link safety</h2>
             <label>
               <input
                 type="checkbox"
@@ -465,40 +735,71 @@ export function SettingsPage() {
           </div>
           <div className="settings-section">
             <h2>Active sessions</h2>
+            {sessionsLoading && <p className="settings-hint">Loading sessions…</p>}
+            {!sessionsLoading && sessionsError && (
+              <p className="settings-hint">{sessionsError}</p>
+            )}
+            {!sessionsLoading && !sessionsError && sessions.length === 0 && (
+              <p className="settings-hint">No active sessions found.</p>
+            )}
             {sessions.map((session) => (
               <div className="billing-row" key={session.id}>
                 <div>
-                  <strong>{session.name}</strong>
+                  <strong>{session.device}</strong>
                   <small>
-                    {session.location}
-                    {session.active ? '' : ' · Signed out'}
+                    {session.ip || 'Unknown IP'} · Last active{' '}
+                    {new Date(session.last_used_at).toLocaleString()}
                   </small>
                 </div>
-                <span className={session.active ? 'billing-paid' : ''}>
-                  {session.active && (
-                    <>
-                      <ShieldCheck size={13} />
-                      Active
-                    </>
-                  )}
-                </span>
+                {session.current ? (
+                  <span className="billing-paid">
+                    <ShieldCheck size={13} />
+                    Current
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={async () => {
+                      try {
+                        await securityApi.revokeSession(session.id)
+                        setEndNotice('Session signed out')
+                        await refreshSessions()
+                      } catch (error) {
+                        setEndNotice(error instanceof Error ? error.message : 'Could not sign out session')
+                      }
+                    }}
+                  >
+                    Sign out
+                  </button>
+                )}
               </div>
             ))}
             <p className="settings-hint">
-              Sign out of this and every other session? This clears Harbor Mail from those devices.
+              Sign out every other browser or device while keeping this session active.
             </p>
             <div className="row-actions">
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => setEndNotice('Signed out of other sessions')}
+                onClick={async () => {
+                  try {
+                    const result = await securityApi.revokeOtherSessions()
+                    setEndNotice(
+                      result.revoked > 0
+                        ? `Signed out ${result.revoked} other session${result.revoked === 1 ? '' : 's'}`
+                        : 'No other active sessions',
+                    )
+                    await refreshSessions()
+                  } catch (error) {
+                    setEndNotice(error instanceof Error ? error.message : 'Could not sign out sessions')
+                  }
+                }}
               >
                 <BellOff size={15} />
                 Sign out other sessions
               </button>
-              {endNotice && (
-                <small className="settings-notice settings-notice--ok">{endNotice}</small>
-              )}
+              {endNotice && <small className="settings-notice settings-notice--ok">{endNotice}</small>}
             </div>
           </div>
           <div className="settings-section">

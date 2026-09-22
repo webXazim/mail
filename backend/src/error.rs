@@ -60,7 +60,7 @@ impl IntoResponse for ApiError {
         // 5xx responses must never expose internals (SQL text, connection
         // details, library versions). Log them server-side and return a
         // generic message to the client.
-        let (status, message) = if self.status.is_server_error() {
+        let (status, message) = if self.status.is_server_error() && self.error != "platform_paused" {
             tracing::error!(
                 status = self.status.as_u16(),
                 error = %self.message,
@@ -68,6 +68,8 @@ impl IntoResponse for ApiError {
             );
             (self.status, "Internal server error".to_string())
         } else {
+            // `platform_paused` is a deliberately public, operator-authored
+            // maintenance response. All other 5xx details remain redacted.
             (self.status, self.message.clone())
         };
         let body = Json(ErrResult {

@@ -7,13 +7,13 @@
   padding: 7vw 10vw;
   background:
     radial-gradient(1200px 600px at 85% -10%, rgba(200, 243, 79, 0.06), transparent 60%),
-    var(--a2t-ink);
+    var(--cs-mail-ink);
 }
 .auth-card {
   padding: 44px;
-  border: 1px solid var(--a2t-line-strong);
-  border-radius: var(--a2t-radius);
-  background: var(--a2t-panel);
+  border: 1px solid var(--cs-mail-line-strong);
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.4);
 }
 .auth-brand {
@@ -24,21 +24,18 @@
   font-size: 18px;
   font-weight: 800;
   letter-spacing: -0.06em;
-  color: var(--a2t-white);
-}
-.auth-brand span span {
-  color: var(--a2t-accent);
+  color: var(--cs-mail-white);
 }
 .auth-card h1 {
   margin: 0;
   font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.05em;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
 }
 .auth-copy {
   margin: 10px 0 28px;
-  color: var(--a2t-copy);
+  color: var(--cs-mail-copy);
   font-size: 13px;
 }
 .auth-card form {
@@ -48,8 +45,8 @@
 .auth-card label:not(.remember) {
   display: grid;
   gap: 7px;
-  color: var(--a2t-copy-soft);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-copy-soft);
+  font-family: var(--cs-mail-mono);
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -57,22 +54,22 @@
 .auth-card input:not([type='checkbox']) {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid var(--a2t-control-line);
-  border-radius: var(--a2t-radius);
+  border: 1px solid var(--cs-mail-control-line);
+  border-radius: var(--cs-mail-radius);
   outline: 0;
-  background: var(--a2t-panel-soft);
-  color: var(--a2t-paper);
-  font-family: var(--a2t-sans);
+  background: var(--cs-mail-panel-soft);
+  color: var(--cs-mail-paper);
+  font-family: var(--cs-mail-sans);
   font-size: 13px;
   letter-spacing: 0;
   text-transform: none;
 }
 .auth-card input:not([type='checkbox'])::placeholder {
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .auth-card input:not([type='checkbox']):focus {
-  border-color: var(--a2t-accent);
-  box-shadow: var(--a2t-focus);
+  border-color: var(--cs-mail-accent);
+  box-shadow: var(--cs-mail-focus);
 }
 .password-field {
   position: relative;
@@ -84,16 +81,16 @@
   padding: 8px;
   border: 0;
   background: transparent;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .password-field button:hover {
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
 }
 .remember {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--a2t-copy);
+  color: var(--cs-mail-copy);
   font-size: 11px;
 }
 .remember .text-button {
@@ -105,14 +102,14 @@
 }
 .form-error {
   margin: -5px 0 -4px;
-  color: var(--a2t-danger);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-danger);
+  font-family: var(--cs-mail-mono);
   font-size: 10px;
 }
 .form-success {
   margin: -5px 0 -4px;
-  color: var(--a2t-success);
-  font-family: var(--a2t-mono);
+  color: var(--cs-mail-success);
+  font-family: var(--cs-mail-mono);
   font-size: 10px;
 }
 .auth-forgot {
@@ -121,7 +118,7 @@
 }
 .auth-foot {
   margin: 24px 0 0;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   text-align: center;
   font-size: 11px;
 }
@@ -129,13 +126,13 @@
   display: grid;
   gap: 12px;
   max-width: 300px;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
 }
 .auth-aside strong {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.04em;
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
 }
 .auth-aside span {
   font-size: 13px;
@@ -156,21 +153,21 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--a2t-panel-raised);
-  color: var(--a2t-accent);
+  background: var(--cs-mail-panel-raised);
+  color: var(--cs-mail-accent);
 }
 .auth-status__icon--success {
   background: rgba(200, 243, 79, 0.12);
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }
 .auth-status strong {
-  color: var(--a2t-white);
+  color: var(--cs-mail-white);
   font-size: 15px;
   font-weight: 700;
 }
 .auth-status p {
   margin: 0;
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   font-size: 12px;
   line-height: 1.6;
   max-width: 320px;
@@ -181,15 +178,15 @@
 
 .auth-legal {
   margin: 22px 0 0;
-  color: var(--a2t-copy-soft);
+  color: var(--cs-mail-copy-soft);
   font-size: 11px;
   line-height: 1.6;
   text-align: center;
 }
 .auth-legal a {
-  color: var(--a2t-silver);
+  color: var(--cs-mail-silver);
   text-decoration: none;
 }
 .auth-legal a:hover {
-  color: var(--a2t-accent);
+  color: var(--cs-mail-accent);
 }

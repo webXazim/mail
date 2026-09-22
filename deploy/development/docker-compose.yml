@@ -1,0 +1,224 @@
+# LOCAL/DEV STACK ONLY. Production shared-VPS deployment uses deploy/production/docker-compose.yml
+# and attaches to the existing shared Stalwart instead of starting this `mail` service.
+
+name: cs-mail
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: csmail
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: csmail
+    ports:
+      # Loopback only — Postgres is never exposed to the public network.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U csmail -d csmail"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mail:
+    # Stalwart mail/collaboration server: IMAP, SMTP, JMAP store + admin API.
+    # First boot starts in HTTP bootstrap mode on :8080; run
+    #   the local Stalwart development bootstrap
+    # once to write the config (hostname/domain/TLS/DKIM), then it restarts
+    # into normal operation and persists state in the named volumes below.
+    image: stalwartlabs/stalwart:latest
+    restart: unless-stopped
+    environment:
+      # Pins the initial admin account to `admin:<password>` on bootstrap so
+      # api-side provisioning has deterministic credentials. In production set
+      # CS_MAIL_MAIL_ADMIN_PASSWORD to a strong value.
+      STALWART_RECOVERY_ADMIN: admin:${CS_MAIL_MAIL_ADMIN_PASSWORD:?set CS_MAIL_MAIL_ADMIN_PASSWORD in .env}
+    ports:
+      # Loopback only — expose to the internet via the reverse proxy instead.
+      - "127.0.0.1:8081:8080" # HTTP: admin API + JMAP (dev, no TLS)
+      - "127.0.0.1:8143:143"  # IMAP (loopback diagnostics only)
+      - "127.0.0.1:8993:993"  # IMAPS (Upgrade 26; publish externally only after Upgrade 27)
+      - "127.0.0.1:8587:587"  # SMTP submission (client send)
+      - "127.0.0.1:8025:25"   # SMTP relay (inbound)
+    volumes:
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "1.0"
+
+  # L190 monitoring: only started with `docker compose --profile monitoring
+  # up -d`. Prometheus version is the SAME tag CI runs promtool from
+  # (see .github/workflows/ci.yml "Monitoring" job) so test-rules semantics are
+  # locked. Config + rules live in deploy/monitoring/.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      # The rules test is the memory-proof that every alert verbatim-links a
+      # RUNBOOK anchor; it MUST stay in sync by a blocking CI job (L190).
+    ports:
+      - "127.0.0.1:9090:9090"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../../backend
+    restart: unless-stopped
+    environment:
+      CS_MAIL_LISTEN_ADDR: 0.0.0.0:8080
+      CS_MAIL_PUBLIC_ORIGIN: ${CS_MAIL_PUBLIC_ORIGIN:-http://localhost:5174}
+      CS_MAIL_CORS_ORIGINS: ${CS_MAIL_CORS_ORIGINS:-http://localhost:5174}
+      CS_MAIL_TRUSTED_PROXY_IPS: ${CS_MAIL_TRUSTED_PROXY_IPS:-127.0.0.1,::1}
+      CS_MAIL_LOG_FORMAT: ${CS_MAIL_LOG_FORMAT:-json}
+      CS_MAIL_DATABASE_URL: postgres://csmail:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/csmail
+      # No default: a known secret is a vulnerability. Set CS_MAIL_JWT_SECRET in
+      # .env on the server (32+ random bytes, e.g. `openssl rand -base64 48`).
+      CS_MAIL_JWT_SECRET: ${CS_MAIL_JWT_SECRET:?set CS_MAIL_JWT_SECRET in .env}
+      CS_MAIL_JWT_ACCESS_TTL_SECS: 900
+      CS_MAIL_JWT_REFRESH_TTL_SECS: 2592000
+      # Upgrade 25: independent HMAC key for normalized delivery-event intake.
+      # Keep this separate from session/JWT/provisioning secrets. Empty disables the endpoint.
+      CS_MAIL_DELIVERY_EVENT_SECRET: ${CS_MAIL_DELIVERY_EVENT_SECRET:-}
+      # Upgrade 15: durable replay ledger plus leased JMAP change watchers.
+      CS_MAIL_REALTIME_POLL_SECS: ${CS_MAIL_REALTIME_POLL_SECS:-2}
+      CS_MAIL_REALTIME_LEASE_SECS: ${CS_MAIL_REALTIME_LEASE_SECS:-60}
+      CS_MAIL_REALTIME_BATCH_SIZE: ${CS_MAIL_REALTIME_BATCH_SIZE:-20}
+      CS_MAIL_REALTIME_EVENT_RETENTION_SECS: ${CS_MAIL_REALTIME_EVENT_RETENTION_SECS:-604800}
+      # Smoke tests (WS8.4) and staging deploys can relax verification / point
+      # at a real bridge without editing this file.
+      CS_MAIL_REQUIRE_VERIFICATION: ${CS_MAIL_REQUIRE_VERIFICATION:-true}
+      CS_MAIL_DEV_RETURN_TOKEN_LINKS: ${CS_MAIL_DEV_RETURN_TOKEN_LINKS:-false}
+      CS_MAIL_COOKIE_SECURE: ${CS_MAIL_COOKIE_SECURE:-true}
+      # Central mail-provider integration (WS2): provisioning + mailbox JMAP + submission.
+      # Empty value (CI smoke tests) disables the provider; `-` keeps the default
+      # only when unset so an explicitly-empty override actually lands.
+      CS_MAIL_MAIL_ADMIN_URL: ${CS_MAIL_MAIL_ADMIN_URL-http://mail:8080/}
+      CS_MAIL_MAIL_ADMIN_USERNAME: admin
+      CS_MAIL_MAIL_ADMIN_SECRET: ${CS_MAIL_MAIL_ADMIN_PASSWORD:?set CS_MAIL_MAIL_ADMIN_PASSWORD in .env}
+      # Preferred in production: a narrowly permissioned Stalwart API key.
+      # When present the API uses Bearer auth and ignores Basic auth credentials.
+      CS_MAIL_MAIL_ADMIN_TOKEN: ${CS_MAIL_MAIL_ADMIN_TOKEN:-}
+      # API keys are management-only; JMAP mailbox impersonation keeps a
+      # separate Basic-auth service credential. Defaults preserve the current
+      # single-admin development setup.
+      CS_MAIL_MAIL_JMAP_USERNAME: ${CS_MAIL_MAIL_JMAP_USERNAME:-admin}
+      CS_MAIL_MAIL_JMAP_SECRET: ${CS_MAIL_MAIL_JMAP_SECRET:-}
+      CS_MAIL_MAIL_DEFAULT_DOMAIN: ${CS_MAIL_MAIL_DEFAULT_DOMAIN:-crescentsphere.com}
+      CS_MAIL_PROVIDER_NAMESPACE: ${CS_MAIL_PROVIDER_NAMESPACE:-cs-mail}
+      CS_MAIL_MAIL_REQUEST_TIMEOUT_SECS: ${CS_MAIL_MAIL_REQUEST_TIMEOUT_SECS:-10}
+      CS_MAIL_MAIL_READ_RETRIES: ${CS_MAIL_MAIL_READ_RETRIES:-2}
+      CS_MAIL_MAIL_RETRY_BASE_MS: ${CS_MAIL_MAIL_RETRY_BASE_MS:-150}
+      # Upgrade 26: advertised client endpoints and durable MBOX import worker.
+      CS_MAIL_CLIENT_HOST: ${CS_MAIL_CLIENT_HOST:-mail.crescentsphere.com}
+      CS_MAIL_CLIENT_IMAP_PORT: ${CS_MAIL_CLIENT_IMAP_PORT:-993}
+      CS_MAIL_CLIENT_SMTP_PORT: ${CS_MAIL_CLIENT_SMTP_PORT:-587}
+      CS_MAIL_CLIENT_MAX_APP_PASSWORDS: ${CS_MAIL_CLIENT_MAX_APP_PASSWORDS:-5}
+      CS_MAIL_IMPORT_MAX_BYTES: ${CS_MAIL_IMPORT_MAX_BYTES:-2147483648}
+      CS_MAIL_IMPORT_MESSAGE_MAX_BYTES: ${CS_MAIL_IMPORT_MESSAGE_MAX_BYTES:-52428800}
+      CS_MAIL_IMPORT_POLL_SECS: ${CS_MAIL_IMPORT_POLL_SECS:-5}
+      CS_MAIL_IMPORT_LEASE_SECS: ${CS_MAIL_IMPORT_LEASE_SECS:-900}
+      # Durable provider mutation queue. Use an independent random key in
+      # production; when omitted the API derives a rollout-compatible key from
+      # CS_MAIL_JWT_SECRET, but explicit separation is strongly preferred.
+      CS_MAIL_PROVISIONING_KEY: ${CS_MAIL_PROVISIONING_KEY:-}
+      # Separate pgcrypto passphrase for TOTP enrollment secrets.
+      CS_MAIL_TOTP_KEY: ${CS_MAIL_TOTP_KEY:-}
+      CS_MAIL_PROVISIONING_POLL_SECS: ${CS_MAIL_PROVISIONING_POLL_SECS:-2}
+      CS_MAIL_PROVISIONING_LEASE_SECS: ${CS_MAIL_PROVISIONING_LEASE_SECS:-120}
+      CS_MAIL_PROVISIONING_RETRY_BASE_SECS: ${CS_MAIL_PROVISIONING_RETRY_BASE_SECS:-5}
+      CS_MAIL_PROVISIONING_RECONCILE_SECS: ${CS_MAIL_PROVISIONING_RECONCILE_SECS:-300}
+      CS_MAIL_PROVISIONING_MAX_ATTEMPTS: ${CS_MAIL_PROVISIONING_MAX_ATTEMPTS:-12}
+      CS_MAIL_PROVISIONING_BATCH_SIZE: ${CS_MAIL_PROVISIONING_BATCH_SIZE:-10}
+      CS_MAIL_SCHEDULE_POLL_SECS: ${CS_MAIL_SCHEDULE_POLL_SECS:-5}
+      CS_MAIL_SCHEDULE_LEASE_SECS: ${CS_MAIL_SCHEDULE_LEASE_SECS:-300}
+      CS_MAIL_SCHEDULE_RETRY_BASE_SECS: ${CS_MAIL_SCHEDULE_RETRY_BASE_SECS:-15}
+      CS_MAIL_SCHEDULE_MAX_ATTEMPTS: ${CS_MAIL_SCHEDULE_MAX_ATTEMPTS:-12}
+      CS_MAIL_SCHEDULE_BATCH_SIZE: ${CS_MAIL_SCHEDULE_BATCH_SIZE:-20}
+      # Upgrade 07 staged outbound attachment storage. The raw upload endpoint
+      # streams to this persistent volume; compose/draft/schedule JSON contains
+      # only opaque attachment ids.
+      CS_MAIL_ATTACHMENT_STORE_DIR: /srv/attachments
+      CS_MAIL_ATTACHMENT_STAGING_QUOTA_BYTES: ${CS_MAIL_ATTACHMENT_STAGING_QUOTA_BYTES:-1073741824}
+      CS_MAIL_ATTACHMENT_UPLOAD_TTL_SECS: ${CS_MAIL_ATTACHMENT_UPLOAD_TTL_SECS:-86400}
+      CS_MAIL_ATTACHMENT_DRAFT_TTL_SECS: ${CS_MAIL_ATTACHMENT_DRAFT_TTL_SECS:-2592000}
+      CS_MAIL_ATTACHMENT_CONSUMED_GRACE_SECS: ${CS_MAIL_ATTACHMENT_CONSUMED_GRACE_SECS:-3600}
+      CS_MAIL_ATTACHMENT_CLEANUP_SECS: ${CS_MAIL_ATTACHMENT_CLEANUP_SECS:-900}
+      # SMTP submission (WS2.3): the Stalwart relay on the internal network,
+      # plaintext in dev with no auth; CS_MAIL_SMTP_USERNAME/PASSWORD configure
+      # AUTH LOGIN when the stack gains an authenticated 587 listener.
+      CS_MAIL_SMTP_HOST: mail
+      CS_MAIL_SMTP_PORT: ${CS_MAIL_SMTP_PORT:-25}
+    ports:
+      # The public port for the reverse proxy on the host; never bind 0.0.0.0
+      # unless the proxy runs in its own container on the same network.
+      - "127.0.0.1:8080:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - api-attachments:/srv/attachments
+    # MIME assembly still materializes the final message in memory. Keep a
+    # conservative container ceiling for the 100 MiB product attachment cap.
+    mem_limit: 1g
+    cpus: "1.0"
+    depends_on:
+      db:
+        condition: service_healthy
+      mail:
+        condition: service_started
+
+volumes:
+  pgdata:
+  stalwart-etc:
+  stalwart-data:
+  api-attachments:

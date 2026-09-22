@@ -1,0 +1,607 @@
+use axum::extract::{Path, State};
+use axum::Json;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+use crate::audit;
+use crate::error::ApiError;
+use crate::middleware::auth::AuthUser;
+use crate::middleware::rate_limit::{
+    DNS_CHECK_LIMIT, DNS_CHECK_WINDOW, DOMAIN_OPERATION_LIMIT, DOMAIN_OPERATION_WINDOW,
+};
+use crate::services::{dns, domain_onboarding, email, tenancy};
+use crate::state::AppState;
+
+const CHALLENGE_TTL_HOURS: i64 = 72;
+const VERIFY_COOLDOWN_SECONDS: i64 = 15;
+const VERIFY_PREFIX: &str = "_cs-mail-verify";
+const VERIFY_VALUE_PREFIX: &str = "cs-mail-verification=";
+
+#[derive(Debug, sqlx::FromRow)]
+struct DomainRow {
+    id: Uuid,
+    organization_id: Uuid,
+    domain: String,
+    status: String,
+    is_primary: bool,
+    is_system: bool,
+    verified_at: Option<DateTime<Utc>>,
+    verification_name: Option<String>,
+    verification_token: Option<String>,
+    verification_expires_at: Option<DateTime<Utc>>,
+    verification_attempts: i32,
+    last_checked_at: Option<DateTime<Utc>>,
+    last_dns_value: String,
+    last_error: String,
+    provider_domain_id: Option<String>,
+    provider_marker: String,
+    provider_synced_at: Option<DateTime<Utc>>,
+    dns_zone_file: String,
+    dns_expected: Value,
+    dns_observed: Value,
+    dns_mx_ready: bool,
+    dns_spf_ready: bool,
+    dns_dkim_ready: bool,
+    dns_dmarc_ready: bool,
+    dns_ready: bool,
+    last_dns_readiness_check: Option<DateTime<Utc>>,
+}
+
+fn normalize_domain(raw: &str) -> Result<String, ApiError> {
+    let raw = raw.trim().trim_end_matches('.').to_lowercase();
+    if raw.is_empty() {
+        return Err(ApiError::bad_request("Domain is required"));
+    }
+    let ascii = idna::domain_to_ascii(&raw)
+        .map_err(|_| ApiError::bad_request("Domain name is not valid"))?
+        .to_lowercase();
+    if ascii.len() > 253 || !ascii.contains('.') {
+        return Err(ApiError::bad_request("Enter a registrable business domain"));
+    }
+    if ascii.parse::<std::net::IpAddr>().is_ok() {
+        return Err(ApiError::bad_request("An IP address cannot be claimed as a mail domain"));
+    }
+    let labels: Vec<&str> = ascii.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|label| {
+        label.is_empty()
+            || label.len() > 63
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    }) {
+        return Err(ApiError::bad_request("Domain name is not valid"));
+    }
+    // Reserved/non-public namespaces should never enter the customer ownership
+    // flow even if a local resolver happens to answer them.
+    let tld = labels.last().copied().unwrap_or_default();
+    if matches!(tld, "localhost" | "local" | "internal" | "invalid" | "example" | "test") {
+        return Err(ApiError::bad_request("This domain cannot be used for public business mail"));
+    }
+    Ok(ascii)
+}
+
+fn reserved_platform_domain(domain: &str) -> bool {
+    domain == "crescentsphere.com" || domain.ends_with(".crescentsphere.com")
+}
+
+fn verification_name(domain: &str) -> String {
+    format!("{VERIFY_PREFIX}.{domain}")
+}
+
+fn verification_value(token: &str) -> String {
+    format!("{VERIFY_VALUE_PREFIX}{token}")
+}
+
+fn serialize_domain(row: &DomainRow, include_challenge: bool) -> Value {
+    let value = if include_challenge { row.verification_token.as_deref().map(verification_value) } else { None };
+    json!({
+        "id": row.id,
+        "organization_id": row.organization_id,
+        "domain": row.domain,
+        "status": row.status,
+        "is_primary": row.is_primary,
+        "is_system": row.is_system,
+        "verified_at": row.verified_at,
+        "verification": {
+            "type": "TXT",
+            "name": if include_challenge { row.verification_name.clone() } else { None },
+            "value": value,
+            "expires_at": row.verification_expires_at,
+            "attempts": row.verification_attempts,
+            "last_checked_at": row.last_checked_at,
+            "last_observed_value": row.last_dns_value,
+        },
+        "provider": {
+            "provisioned": row.provider_domain_id.as_deref().is_some_and(|v| !v.is_empty()),
+            "synced_at": row.provider_synced_at,
+        },
+        "dns": {
+            "zone_file": row.dns_zone_file,
+            "expected": row.dns_expected.clone(),
+            "observed": row.dns_observed.clone(),
+            "mx": row.dns_mx_ready,
+            "spf": row.dns_spf_ready,
+            "dkim": row.dns_dkim_ready,
+            "dmarc": row.dns_dmarc_ready,
+            "ready": row.dns_ready,
+            "last_checked_at": row.last_dns_readiness_check,
+        },
+        "last_error": row.last_error,
+    })
+}
+
+async fn load_domain(state: &AppState, organization_id: Uuid, domain_id: Uuid) -> Result<DomainRow, ApiError> {
+    sqlx::query_as::<_, DomainRow>(
+        "SELECT id, organization_id, domain::text AS domain, status, is_primary, is_system,
+                verified_at, verification_name, verification_token, verification_expires_at,
+                verification_attempts, last_checked_at, last_dns_value, last_error,
+                provider_domain_id, provider_marker, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
+                dns_mx_ready, dns_spf_ready, dns_dkim_ready, dns_dmarc_ready, dns_ready, last_dns_readiness_check
+         FROM organization_domains
+         WHERE id=$1 AND organization_id=$2",
+    )
+    .bind(domain_id)
+    .bind(organization_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .ok_or_else(|| ApiError::not_found("Domain claim not found"))
+}
+
+async fn record_event(
+    state: &AppState,
+    domain_id: Uuid,
+    organization_id: Uuid,
+    user_id: Uuid,
+    outcome: &str,
+    observed: &[String],
+) {
+    let _ = sqlx::query(
+        "INSERT INTO domain_verification_events(domain_id, organization_id, actor_user_id, outcome, observed_values)
+         VALUES($1,$2,$3,$4,$5)",
+    )
+    .bind(domain_id)
+    .bind(organization_id)
+    .bind(user_id)
+    .bind(outcome)
+    .bind(json!(observed))
+    .execute(&state.db)
+    .await;
+}
+
+#[derive(Deserialize)]
+pub struct CreateDomainIn {
+    domain: String,
+}
+
+pub async fn list(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    let membership = tenancy::require_member(&state.db, auth.user_id, organization_id).await?;
+    let include_challenge = matches!(membership.role.as_str(), "owner" | "admin");
+    let rows = sqlx::query_as::<_, DomainRow>(
+        "SELECT id, organization_id, domain::text AS domain, status, is_primary, is_system,
+                verified_at, verification_name, verification_token, verification_expires_at,
+                verification_attempts, last_checked_at, last_dns_value, last_error,
+                provider_domain_id, provider_marker, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
+                dns_mx_ready, dns_spf_ready, dns_dkim_ready, dns_dmarc_ready, dns_ready, last_dns_readiness_check
+         FROM organization_domains WHERE organization_id=$1 ORDER BY is_primary DESC, created_at ASC",
+    )
+    .bind(organization_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(json!({"domains": rows.iter().map(|row| serialize_domain(row, include_challenge)).collect::<Vec<_>>() })))
+}
+
+pub async fn create(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(organization_id): Path<Uuid>,
+    Json(body): Json<CreateDomainIn>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    crate::services::entitlements::require_capacity(&state, organization_id, crate::services::entitlements::CapacityKind::Domain, 1).await?;
+    let domain = normalize_domain(&body.domain)?;
+    if reserved_platform_domain(&domain) {
+        return Err(ApiError::forbidden("This domain is reserved for CrescentSphere infrastructure"));
+    }
+
+    let existing: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT id, organization_id, status FROM organization_domains WHERE lower(domain::text)=lower($1)",
+    )
+    .bind(&domain)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    if let Some((id, owner_org, _)) = existing {
+        if owner_org != organization_id {
+            return Err(ApiError::conflict("This domain is already claimed by another CS Mail business"));
+        }
+        let row = load_domain(&state, organization_id, id).await?;
+        return Ok(Json(serialize_domain(&row, true)));
+    }
+
+    let token = email::random_token();
+    let verify_name = verification_name(&domain);
+    let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO organization_domains(
+            organization_id, domain, status, verification_name, verification_token,
+            verification_expires_at, last_error
+         ) VALUES($1,$2,'pending_verification',$3,$4,now()+($5 * interval '1 hour'),'')
+         RETURNING id",
+    )
+    .bind(organization_id)
+    .bind(&domain)
+    .bind(&verify_name)
+    .bind(&token)
+    .bind(CHALLENGE_TTL_HOURS)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| {
+        if matches!(&e, sqlx::Error::Database(db) if db.code().as_deref()==Some("23505")) {
+            ApiError::conflict("This domain is already claimed")
+        } else {
+            ApiError::internal(e.to_string())
+        }
+    })?;
+    sqlx::query(
+        "INSERT INTO domain_verification_events(domain_id, organization_id, actor_user_id, outcome)
+         VALUES($1,$2,$3,'created')",
+    )
+    .bind(id).bind(organization_id).bind(auth.user_id)
+    .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    audit::record(&state, Some(auth.user_id), "business.domain.claim", json!({
+        "organization_id": organization_id, "domain_id": id, "domain": domain
+    })).await;
+    let row = load_domain(&state, organization_id, id).await?;
+    Ok(Json(serialize_domain(&row, true)))
+}
+
+pub async fn rotate(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system || row.verified_at.is_some() || row.status != "pending_verification" {
+        return Err(ApiError::bad_request("Only an unverified customer domain can rotate its verification challenge"));
+    }
+    let token = email::random_token();
+    sqlx::query(
+        "UPDATE organization_domains SET verification_token=$1,
+         verification_expires_at=now()+($2 * interval '1 hour'), verification_attempts=0,
+         last_checked_at=NULL, last_dns_value='', last_error='', updated_at=now() WHERE id=$3",
+    )
+    .bind(&token).bind(CHALLENGE_TTL_HOURS).bind(domain_id)
+    .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    record_event(&state, domain_id, organization_id, auth.user_id, "rotated", &[]).await;
+    audit::record(&state, Some(auth.user_id), "business.domain.challenge.rotate", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain
+    })).await;
+    let updated = load_domain(&state, organization_id, domain_id).await?;
+    Ok(Json(serialize_domain(&updated, true)))
+}
+
+pub async fn verify(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system || row.verified_at.is_some() || row.status == "verified" {
+        return Ok(Json(serialize_domain(&row, true)));
+    }
+    if row.status != "pending_verification" {
+        return Err(ApiError::bad_request("This domain is not waiting for ownership verification"));
+    }
+    let expires = row.verification_expires_at.ok_or_else(|| ApiError::bad_request("Verification challenge is missing"))?;
+    if expires <= Utc::now() {
+        record_event(&state, domain_id, organization_id, auth.user_id, "expired", &[]).await;
+        return Err(ApiError::bad_request("Verification challenge expired. Generate a new challenge."));
+    }
+    let claimed: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE organization_domains
+         SET last_checked_at=now(), verification_attempts=verification_attempts+1, updated_at=now()
+         WHERE id=$1 AND organization_id=$2
+           AND (last_checked_at IS NULL OR last_checked_at <= now() - ($3 * interval '1 second'))
+         RETURNING id",
+    )
+    .bind(domain_id)
+    .bind(organization_id)
+    .bind(VERIFY_COOLDOWN_SECONDS)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    if claimed.is_none() {
+        record_event(&state, domain_id, organization_id, auth.user_id, "rate_limited", &[]).await;
+        return Err(ApiError::too_many("DNS verification was checked recently. Wait a few seconds and try again."));
+    }
+    let name = row.verification_name.as_deref().ok_or_else(|| ApiError::bad_request("Verification challenge is missing"))?;
+    let token = row.verification_token.as_deref().ok_or_else(|| ApiError::bad_request("Verification challenge is missing"))?;
+    let expected = verification_value(token);
+
+    let observed = match dns::txt_records(name).await {
+        Ok(values) => values,
+        Err(error) => {
+            sqlx::query(
+                "UPDATE organization_domains SET last_error=$2, updated_at=now() WHERE id=$1",
+            ).bind(domain_id).bind(error.to_string()).execute(&state.db).await
+             .map_err(|e| ApiError::internal(e.to_string()))?;
+            record_event(&state, domain_id, organization_id, auth.user_id, "error", &[]).await;
+            return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "dns_unavailable", "DNS verification service is temporarily unavailable"));
+        }
+    };
+    let matched = observed.iter().any(|value| value.trim() == expected);
+    let observed_summary = observed.join(" | ").chars().take(500).collect::<String>();
+    if !matched {
+        sqlx::query(
+            "UPDATE organization_domains SET last_dns_value=$2, last_error='Verification TXT record not found yet', updated_at=now() WHERE id=$1",
+        ).bind(domain_id).bind(&observed_summary).execute(&state.db).await
+         .map_err(|e| ApiError::internal(e.to_string()))?;
+        record_event(&state, domain_id, organization_id, auth.user_id, "not_found", &observed).await;
+        let updated = load_domain(&state, organization_id, domain_id).await?;
+        return Ok(Json(json!({
+            "verified": false,
+            "domain": serialize_domain(&updated, true),
+            "message": "Verification TXT record not found yet. DNS propagation can take time."
+        })));
+    }
+
+    let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "UPDATE organization_domains SET status='verified', verified_at=now(), verification_token=NULL, verification_expires_at=NULL, last_dns_value=$2, last_error='', updated_at=now()
+         WHERE id=$1 AND organization_id=$3 AND status='pending_verification'",
+    ).bind(domain_id).bind(&observed_summary).bind(organization_id)
+     .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    // First verified customer domain becomes the business primary domain.
+    sqlx::query(
+        "UPDATE organization_domains SET is_primary=TRUE, updated_at=now()
+         WHERE id=$1 AND NOT EXISTS(
+           SELECT 1 FROM organization_domains d WHERE d.organization_id=$2 AND d.is_primary=TRUE AND d.id<>$1
+         )",
+    ).bind(domain_id).bind(organization_id)
+     .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "INSERT INTO domain_verification_events(domain_id, organization_id, actor_user_id, outcome, observed_values)
+         VALUES($1,$2,$3,'verified',$4)",
+    ).bind(domain_id).bind(organization_id).bind(auth.user_id).bind(json!(observed))
+     .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    audit::record(&state, Some(auth.user_id), "business.domain.verified", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain,
+        "method": "dns_txt"
+    })).await;
+    let updated = load_domain(&state, organization_id, domain_id).await?;
+    Ok(Json(json!({
+        "verified": true,
+        "domain": serialize_domain(&updated, true),
+        "message": "Domain ownership verified. Mail-provider provisioning is the next setup step."
+    })))
+}
+
+pub async fn provision(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system {
+        return Err(ApiError::forbidden("The system domain is managed by the platform operator"));
+    }
+    if row.verified_at.is_none() {
+        return Err(ApiError::bad_request("Verify domain ownership before provisioning mail service"));
+    }
+    if matches!(row.status.as_str(), "dns_pending" | "active" | "degraded")
+        && row.provider_domain_id.as_deref().is_some_and(|v| !v.is_empty())
+    {
+        return Ok(Json(json!({
+            "domain": serialize_domain(&row, true),
+            "message": "Mail domain is already provisioned. Complete the DNS readiness checklist."
+        })));
+    }
+    if !matches!(row.status.as_str(), "verified" | "failed" | "provisioning") {
+        return Err(ApiError::conflict("This domain is not ready for provider provisioning"));
+    }
+
+    let marker = if row.provider_marker.trim().is_empty() {
+        state.stalwart.ownership_marker("domain", &organization_id.to_string(), &domain_id.to_string())
+    } else {
+        row.provider_marker.clone()
+    };
+    let claimed: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE organization_domains SET status='provisioning', provider_marker=$2, last_error='', updated_at=now()
+         WHERE id=$1 AND (status IN ('verified','failed') OR (status='provisioning' AND updated_at < now()-interval '5 minutes'))
+         RETURNING id",
+    ).bind(domain_id).bind(&marker).fetch_optional(&state.db).await
+     .map_err(|e| ApiError::internal(e.to_string()))?;
+    if claimed.is_none() {
+        return Err(ApiError::conflict("Domain provisioning is already in progress. Wait a few minutes before retrying."));
+    }
+
+    let snapshot = match state.stalwart.ensure_customer_domain(
+        row.provider_domain_id.as_deref(), &row.domain, &marker,
+    ).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let detail = error.to_string();
+            tracing::error!(organization_id=%organization_id, domain_id=%domain_id, domain=%row.domain, %detail, "customer domain provisioning failed");
+            sqlx::query("UPDATE organization_domains SET status='failed', last_error=$2, updated_at=now() WHERE id=$1")
+                .bind(domain_id).bind("Mail-provider provisioning failed. The operation is safe to retry.")
+                .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+            if detail.contains("already exists") || detail.contains("does not belong") {
+                return Err(ApiError::conflict("This domain already exists in the shared mail provider and is not owned by this CS Mail business"));
+            }
+            return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()));
+        }
+    };
+    if snapshot.name != row.domain || snapshot.description != marker || !snapshot.enabled {
+        return Err(ApiError::conflict("Mail-provider domain ownership could not be established safely"));
+    }
+    let expected = domain_onboarding::parse_required_records(&snapshot.dns_zone_file, &row.domain);
+    if expected.is_empty() {
+        sqlx::query(
+            "UPDATE organization_domains SET provider_domain_id=$2, provider_synced_at=now(), dns_zone_file=$3,
+             dns_expected=$4, status='failed', last_error='Mail provider did not generate the required DNS zone records', updated_at=now() WHERE id=$1",
+        ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected))
+         .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider_dns", "Mail provider did not generate DNS setup records"));
+    }
+
+    sqlx::query(
+        "UPDATE organization_domains SET provider_domain_id=$2, provider_synced_at=now(), dns_zone_file=$3,
+         dns_expected=$4, status='dns_pending', next_dns_check_at=now(), last_error='', updated_at=now() WHERE id=$1",
+    ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected))
+     .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    audit::record(&state, Some(auth.user_id), "business.domain.provision", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain,
+        "provider_domain_id": snapshot.id
+    })).await;
+
+    // A first readiness check is best-effort: DNS commonly has not propagated
+    // yet and that is not a provisioning failure.
+    let _ = domain_onboarding::refresh_one(&state, domain_id).await;
+    let updated = load_domain(&state, organization_id, domain_id).await?;
+    Ok(Json(json!({
+        "domain": serialize_domain(&updated, true),
+        "message": if updated.dns_ready { "Domain is active for business mail." } else { "Mail domain provisioned. Publish the required MX/SPF/DKIM/DMARC records, then verify DNS." }
+    })))
+}
+
+pub async fn check_dns(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("dns-check:{organization_id}:{}", auth.user_id),
+        DNS_CHECK_LIMIT,
+        DNS_CHECK_WINDOW,
+    ).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.provider_domain_id.as_deref().map_or(true, |v| v.trim().is_empty()) {
+        return Err(ApiError::bad_request("Provision the verified domain before checking mail DNS"));
+    }
+    if let Some(last) = row.last_dns_readiness_check {
+        if (Utc::now() - last).num_seconds() < VERIFY_COOLDOWN_SECONDS {
+            return Err(ApiError::too_many("DNS readiness was checked recently. Wait a few seconds and try again."));
+        }
+    }
+    let readiness = domain_onboarding::refresh_one(&state, domain_id).await.map_err(|error| {
+        tracing::warn!(organization_id=%organization_id, domain_id=%domain_id, %error, "manual domain DNS readiness check failed");
+        ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "dns_unavailable", "DNS readiness check is temporarily unavailable")
+    })?;
+    audit::record(&state, Some(auth.user_id), "business.domain.dns_check", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "ready": readiness.ready,
+        "mx": readiness.mx, "spf": readiness.spf, "dkim": readiness.dkim, "dmarc": readiness.dmarc
+    })).await;
+    let updated = load_domain(&state, organization_id, domain_id).await?;
+    Ok(Json(json!({
+        "ready": readiness.ready,
+        "domain": serialize_domain(&updated, true),
+        "message": if readiness.ready { "MX, SPF, DKIM and DMARC are ready. Business mail is active." } else { "Some required DNS records are still missing or have not propagated." }
+    })))
+}
+
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system {
+        return Err(ApiError::forbidden("The protected CrescentSphere domain cannot be removed"));
+    }
+    let mailbox_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM mailboxes WHERE domain_id=$1 AND deleted_at IS NULL",
+    ).bind(domain_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let address_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM business_addresses WHERE domain_id=$1 AND deleted_at IS NULL",
+    ).bind(domain_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if mailbox_count > 0 || address_count > 0 {
+        return Err(ApiError::conflict("Remove all mailboxes, aliases and groups on this domain before releasing the claim"));
+    }
+    if let Some(provider_id) = row.provider_domain_id.as_deref().filter(|value| !value.trim().is_empty()) {
+        if row.provider_marker.trim().is_empty() {
+            return Err(ApiError::conflict("Provider ownership metadata is missing; a platform administrator must reconcile this domain before removal"));
+        }
+        sqlx::query("UPDATE organization_domains SET status='removing', last_error='', updated_at=now() WHERE id=$1")
+            .bind(domain_id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        if let Err(error) = state.stalwart.delete_customer_domain(provider_id, &row.domain, &row.provider_marker).await {
+            tracing::error!(organization_id=%organization_id, domain_id=%domain_id, domain=%row.domain, provider_domain_id=%provider_id, error=%error, "customer domain removal failed");
+            sqlx::query("UPDATE organization_domains SET status='failed', last_error='Mail-provider domain removal failed. Retry before releasing this claim.', updated_at=now() WHERE id=$1")
+                .bind(domain_id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+            return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()));
+        }
+    } else if matches!(row.status.as_str(), "provisioning" | "removing") {
+        return Err(ApiError::conflict("Domain provisioning/removal is still in progress"));
+    }
+    sqlx::query("DELETE FROM organization_domains WHERE id=$1 AND organization_id=$2")
+        .bind(domain_id).bind(organization_id).execute(&state.db).await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    audit::record(&state, Some(auth.user_id), "business.domain.release", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain
+    })).await;
+    Ok(Json(json!({"ok": true})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_domain, reserved_platform_domain};
+
+    #[test]
+    fn normalizes_idn_and_trailing_dot() {
+        assert_eq!(normalize_domain("BÜCHER.de.").unwrap(), "xn--bcher-kva.de");
+    }
+
+    #[test]
+    fn rejects_ip_and_single_label() {
+        assert!(normalize_domain("127.0.0.1").is_err());
+        assert!(normalize_domain("localhost").is_err());
+    }
+
+    #[test]
+    fn reserves_platform_domain_tree() {
+        assert!(reserved_platform_domain("crescentsphere.com"));
+        assert!(reserved_platform_domain("mail.crescentsphere.com"));
+        assert!(!reserved_platform_domain("example.com"));
+    }
+}

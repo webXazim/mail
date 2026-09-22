@@ -2,12 +2,15 @@ use axum::async_trait;
 use axum::extract::FromRef;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use axum::extract::Request;
+use axum::middleware::Next;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::ErrResult;
@@ -17,6 +20,7 @@ use crate::state::AppState;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid,
+    pub sid: Uuid,
     pub email: String,
     pub role: String,
     pub exp: usize,
@@ -30,8 +34,13 @@ pub struct Claims {
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: Uuid,
+    pub session_id: Uuid,
     pub email: String,
     pub role: String,
+    /// Optional request-scoped business context. Values are untrusted hints until
+    /// services::tenancy validates membership and mailbox assignment.
+    pub organization_id_hint: Option<Uuid>,
+    pub mailbox_id_hint: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -40,6 +49,7 @@ pub enum AuthError {
     Invalid,
     Expired,
     Forbidden,
+    Suspended,
 }
 
 impl IntoResponse for AuthError {
@@ -56,6 +66,11 @@ impl IntoResponse for AuthError {
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "Administrator access required",
+            ),
+            AuthError::Suspended => (
+                StatusCode::FORBIDDEN,
+                "account_suspended",
+                "This account is suspended",
             ),
         };
         let body = Json(ErrResult {
@@ -101,12 +116,70 @@ where
             return Err(AuthError::Invalid);
         }
 
+        // Authorization is resolved from current server state on every
+        // protected request. A demotion or suspension therefore takes effect
+        // immediately instead of waiting for an access token to expire.
+        let current: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT u.email::text, u.platform_role, u.status
+             FROM sessions s
+             JOIN users u ON u.id = s.user_id
+             WHERE s.id = $1 AND s.user_id = $2
+               AND s.revoked_at IS NULL AND s.expires_at > now()",
+        )
+        .bind(token_data.claims.sid)
+        .bind(token_data.claims.sub)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| AuthError::Invalid)?;
+        let (email, role, status) = current.ok_or(AuthError::Invalid)?;
+        if status != "active" {
+            return Err(AuthError::Suspended);
+        }
+
+        let organization_id_hint = parts.headers
+            .get("x-cs-organization-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok());
+        let mailbox_id_hint = parts.headers
+            .get("x-cs-mailbox-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok());
+
         Ok(AuthUser {
             user_id: token_data.claims.sub,
-            email: token_data.claims.email,
-            role: token_data.claims.role,
+            session_id: token_data.claims.sid,
+            email,
+            role,
+            organization_id_hint,
+            mailbox_id_hint,
         })
     }
+}
+
+/// Platform-admin requests must arrive through the localhost-only admin reverse
+/// proxy. Public Nginx strips this header and blocks `/api/admin/*`; the API
+/// itself is loopback-bound in production. Keeping the check here makes an
+/// accidental future proxy regression fail closed instead of exposing the
+/// platform-control plane to the Internet.
+pub const ADMIN_LOCAL_HEADER: &str = "x-cs-admin-local";
+
+pub fn is_local_admin_request(headers: &HeaderMap) -> bool {
+    headers
+        .get(ADMIN_LOCAL_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == "1")
+}
+
+/// Route-level defense in depth for every `/api/admin` endpoint, including any
+/// future handler that might accidentally omit the `AdminUser` extractor.
+pub async fn local_admin_gate(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    if (path == "/api/admin" || path.starts_with("/api/admin/"))
+        && !is_local_admin_request(request.headers())
+    {
+        return AuthError::Forbidden.into_response();
+    }
+    next.run(request).await
 }
 
 /// Authenticated caller whose role is `admin`. Rejects members with 403 so the
@@ -123,19 +196,21 @@ where
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if !is_local_admin_request(&parts.headers) {
+            return Err(AuthError::Forbidden);
+        }
         let user = AuthUser::from_request_parts(parts, state).await?;
-        if user.role != "admin" {
+        if user.role != "platform_admin" {
             return Err(AuthError::Forbidden);
         }
         Ok(AdminUser(user))
     }
 }
 
-/// Authenticate a WebSocket / polling client from the HttpOnly session cookie.
-/// Browsers cannot set an `Authorization` header on a WS handshake, and putting
-/// an access token in the query string would leak it into logs and history, so
-/// the same-origin refresh cookie is the transport for realtime (WS2.6).
-pub fn user_from_cookie(state: &AppState, headers: &HeaderMap) -> Option<AuthUser> {
+/// Authenticate a WebSocket / polling client from the HttpOnly refresh cookie.
+/// Unlike the old decoder-only path, this verifies that the concrete session
+/// has not been revoked and resolves the current role/status from PostgreSQL.
+pub async fn user_from_cookie(state: &AppState, headers: &HeaderMap) -> Option<AuthUser> {
     let token = cookie_token(headers)?;
     let data = decode::<Claims>(
         &token,
@@ -146,15 +221,45 @@ pub fn user_from_cookie(state: &AppState, headers: &HeaderMap) -> Option<AuthUse
     if data.claims.kind != "refresh" {
         return None;
     }
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    let current: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT u.email::text, u.platform_role, u.status
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         WHERE s.id = $1 AND s.user_id = $2 AND s.token_hash = $3
+           AND s.revoked_at IS NULL AND s.expires_at > now()",
+    )
+    .bind(data.claims.sid)
+    .bind(data.claims.sub)
+    .bind(hash)
+    .fetch_optional(&state.db)
+    .await
+    .ok()?;
+    let (email, role, status) = current?;
+    if status != "active" {
+        return None;
+    }
     Some(AuthUser {
         user_id: data.claims.sub,
-        email: data.claims.email,
-        role: data.claims.role,
+        session_id: data.claims.sid,
+        email,
+        role,
+        organization_id_hint: headers
+            .get("x-cs-organization-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok()),
+        mailbox_id_hint: headers
+            .get("x-cs-mailbox-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok()),
     })
 }
 
 pub fn create_tokens(
     user_id: Uuid,
+    session_id: Uuid,
     email: &str,
     role: &str,
     secret: &str,
@@ -168,6 +273,7 @@ pub fn create_tokens(
 
     let access_claims = Claims {
         sub: user_id,
+        sid: session_id,
         email: email.into(),
         role: role.into(),
         iat: now,
@@ -178,6 +284,7 @@ pub fn create_tokens(
 
     let refresh_claims = Claims {
         sub: user_id,
+        sid: session_id,
         email: email.into(),
         role: role.into(),
         iat: now,
@@ -199,4 +306,46 @@ fn encode_jwt(claims: &Claims, secret: &str) -> String {
         &EncodingKey::from_secret(secret.as_bytes()),
     )
     .expect("JWT encoding should not fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_pair_shares_stable_session_id_and_has_distinct_jti() {
+        let user_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let secret = "test-secret-long-enough-for-unit-test";
+        let (access, refresh) = create_tokens(
+            user_id,
+            session_id,
+            "alice@example.com",
+            "member",
+            secret,
+            300,
+            3600,
+        );
+        let access_claims = decode::<Claims>(
+            &access,
+            &DecodingKey::from_secret(secret.as_bytes()),
+            &Validation::default(),
+        )
+        .expect("access token decodes")
+        .claims;
+        let refresh_claims = decode::<Claims>(
+            &refresh,
+            &DecodingKey::from_secret(secret.as_bytes()),
+            &Validation::default(),
+        )
+        .expect("refresh token decodes")
+        .claims;
+
+        assert_eq!(access_claims.sub, user_id);
+        assert_eq!(access_claims.sid, session_id);
+        assert_eq!(refresh_claims.sid, session_id);
+        assert_eq!(access_claims.kind, "access");
+        assert_eq!(refresh_claims.kind, "refresh");
+        assert_ne!(access_claims.jti, refresh_claims.jti);
+    }
 }

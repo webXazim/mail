@@ -16,6 +16,7 @@ import {
 import { folderSlug, folders } from '../lib/mail'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useRole } from '../services/profile'
+import { isLocalAdminOrigin } from '../lib/admin-origin'
 
 type CommandPaletteProps = {
   open: boolean
@@ -40,7 +41,7 @@ type Command = {
   action: () => void
 }
 
-const recentKey = 'harbor-mail:recent-searches'
+const recentKey = 'cs-mail:recent-searches'
 const loadRecent = (): string[] => {
   try {
     return JSON.parse(localStorage.getItem(recentKey) || '[]')
@@ -131,7 +132,7 @@ export function CommandPalette({
         section: 'Actions',
         action: onOpenSettings,
       },
-      ...(role === 'admin'
+      ...(role === 'admin' && isLocalAdminOrigin()
         ? [
             {
               id: 'admin',

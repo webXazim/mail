@@ -13,14 +13,14 @@ export const contacts = [
   },
   {
     name: 'Priya Shah',
-    email: 'priya@harbor.co',
-    company: 'Harbor Mail',
+    email: 'priya@crescentsphere.com',
+    company: 'CS Mail',
     phone: '+1 (650) 555-0182',
   },
   {
     name: 'Alex Chen',
-    email: 'alex.chen@harbor.co',
-    company: 'Harbor Mail',
+    email: 'alex.chen@crescentsphere.com',
+    company: 'CS Mail',
     phone: '+1 (650) 555-0129',
   },
   {

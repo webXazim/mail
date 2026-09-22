@@ -5,12 +5,14 @@
 //! `accountId` (admin impersonation) — we never store per-user mail secrets.
 //!
 //! Responsibilities: mailbox tree w/ counters, paginated thread previews,
-//! full thread + bodies, read/starred flags, move, delete, text search, and
+//! full thread + bodies, read/starred flags, move, delete, advanced search, and
 //! attachment blobs.
 
+use chrono::{Duration, NaiveDate, TimeZone, Utc};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
-use crate::services::provisioning::MailBridge;
+use crate::services::stalwart::StalwartService;
 
 /// Properties needed to render a list row / preview.
 const LIST_PROPS: &[&str] = &[
@@ -66,10 +68,12 @@ const FULL_PROPS_FETCH: &[&str] = &[
     "header:X-Spam-Score",
 ];
 
-/// Compact mailbox roster with unread counts (sidebar).
-pub async fn mailboxes(bridge: &MailBridge, account: &str) -> Result<Value, String> {
+/// Compact mailbox roster with unread counts (sidebar). The snapshot also
+/// carries the JMAP Mailbox/get state so clients can cheaply identify roster
+/// changes without guessing from their locally-loaded message window.
+pub async fn mailbox_snapshot(bridge: &StalwartService, account: &str) -> Result<Value, String> {
     let result = bridge
-        .jmap_mail("Mailbox/get", json!({ "accountId": account }))
+        .mail_read("Mailbox/get", json!({ "accountId": account }))
         .await?;
     let list = result
         .get("list")
@@ -89,26 +93,200 @@ pub async fn mailboxes(bridge: &MailBridge, account: &str) -> Result<Value, Stri
             "unread": mb.get("unreadEmails").and_then(Value::as_u64).unwrap_or(0),
         }));
     }
-    Ok(Value::Array(out))
+    Ok(json!({
+        "mailboxes": out,
+        "state": result.get("state").cloned().unwrap_or(Value::Null)
+    }))
 }
 
-/// One page of thread previews from a mailbox, newest first. Returns
-/// `has_more` so the UI can paginate; `anchor` is the last email id seen
-/// (older-than pagination).
-pub async fn thread_previews(
-    bridge: &MailBridge,
+pub async fn mailboxes(bridge: &StalwartService, account: &str) -> Result<Value, String> {
+    let snapshot = mailbox_snapshot(bridge, account).await?;
+    Ok(snapshot.get("mailboxes").cloned().unwrap_or_else(|| Value::Array(Vec::new())))
+}
+
+/// Current Email/get state without downloading the mailbox. JMAP state tokens
+/// drive multi-device realtime invalidation for flag/move/delete changes that
+/// do not necessarily alter Inbox query membership.
+pub async fn email_state(bridge: &StalwartService, account: &str) -> Result<Option<String>, String> {
+    let result = bridge
+        .mail_read(
+            "Email/get",
+            json!({ "accountId": account, "ids": [], "properties": ["id"] }),
+        )
+        .await?;
+    Ok(result.get("state").and_then(Value::as_str).map(str::to_string))
+}
+
+pub async fn email_changes(
+    bridge: &StalwartService,
     account: &str,
-    in_mailbox: &str,
+    since_state: &str,
+    max_changes: usize,
+) -> Result<Value, String> {
+    let result = bridge
+        .mail_read(
+            "Email/changes",
+            json!({
+                "accountId": account,
+                "sinceState": since_state,
+                "maxChanges": max_changes.max(1).min(500) as i64
+            }),
+        )
+        .await?;
+    let created = result.get("created").and_then(Value::as_array).map_or(0, Vec::len);
+    let updated = result.get("updated").and_then(Value::as_array).map_or(0, Vec::len);
+    let destroyed = result.get("destroyed").and_then(Value::as_array).map_or(0, Vec::len);
+    Ok(json!({
+        "state": result.get("newState").cloned().unwrap_or_else(|| json!(since_state)),
+        "has_more_changes": result.get("hasMoreChanges").and_then(Value::as_bool).unwrap_or(false),
+        "changed": created + updated + destroyed > 0,
+        "created": created,
+        "updated": updated,
+        "destroyed": destroyed
+    }))
+}
+
+pub async fn mailbox_state(bridge: &StalwartService, account: &str) -> Result<Option<String>, String> {
+    let result = bridge
+        .mail_read(
+            "Mailbox/get",
+            json!({ "accountId": account, "ids": [], "properties": ["id"] }),
+        )
+        .await?;
+    Ok(result.get("state").and_then(Value::as_str).map(str::to_string))
+}
+
+pub async fn mailbox_changes(
+    bridge: &StalwartService,
+    account: &str,
+    since_state: &str,
+    max_changes: usize,
+) -> Result<Value, String> {
+    let result = bridge
+        .mail_read(
+            "Mailbox/changes",
+            json!({
+                "accountId": account,
+                "sinceState": since_state,
+                "maxChanges": max_changes.max(1).min(500) as i64
+            }),
+        )
+        .await?;
+    let created = result.get("created").and_then(Value::as_array).map_or(0, Vec::len);
+    let updated = result.get("updated").and_then(Value::as_array).map_or(0, Vec::len);
+    let destroyed = result.get("destroyed").and_then(Value::as_array).map_or(0, Vec::len);
+    Ok(json!({
+        "state": result.get("newState").cloned().unwrap_or_else(|| json!(since_state)),
+        "has_more_changes": result.get("hasMoreChanges").and_then(Value::as_bool).unwrap_or(false),
+        "changed": created + updated + destroyed > 0
+    }))
+}
+
+fn query_filter(scope: &str, mailbox: Option<&str>, trash: Option<&str>) -> Result<Option<Value>, String> {
+    let not_trash = trash.map(|id| json!({
+        "operator": "NOT",
+        "conditions": [{ "inMailbox": id }]
+    }));
+    let combine = |mut parts: Vec<Value>| -> Option<Value> {
+        parts.retain(|v| !v.is_null());
+        match parts.len() {
+            0 => None,
+            1 => parts.into_iter().next(),
+            _ => Some(json!({ "operator": "AND", "conditions": parts })),
+        }
+    };
+    match scope {
+        "mailbox" => mailbox
+            .filter(|id| !id.is_empty())
+            .map(|id| Some(json!({ "inMailbox": id })))
+            .ok_or_else(|| "mailbox id is required".to_string()),
+        "all" => Ok(not_trash),
+        "unread" => Ok(combine(vec![not_trash.unwrap_or(Value::Null), json!({ "notKeyword": "$seen" })])),
+        "starred" => Ok(combine(vec![not_trash.unwrap_or(Value::Null), json!({ "hasKeyword": "$flagged" })])),
+        _ => Err(format!("unsupported mail query scope: {scope}")),
+    }
+}
+
+/// Exact counters for virtual mailbox views that are not represented by one
+/// physical JMAP Mailbox. These totals come from Email/query and therefore do
+/// not depend on how many rows the browser has loaded.
+pub async fn virtual_counts(
+    bridge: &StalwartService,
+    account: &str,
+    trash: Option<&str>,
+) -> Result<Value, String> {
+    async fn total_for(
+        bridge: &StalwartService,
+        account: &str,
+        filter: Option<Value>,
+    ) -> Result<u64, String> {
+        let mut args = json!({
+            "accountId": account,
+            "collapseThreads": true,
+            "calculateTotal": true,
+            "position": 0,
+            "limit": 1
+        });
+        if let Some(filter) = filter { args["filter"] = filter; }
+        let result = bridge.mail_read("Email/query", args).await?;
+        Ok(result.get("total").and_then(Value::as_u64).unwrap_or(0))
+    }
+
+    let all = total_for(bridge, account, query_filter("all", None, trash)?).await?;
+    let unread = total_for(bridge, account, query_filter("unread", None, trash)?).await?;
+    let starred = total_for(bridge, account, query_filter("starred", None, trash)?).await?;
+    Ok(json!({ "all": all, "unread": unread, "starred": starred }))
+}
+
+fn query_sort(sort: &str) -> Value {
+    let (property, ascending) = match sort {
+        "received_asc" => ("receivedAt", true),
+        "sender_asc" => ("from", true),
+        "sender_desc" => ("from", false),
+        "subject_asc" => ("subject", true),
+        "subject_desc" => ("subject", false),
+        _ => ("receivedAt", false),
+    };
+    json!([{ "property": property, "isAscending": ascending }])
+}
+
+/// One stable page of collapsed conversation previews. The returned query
+/// state belongs to the exact filter/sort used for the page. A caller can send
+/// its previous state on the next request; if the membership/order changed in
+/// between, `reset_required` tells the UI to restart from page one rather than
+/// mixing two snapshots.
+pub async fn thread_previews(
+    bridge: &StalwartService,
+    account: &str,
+    scope: &str,
+    in_mailbox: Option<&str>,
     limit: usize,
     anchor: Option<&str>,
+    expected_query_state: Option<&str>,
+    sort: &str,
+    unread: bool,
+    starred: bool,
+    attachment: bool,
 ) -> Result<Value, String> {
+    let trash = mailbox_id_for_role(bridge, account, "trash").await?;
+    let mut filter = query_filter(scope, in_mailbox, trash.as_deref())?;
+    let mut extras = Vec::new();
+    if unread { extras.push(json!({ "notKeyword": "$seen" })); }
+    if starred { extras.push(json!({ "hasKeyword": "$flagged" })); }
+    if attachment { extras.push(json!({ "hasAttachment": true })); }
+    if !extras.is_empty() {
+        if let Some(base) = filter.take() { extras.insert(0, base); }
+        filter = Some(if extras.len() == 1 { extras.remove(0) } else { json!({ "operator": "AND", "conditions": extras }) });
+    }
+
     let mut args = json!({
         "accountId": account,
-        "filter": { "inMailbox": in_mailbox },
-        "sort": [{ "property": "receivedAt", "isAscending": false }],
+        "sort": query_sort(sort),
         "collapseThreads": true,
-        "limit": (limit as i64) + 1
+        "calculateTotal": true,
+        "limit": limit as i64
     });
+    if let Some(f) = filter { args["filter"] = f; }
     if let Some(a) = anchor {
         args["anchor"] = json!(a);
         args["anchorOffset"] = json!(1);
@@ -116,23 +294,157 @@ pub async fn thread_previews(
         args["position"] = json!(0);
     }
 
-    let result = bridge.jmap_mail("Email/query", args).await?;
-    let ids: Vec<Value> = result
-        .get("ids")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let has_more = ids.len() > limit;
-    let ids: Vec<Value> = ids.into_iter().take(limit).collect();
-
+    let result = match bridge.mail_read("Email/query", args.clone()).await {
+        Ok(result) => (result, false),
+        Err(err) if anchor.is_some() && err.to_ascii_lowercase().contains("anchor") => {
+            // The anchor can disappear when another client moves/deletes mail
+            // between page requests. Restart from position zero and signal the
+            // browser to discard the mixed snapshot instead of surfacing a
+            // transient pagination failure.
+            if let Some(obj) = args.as_object_mut() {
+                obj.remove("anchor");
+                obj.remove("anchorOffset");
+                obj.insert("position".into(), json!(0));
+            }
+            (bridge.mail_read("Email/query", args).await?, true)
+        }
+        Err(err) => return Err(err),
+    };
+    let (result, anchor_reset) = result;
+    let query_state = result.get("queryState").and_then(Value::as_str).unwrap_or("");
+    let reset_required = anchor_reset || expected_query_state
+        .filter(|s| !s.is_empty())
+        .map(|s| s != query_state)
+        .unwrap_or(false);
+    let ids: Vec<Value> = result.get("ids").and_then(Value::as_array).cloned().unwrap_or_default();
+    let position = result.get("position").and_then(Value::as_u64).unwrap_or(0);
+    let total = result.get("total").and_then(Value::as_u64).unwrap_or(position + ids.len() as u64);
+    let has_more = position.saturating_add(ids.len() as u64) < total;
+    let next_anchor = ids.last().and_then(Value::as_str).map(str::to_string);
     let emails = emails_by_id(bridge, account, &ids, LIST_PROPS, false).await?;
-    Ok(json!({ "emails": to_rows(emails), "has_more": has_more }))
+    Ok(json!({
+        "emails": to_rows(emails),
+        "has_more": has_more,
+        "next_anchor": next_anchor,
+        "query_state": query_state,
+        "reset_required": reset_required,
+        "position": position,
+        "total": total,
+    }))
+}
+
+pub async fn mailbox_id_for_role(
+    bridge: &StalwartService,
+    account: &str,
+    role: &str,
+) -> Result<Option<String>, String> {
+    let list = mailboxes(bridge, account).await?;
+    for mb in list.as_array().into_iter().flatten() {
+        if mb.get("role").and_then(Value::as_str) == Some(role) {
+            return Ok(mb.get("id").and_then(Value::as_str).map(String::from));
+        }
+    }
+    Ok(None)
+}
+
+pub async fn mailbox_by_id(
+    bridge: &StalwartService,
+    account: &str,
+    mailbox_id: &str,
+) -> Result<Option<Value>, String> {
+    let result = bridge
+        .mail_read("Mailbox/get", json!({ "accountId": account, "ids": [mailbox_id] }))
+        .await?;
+    Ok(result.get("list").and_then(Value::as_array).and_then(|v| v.first()).cloned())
+}
+
+pub async fn create_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    name: &str,
+    role: Option<&str>,
+) -> Result<String, String> {
+    let mut mailbox = json!({ "name": name, "isSubscribed": true });
+    if let Some(role) = role { mailbox["role"] = json!(role); }
+    let result = bridge
+        .mail_write("Mailbox/set", json!({ "accountId": account, "create": { "new": mailbox } }))
+        .await?;
+    reject_set_failures("Mailbox/set", result.clone())?;
+    result.get("created").and_then(|v| v.get("new")).and_then(|v| v.get("id"))
+        .and_then(Value::as_str).map(str::to_string)
+        .ok_or_else(|| "Mailbox/set did not return the created mailbox id".to_string())
+}
+
+pub async fn ensure_role_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    role: &str,
+    name: &str,
+) -> Result<String, String> {
+    if let Some(id) = mailbox_id_for_role(bridge, account, role).await? { return Ok(id); }
+    create_mailbox(bridge, account, name, Some(role)).await
+}
+
+pub async fn rename_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    mailbox_id: &str,
+    name: &str,
+) -> Result<(), String> {
+    let mut update = serde_json::Map::new();
+    update.insert(mailbox_id.to_string(), json!({ "name": name }));
+    let result = bridge.mail_write("Mailbox/set", json!({
+        "accountId": account,
+        "update": update
+    })).await?;
+    reject_set_failures("Mailbox/set", result)
+}
+
+pub async fn destroy_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    mailbox_id: &str,
+) -> Result<(), String> {
+    let result = bridge.mail_write("Mailbox/set", json!({
+        "accountId": account,
+        "destroy": [mailbox_id],
+        "onDestroyRemoveEmails": false
+    })).await?;
+    reject_set_failures("Mailbox/set", result)
+}
+
+/// Permanently remove every message currently in one mailbox. Querying from
+/// position zero after each successful batch avoids anchor invalidation while
+/// the result set shrinks. This is intentionally used only for explicit
+/// destructive operations such as Empty Trash.
+pub async fn empty_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    mailbox_id: &str,
+) -> Result<usize, String> {
+    let mut deleted = 0usize;
+    for _ in 0..10_000 {
+        let result = bridge.mail_read("Email/query", json!({
+            "accountId": account,
+            "filter": { "inMailbox": mailbox_id },
+            "collapseThreads": false,
+            "position": 0,
+            "limit": 100
+        })).await?;
+        let ids = result.get("ids").and_then(Value::as_array).cloned().unwrap_or_default();
+        if ids.is_empty() { return Ok(deleted); }
+        let batch: Vec<String> = ids.iter().filter_map(Value::as_str).map(str::to_string).collect();
+        if batch.is_empty() { return Ok(deleted); }
+        destroy(bridge, account, &batch).await?;
+        deleted += batch.len();
+    }
+    Err("empty mailbox exceeded safety iteration limit".to_string())
 }
 
 /// Full thread (conversation) with every message's bodies and headers.
-pub async fn thread(bridge: &MailBridge, account: &str, thread_id: &str) -> Result<Value, String> {
+pub async fn thread(bridge: &StalwartService, account: &str, thread_id: &str) -> Result<Value, String> {
     let t = bridge
-        .jmap_mail(
+        .mail_read(
             "Thread/get",
             json!({ "accountId": account, "ids": [thread_id] }),
         )
@@ -172,41 +484,394 @@ pub async fn thread(bridge: &MailBridge, account: &str, thread_id: &str) -> Resu
     }))
 }
 
-/// Batch the threads a text search matches, newest first (same shape as
-/// `thread_previews`). Any property but `text` can be added later for
-/// advanced search (WS4.x).
+#[derive(Debug)]
+pub enum SearchError {
+    Invalid(String),
+    Store(String),
+}
+
+impl std::fmt::Display for SearchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) | Self::Store(message) => f.write_str(message),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchTerm {
+    negated: bool,
+    key: Option<String>,
+    value: String,
+}
+
+fn tokenize_search(query: &str) -> Result<Vec<String>, SearchError> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in query.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quoted {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if ch.is_whitespace() && !quoted {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if escaped || quoted {
+        return Err(SearchError::Invalid("Search query contains an unterminated quoted value".into()));
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Ok(tokens)
+}
+
+fn parse_search_terms(query: &str) -> Result<Vec<SearchTerm>, SearchError> {
+    if query.chars().count() > 2048 {
+        return Err(SearchError::Invalid("Search query is too long".into()));
+    }
+    let tokens = tokenize_search(query)?;
+    if tokens.len() > 64 {
+        return Err(SearchError::Invalid("Search query has too many terms".into()));
+    }
+    let mut terms = Vec::new();
+    for token in tokens {
+        if token.chars().count() > 512 {
+            return Err(SearchError::Invalid("A search term is too long".into()));
+        }
+        let (negated, raw) = token
+            .strip_prefix('-')
+            .filter(|rest| !rest.is_empty())
+            .map(|rest| (true, rest))
+            .unwrap_or((false, token.as_str()));
+        let (key, value) = match raw.split_once(':') {
+            Some((candidate, value)) if matches!(candidate.to_ascii_lowercase().as_str(),
+                "from" | "to" | "cc" | "bcc" | "subject" | "body" | "has" | "is" | "in" |
+                "after" | "before" | "newer" | "older" | "newer_than" | "older_than" | "label") =>
+            {
+                (Some(candidate.to_ascii_lowercase()), value)
+            }
+            _ => (None, raw),
+        };
+        if key.is_some() && value.trim().is_empty() {
+            return Err(SearchError::Invalid(format!("Search operator {raw:?} is missing a value")));
+        }
+        terms.push(SearchTerm {
+            negated,
+            key,
+            value: value.trim().to_string(),
+        });
+    }
+    Ok(terms)
+}
+
+fn negate_filter(filter: Value, negated: bool) -> Value {
+    if negated {
+        json!({ "operator": "NOT", "conditions": [filter] })
+    } else {
+        filter
+    }
+}
+
+fn parse_search_date(value: &str, operator: &str, timezone_offset_minutes: i32) -> Result<String, SearchError> {
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        let local_midnight = date.and_hms_opt(0, 0, 0).expect("valid midnight");
+        let dt = Utc.from_utc_datetime(&local_midnight)
+            - Duration::minutes(timezone_offset_minutes as i64);
+        return Ok(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(dt.with_timezone(&Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    }
+    Err(SearchError::Invalid(format!(
+        "{operator}: expects YYYY-MM-DD or an RFC 3339 timestamp"
+    )))
+}
+
+fn parse_relative_duration(value: &str, operator: &str) -> Result<Duration, SearchError> {
+    let split = value
+        .find(|ch: char| !ch.is_ascii_digit())
+        .ok_or_else(|| SearchError::Invalid(format!("{operator}: expects a value such as 7d, 12h, 2w, 3m or 1y")))?;
+    let (amount, unit) = value.split_at(split);
+    let amount: i64 = amount
+        .parse()
+        .map_err(|_| SearchError::Invalid(format!("{operator}: has an invalid duration")))?;
+    if amount <= 0 || amount > 100_000 || unit.len() != 1 {
+        return Err(SearchError::Invalid(format!("{operator}: has an invalid duration")));
+    }
+    let duration = match unit.to_ascii_lowercase().as_str() {
+        "h" => Duration::hours(amount),
+        "d" => Duration::days(amount),
+        "w" => Duration::weeks(amount),
+        // Search durations are intentionally fixed periods rather than calendar
+        // arithmetic, matching the behavior users expect from mail search.
+        "m" => Duration::days(amount.saturating_mul(30)),
+        "y" => Duration::days(amount.saturating_mul(365)),
+        _ => return Err(SearchError::Invalid(format!("{operator}: uses an unsupported duration unit"))),
+    };
+    Ok(duration)
+}
+
+fn role_for_search_scope(value: &str) -> Option<&'static str> {
+    match value.to_ascii_lowercase().as_str() {
+        "inbox" => Some("inbox"),
+        "sent" => Some("sent"),
+        "trash" => Some("trash"),
+        "spam" | "junk" => Some("junk"),
+        "archive" | "archived" => Some("archive"),
+        _ => None,
+    }
+}
+
+async fn resolve_search_mailbox(
+    bridge: &StalwartService,
+    account: &str,
+    value: &str,
+) -> Result<String, SearchError> {
+    if let Some(role) = role_for_search_scope(value) {
+        return mailbox_id_for_role(bridge, account, role)
+            .await
+            .map_err(SearchError::Store)?
+            .ok_or_else(|| SearchError::Invalid(format!("Mailbox {value:?} does not exist")));
+    }
+
+    let roster = mailboxes(bridge, account).await.map_err(SearchError::Store)?;
+    let needle = value.trim().to_lowercase();
+    let mut matches = roster
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|mailbox| mailbox.get("name").and_then(Value::as_str).map(|name| name.to_lowercase() == needle).unwrap_or(false))
+        .filter_map(|mailbox| mailbox.get("id").and_then(Value::as_str).map(str::to_string));
+    let Some(first) = matches.next() else {
+        return Err(SearchError::Invalid(format!("Mailbox {value:?} was not found")));
+    };
+    if matches.next().is_some() {
+        return Err(SearchError::Invalid(format!("Mailbox name {value:?} is ambiguous")));
+    }
+    Ok(first)
+}
+
+async fn compile_search_filter(
+    bridge: &StalwartService,
+    account: &str,
+    query: &str,
+    timezone_offset_minutes: i32,
+) -> Result<Value, SearchError> {
+    let terms = parse_search_terms(query)?;
+    if terms.is_empty() {
+        return Err(SearchError::Invalid("Search query is required".into()));
+    }
+
+    let has_explicit_scope = terms.iter().any(|term| {
+        if term.negated {
+            return false;
+        }
+        let value = term.value.to_ascii_lowercase();
+        match term.key.as_deref() {
+            Some("in") => !matches!(value.as_str(), "unread" | "starred"),
+            Some("is") => matches!(value.as_str(), "sent" | "trash" | "spam" | "junk" | "archive" | "archived"),
+            _ => false,
+        }
+    });
+    let mut conditions = Vec::new();
+
+    // Normal searches intentionally exclude Trash and Spam, matching the
+    // existing advanced-search scope. `in:all`/`in:any` is the explicit escape.
+    if !has_explicit_scope {
+        for role in ["trash", "junk"] {
+            if let Some(id) = mailbox_id_for_role(bridge, account, role).await.map_err(SearchError::Store)? {
+                conditions.push(json!({ "operator": "NOT", "conditions": [{ "inMailbox": id }] }));
+            }
+        }
+    }
+
+    for term in terms {
+        let key = term.key.as_deref();
+        let value = term.value.as_str();
+        let filter = match key {
+            None => json!({ "text": value }),
+            Some("from") => json!({ "from": value }),
+            Some("to") => json!({ "to": value }),
+            Some("cc") => json!({ "cc": value }),
+            Some("bcc") => json!({ "bcc": value }),
+            Some("subject") => json!({ "subject": value }),
+            Some("body") => json!({ "body": value }),
+            Some("has") if value.eq_ignore_ascii_case("attachment") => json!({ "hasAttachment": true }),
+            Some("has") => return Err(SearchError::Invalid(format!("Unsupported has: operator value {value:?}"))),
+            Some("is") => match value.to_ascii_lowercase().as_str() {
+                "unread" => json!({ "notKeyword": "$seen" }),
+                "read" => json!({ "hasKeyword": "$seen" }),
+                "starred" => json!({ "hasKeyword": "$flagged" }),
+                "attachment" => json!({ "hasAttachment": true }),
+                "sent" | "trash" | "spam" | "junk" | "archive" | "archived" => {
+                    let id = resolve_search_mailbox(bridge, account, value).await?;
+                    json!({ "inMailbox": id })
+                }
+                "draft" | "drafts" => return Err(SearchError::Invalid("Drafts are application-owned and are not part of mailbox search".into())),
+                other => return Err(SearchError::Invalid(format!("Unsupported is: operator value {other:?}"))),
+            },
+            Some("in") => match value.to_ascii_lowercase().as_str() {
+                "all" | "any" | "everything" => continue,
+                "unread" => json!({ "notKeyword": "$seen" }),
+                "starred" => json!({ "hasKeyword": "$flagged" }),
+                "draft" | "drafts" => return Err(SearchError::Invalid("Drafts are application-owned and are not part of mailbox search".into())),
+                _ => {
+                    let id = resolve_search_mailbox(bridge, account, value).await?;
+                    json!({ "inMailbox": id })
+                }
+            },
+            Some("after") | Some("newer") => json!({ "after": parse_search_date(value, key.unwrap(), timezone_offset_minutes)? }),
+            Some("before") | Some("older") => json!({ "before": parse_search_date(value, key.unwrap(), timezone_offset_minutes)? }),
+            Some("newer_than") => {
+                let boundary = Utc::now() - parse_relative_duration(value, "newer_than")?;
+                json!({ "after": boundary.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) })
+            }
+            Some("older_than") => {
+                let boundary = Utc::now() - parse_relative_duration(value, "older_than")?;
+                json!({ "before": boundary.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) })
+            }
+            Some("label") => return Err(SearchError::Invalid("label: search is not server-backed yet".into())),
+            Some(other) => return Err(SearchError::Invalid(format!("Unsupported search operator {other:?}"))),
+        };
+        conditions.push(negate_filter(filter, term.negated));
+    }
+
+    match conditions.len() {
+        0 => Ok(json!({})),
+        1 => Ok(conditions.remove(0)),
+        _ => Ok(json!({ "operator": "AND", "conditions": conditions })),
+    }
+}
+
+/// Server-authoritative advanced mail search. The query language is parsed by
+/// CS Mail and compiled to RFC 8621 Email/query filters; result membership,
+/// ordering and total counts therefore come from Stalwart's search index, not
+/// from the browser's currently-loaded mailbox window.
 pub async fn search(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     query: &str,
     limit: usize,
-) -> Result<Value, String> {
-    let args = json!({
+    anchor: Option<&str>,
+    expected_query_state: Option<&str>,
+    sort: &str,
+    timezone_offset_minutes: i32,
+) -> Result<Value, SearchError> {
+    let timezone_offset_minutes = timezone_offset_minutes.clamp(-14 * 60, 14 * 60);
+    let filter = compile_search_filter(bridge, account, query, timezone_offset_minutes).await?;
+    let mut args = json!({
         "accountId": account,
-        "filter": { "text": query },
-        "sort": [{ "property": "receivedAt", "isAscending": false }],
+        "filter": filter,
+        "sort": query_sort(sort),
         "collapseThreads": true,
-        "position": 0,
-        "limit": (limit as i64) + 1
+        "calculateTotal": true,
+        "limit": limit as i64
     });
-    let result = bridge.jmap_mail("Email/query", args).await?;
-    let ids: Vec<Value> = result
-        .get("ids")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let has_more = ids.len() > limit;
-    let ids: Vec<Value> = ids.into_iter().take(limit).collect();
+    if let Some(anchor) = anchor.filter(|value| !value.is_empty()) {
+        args["anchor"] = json!(anchor);
+        args["anchorOffset"] = json!(1);
+    } else {
+        args["position"] = json!(0);
+    }
 
-    let emails = emails_by_id(bridge, account, &ids, LIST_PROPS, false).await?;
-    Ok(json!({ "emails": to_rows(emails), "has_more": has_more }))
+    let result = match bridge.mail_read("Email/query", args.clone()).await {
+        Ok(result) => (result, false),
+        Err(err) if anchor.is_some() && err.to_ascii_lowercase().contains("anchor") => {
+            if let Some(object) = args.as_object_mut() {
+                object.remove("anchor");
+                object.remove("anchorOffset");
+                object.insert("position".into(), json!(0));
+            }
+            (bridge.mail_read("Email/query", args).await.map_err(SearchError::Store)?, true)
+        }
+        Err(err) => return Err(SearchError::Store(err)),
+    };
+    let (result, anchor_reset) = result;
+    let query_state = result.get("queryState").and_then(Value::as_str).unwrap_or("");
+    let reset_required = anchor_reset
+        || expected_query_state
+            .filter(|state| !state.is_empty())
+            .map(|state| state != query_state)
+            .unwrap_or(false);
+    let ids: Vec<Value> = result.get("ids").and_then(Value::as_array).cloned().unwrap_or_default();
+    let position = result.get("position").and_then(Value::as_u64).unwrap_or(0);
+    let total = result.get("total").and_then(Value::as_u64).unwrap_or(position + ids.len() as u64);
+    let has_more = position.saturating_add(ids.len() as u64) < total;
+    let next_anchor = ids.last().and_then(Value::as_str).map(str::to_string);
+    let emails = emails_by_id(bridge, account, &ids, LIST_PROPS, false)
+        .await
+        .map_err(SearchError::Store)?;
+    Ok(json!({
+        "emails": to_rows(emails),
+        "has_more": has_more,
+        "next_anchor": next_anchor,
+        "query_state": query_state,
+        "reset_required": reset_required,
+        "position": position,
+        "total": total
+    }))
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn tokenizer_supports_quoted_operator_values_and_negation() {
+        let terms = parse_search_terms(r#"from:alice@example.com subject:"Quarterly report" -has:attachment plain"#).unwrap();
+        assert_eq!(terms.len(), 4);
+        assert_eq!(terms[0].key.as_deref(), Some("from"));
+        assert_eq!(terms[1].value, "Quarterly report");
+        assert!(terms[2].negated);
+        assert_eq!(terms[3].key, None);
+        let url = parse_search_terms("https://example.com").unwrap();
+        assert_eq!(url[0].key, None);
+        assert_eq!(url[0].value, "https://example.com");
+    }
+
+    #[test]
+    fn tokenizer_rejects_unterminated_quotes() {
+        assert!(matches!(parse_search_terms("subject:\"open"), Err(SearchError::Invalid(_))));
+    }
+
+    #[test]
+    fn date_only_search_uses_client_timezone_offset() {
+        assert_eq!(
+            parse_search_date("2026-09-21", "after", 180).unwrap(),
+            "2026-09-20T21:00:00Z"
+        );
+    }
+
+    #[test]
+    fn relative_search_duration_accepts_mail_style_units() {
+        assert_eq!(parse_relative_duration("7d", "newer_than").unwrap(), Duration::days(7));
+        assert_eq!(parse_relative_duration("2w", "newer_than").unwrap(), Duration::weeks(2));
+        assert!(parse_relative_duration("today", "newer_than").is_err());
+        assert!(parse_relative_duration("999999999d", "newer_than").is_err());
+    }
 }
 
 /// Mark a set of emails read/unread (`$seen`) and/or starred (`$flagged`).
 /// Stalwart 0.16's `Email/set` expects a full `keywords` map, not the RFC 8621
 /// `$is`/`$not` patch, so we merge with the current keywords first.
 pub async fn set_flags(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     email_ids: &[String],
     read: Option<bool>,
@@ -233,7 +898,7 @@ pub async fn set_flags(
         return Ok(());
     }
     let result = bridge
-        .jmap_mail(
+        .mail_write(
             "Email/set",
             json!({ "accountId": account, "update": update }),
         )
@@ -242,13 +907,14 @@ pub async fn set_flags(
 }
 
 /// Move emails into `to`; when the UI knows the current mailbox it passes
-/// `from` so this is a true move. Full replacement map again (Stalwart 0.16
-/// rejects/ignores the `$add`/`$remove` patch).
+/// `from` so this is a true move. We send a full mailbox membership map
+/// rather than relying on patch semantics for this provider operation.
 pub async fn move_emails(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     email_ids: &[String],
     from: Option<&str>,
+    from_by_email: Option<&HashMap<String, String>>,
     to: &str,
 ) -> Result<(), String> {
     if email_ids.is_empty() {
@@ -260,7 +926,11 @@ pub async fn move_emails(
             .as_object()
             .cloned()
             .unwrap_or_else(serde_json::Map::new);
-        if let Some(f) = from {
+        if let Some(f) = from_by_email
+            .and_then(|items| items.get(&id))
+            .map(String::as_str)
+            .or(from)
+        {
             mailboxes.remove(f);
         }
         mailboxes.insert(to.into(), json!(true));
@@ -270,7 +940,7 @@ pub async fn move_emails(
         return Ok(());
     }
     let result = bridge
-        .jmap_mail(
+        .mail_write(
             "Email/set",
             json!({ "accountId": account, "update": update }),
         )
@@ -280,47 +950,118 @@ pub async fn move_emails(
 
 /// Id of the `Sent` folder for an account (from the mailbox roster), so the
 /// send path can file the sender's self-copy exactly where webmail shows it.
-pub async fn sent_mailbox_id(bridge: &MailBridge, account: &str) -> Result<Option<String>, String> {
-    let list = mailboxes(bridge, account).await?;
-    for mb in list.as_array().into_iter().flatten() {
-        if mb.get("role").and_then(Value::as_str) == Some("sent") {
-            return Ok(mb.get("id").and_then(Value::as_str).map(String::from));
-        }
-    }
-    Ok(None)
+pub async fn sent_mailbox_id(bridge: &StalwartService, account: &str) -> Result<Option<String>, String> {
+    mailbox_id_for_role(bridge, account, "sent").await
 }
 
 /// Id of the `Junk` folder, used to class a message as spam even when the
 /// relay stamps no explicit spam header (WS2.5).
-pub async fn junk_mailbox_id(bridge: &MailBridge, account: &str) -> Result<Option<String>, String> {
-    let list = mailboxes(bridge, account).await?;
-    for mb in list.as_array().into_iter().flatten() {
-        if mb.get("role").and_then(Value::as_str) == Some("junk") {
-            return Ok(mb.get("id").and_then(Value::as_str).map(String::from));
-        }
-    }
-    Ok(None)
+pub async fn junk_mailbox_id(bridge: &StalwartService, account: &str) -> Result<Option<String>, String> {
+    mailbox_id_for_role(bridge, account, "junk").await
 }
 
 /// Id of the `Inbox` folder (realtime new-mail poller, WS2.6).
 pub async fn inbox_mailbox_id(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
 ) -> Result<Option<String>, String> {
-    let list = mailboxes(bridge, account).await?;
-    for mb in list.as_array().into_iter().flatten() {
-        if mb.get("role").and_then(Value::as_str) == Some("inbox") {
-            return Ok(mb.get("id").and_then(Value::as_str).map(String::from));
-        }
-    }
-    Ok(None)
+    mailbox_id_for_role(bridge, account, "inbox").await
+}
+
+/// Current JMAP Email/query state for the Inbox query used by realtime. The
+/// state token, rather than a timestamp, lets a multi-instance worker resume
+/// without dropping messages that share the same receivedAt value.
+pub async fn inbox_query_state(
+    bridge: &StalwartService,
+    account: &str,
+) -> Result<Option<String>, String> {
+    let Some(inbox) = inbox_mailbox_id(bridge, account).await? else {
+        return Ok(None);
+    };
+    let result = bridge
+        .mail_read(
+            "Email/query",
+            json!({
+                "accountId": account,
+                "filter": { "inMailbox": inbox },
+                "sort": [{ "property": "receivedAt", "isAscending": false }],
+                "collapseThreads": false,
+                "position": 0,
+                "limit": 1
+            }),
+        )
+        .await?;
+    Ok(result
+        .get("queryState")
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+/// Incremental Inbox membership changes from a prior Email/query state.
+/// `Email/queryChanges` gives us exact added ids and a new resume token, which
+/// is substantially safer than polling `receivedAt > timestamp`.
+pub async fn inbox_query_changes(
+    bridge: &StalwartService,
+    account: &str,
+    since_query_state: &str,
+    max_changes: usize,
+) -> Result<Value, String> {
+    let Some(inbox) = inbox_mailbox_id(bridge, account).await? else {
+        return Ok(json!({
+            "query_state": since_query_state,
+            "has_more_changes": false,
+            "emails": []
+        }));
+    };
+    let result = bridge
+        .mail_read(
+            "Email/queryChanges",
+            json!({
+                "accountId": account,
+                "filter": { "inMailbox": inbox },
+                "sort": [{ "property": "receivedAt", "isAscending": false }],
+                "collapseThreads": false,
+                "sinceQueryState": since_query_state,
+                "maxChanges": max_changes.max(1).min(500) as i64
+            }),
+        )
+        .await?;
+
+    let ids: Vec<Value> = result
+        .get("added")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("id").cloned())
+        .collect();
+    let emails = if ids.is_empty() {
+        Vec::new()
+    } else {
+        emails_by_id(bridge, account, &ids, LIST_PROPS, false).await?
+    };
+
+    let removed = result.get("removed").and_then(Value::as_array).map_or(0, Vec::len);
+    let added = ids.len();
+    Ok(json!({
+        "query_state": result
+            .get("newQueryState")
+            .cloned()
+            .unwrap_or_else(|| json!(since_query_state)),
+        "has_more_changes": result
+            .get("hasMoreChanges")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "changed": added + removed > 0,
+        "removed": removed,
+        "emails": to_rows(emails)
+    }))
 }
 
 /// Inbox messages received after `since` (RFC 3339), newest first, as preview
-/// rows. `since = None` means "give me the newest mail" — the poller uses that
-/// on first sight to establish a watermark without replaying history.
+/// rows. `since = None` means "give me the newest mail" — retained for
+/// compatibility with older diagnostics; realtime now uses query-state deltas.
 pub async fn recent_inbox(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     since: Option<&str>,
     limit: usize,
@@ -333,7 +1074,7 @@ pub async fn recent_inbox(
         filter["after"] = json!(s);
     }
     let result = bridge
-        .jmap_mail(
+        .mail_read(
             "Email/query",
             json!({
                 "accountId": account,
@@ -354,137 +1095,18 @@ pub async fn recent_inbox(
     Ok(Value::Array(to_rows(emails)))
 }
 
-/// Disk usage for one account from Stalwart's management namespace, as
-/// `(used_bytes, quota_bytes)`. Returns `None` if the account has vanished.
-pub async fn account_quota(
-    bridge: &MailBridge,
-    account: &str,
-) -> Result<Option<(u64, u64)>, String> {
-    if !bridge.enabled() {
-        return Ok(None);
-    }
-    let result = bridge
-        .jmap("x:Account/get", json!({ "ids": [account] }))
-        .await?;
-    let Some(item) = result
-        .get("list")
-        .and_then(Value::as_array)
-        .and_then(|a| a.first())
-    else {
-        return Ok(None);
-    };
-    let used = item
-        .get("usedDiskQuota")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let total = item
-        .get("quotas")
-        .and_then(|q| q.get("maxDiskQuota"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    Ok(Some((used, total)))
-}
-
-/// Batch disk usage for many accounts in one `x:Account/get` call, keyed by
-/// Stalwart account id. The admin surface lists N users for one management
-/// round-trip instead of N.
-pub async fn account_quotas(
-    bridge: &MailBridge,
-    accounts: &[String],
-) -> Result<std::collections::HashMap<String, (u64, u64)>, String> {
-    let mut out = std::collections::HashMap::new();
-    if !bridge.enabled() || accounts.is_empty() {
-        return Ok(out);
-    }
-    let result = bridge
-        .jmap("x:Account/get", json!({ "ids": accounts }))
-        .await?;
-    for item in result
-        .get("list")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let Some(id) = item.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        let used = item
-            .get("usedDiskQuota")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let total = item
-            .get("quotas")
-            .and_then(|q| q.get("maxDiskQuota"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        out.insert(id.to_string(), (used, total));
-    }
-    Ok(out)
-}
-
-/// Set an account's mailbox disk quota in Stalwart (WS3.6). Written as the
-/// pointer path Stalwart's patch semantics expect; a no-op update reports the
-/// id as neither created nor updated, which we treat as success.
-pub async fn set_account_quota(
-    bridge: &MailBridge,
-    account: &str,
-    bytes: u64,
-) -> Result<(), String> {
-    if !bridge.enabled() {
-        return Ok(());
-    }
-    let mut update = serde_json::Map::new();
-    update.insert(account.to_string(), json!({ "quotas/maxDiskQuota": bytes }));
-    let result = bridge
-        .jmap("x:Account/set", json!({ "update": update }))
-        .await?;
-    if let Some(reason) = result
-        .get("notUpdated")
-        .and_then(|n| n.get(account))
-        .filter(|v| !v.is_null())
-    {
-        return Err(format!("quota update rejected: {reason}"));
-    }
-    Ok(())
-}
-
-/// Permanently remove an account from Stalwart (WS5.4 erasure). An account
-/// that is already gone counts as success.
-pub async fn destroy_account(bridge: &MailBridge, account: &str) -> Result<(), String> {
-    if !bridge.enabled() {
-        return Ok(());
-    }
-    let result = bridge
-        .jmap("x:Account/set", json!({ "destroy": [account] }))
-        .await?;
-    let destroyed = result
-        .get("destroyed")
-        .and_then(Value::as_array)
-        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(account)));
-    if destroyed {
-        return Ok(());
-    }
-    if let Some(reason) = result.get("notDestroyed").and_then(|n| n.get(account)) {
-        if reason.get("type").and_then(Value::as_str) == Some("notFound") {
-            return Ok(());
-        }
-        return Err(format!("account destroy rejected: {reason}"));
-    }
-    Err(format!("account destroy: unexpected response {result}"))
-}
-
 /// Find the id of the most recent email whose `Message-ID` header equals
 /// `expect` (with brackets), scanning the deepest `scan` emails account-wide.
 /// Returns `None` until it lands — the send path polls this after SMTP,
 /// letting Stalwart's delivery (Inbox or Junk) race with our lookup.
 pub async fn find_by_message_id(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     expect: &str,
     scan: usize,
 ) -> Result<Option<String>, String> {
     let query = bridge
-        .jmap_mail(
+        .mail_read(
             "Email/query",
             json!({
                 "accountId": account,
@@ -503,7 +1125,7 @@ pub async fn find_by_message_id(
         return Ok(None);
     }
     let result = bridge
-        .jmap_mail(
+        .mail_read(
             "Email/get",
             json!({
                 "accountId": account,
@@ -534,7 +1156,7 @@ pub async fn find_by_message_id(
 /// File the sender's self-copy into `sent_mailbox` and mark it read. Full-map
 /// replacement (Stalwart 0.16 semantics) drops whatever Inbox/Junk produced.
 pub async fn move_to_sent(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     email_id: &str,
     sent_mailbox: &str,
@@ -547,7 +1169,7 @@ pub async fn move_to_sent(
         }),
     )]);
     let result = bridge
-        .jmap_mail(
+        .mail_write(
             "Email/set",
             json!({ "accountId": account, "update": update }),
         )
@@ -559,7 +1181,7 @@ pub async fn move_to_sent(
 /// of emails, keyed by email id. Stalwart returns the email as a map entry,
 /// so we pass `properties: [property]` to keep responses small.
 async fn current_map(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     email_ids: &[String],
     property: &str,
@@ -568,7 +1190,7 @@ async fn current_map(
     for chunk in email_ids.chunks(100) {
         let ids: Vec<Value> = chunk.iter().map(|s| json!(s)).collect();
         let result = bridge
-            .jmap_mail(
+            .mail_read(
                 "Email/get",
                 json!({
                     "accountId": account,
@@ -592,7 +1214,7 @@ async fn current_map(
 
 /// Permanently delete emails (hard destroy; trash/soft-delete is a move).
 pub async fn destroy(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     email_ids: &[String],
 ) -> Result<(), String> {
@@ -600,7 +1222,7 @@ pub async fn destroy(
         return Ok(());
     }
     let result = bridge
-        .jmap_mail(
+        .mail_write(
             "Email/set",
             json!({ "accountId": account, "destroy": email_ids }),
         )
@@ -610,12 +1232,12 @@ pub async fn destroy(
 
 /// Resolve a blob (attachment) to its bytes for downloading.
 pub async fn attachment_blob(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     blob_id: &str,
 ) -> Result<Option<Value>, String> {
     let result = bridge
-        .jmap_mail(
+        .mail_read(
             "Blob/get",
             json!({ "accountId": account, "ids": [blob_id] }),
         )
@@ -633,7 +1255,7 @@ pub async fn attachment_blob(
 }
 
 async fn emails_by_id(
-    bridge: &MailBridge,
+    bridge: &StalwartService,
     account: &str,
     ids: &[Value],
     props: &[&str],
@@ -652,7 +1274,7 @@ async fn emails_by_id(
         args.insert("fetchTextBodyValues".into(), json!(true));
         args.insert("fetchHTMLBodyValues".into(), json!(true));
     }
-    let result = bridge.jmap_mail("Email/get", Value::Object(args)).await?;
+    let result = bridge.mail_read("Email/get", Value::Object(args)).await?;
     Ok(result
         .get("list")
         .and_then(Value::as_array)
@@ -682,6 +1304,7 @@ fn to_rows(emails: Vec<Value>) -> Vec<Value> {
                 "has_attachment": e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false),
                 "size": e.get("size").and_then(Value::as_u64).unwrap_or(0),
                 "mailboxes": e.get("mailboxIds"),
+                "keywords": e.get("keywords"),
             })
         })
         .collect()
@@ -719,15 +1342,12 @@ fn body_for(email: &serde_json::Map<String, Value>, body_kind: &str) -> String {
 /// Turn an `Email/set` response into an error if anything was rejected.
 fn reject_set_failures(method: &str, result: Value) -> Result<(), String> {
     for container in ["notCreated", "notUpdated", "notDestroyed"] {
-        if let Some(bad) = result.get(container).and_then(Value::as_array) {
-            if !bad.is_empty() {
-                return Err(format!(
-                    "{method}: {container} on {bad:?} in {}",
-                    result
-                        .get("error")
-                        .map_or_else(|| "response".to_string(), Value::to_string)
-                ));
-            }
+        let Some(bad) = result.get(container) else { continue; };
+        let non_empty = bad.as_object().map(|v| !v.is_empty())
+            .or_else(|| bad.as_array().map(|v| !v.is_empty()))
+            .unwrap_or(false);
+        if non_empty {
+            return Err(format!("{method}: {container}: {bad}"));
         }
     }
     Ok(())
@@ -915,4 +1535,29 @@ mod tests {
         assert_eq!(v["spf"], "none");
         assert_eq!(v["score"], 0.0);
     }
+    #[test]
+    fn virtual_scope_filters_exclude_trash() {
+        let all = query_filter("all", None, Some("trash-id")).unwrap().unwrap();
+        assert_eq!(all["operator"], "NOT");
+        assert_eq!(all["conditions"][0]["inMailbox"], "trash-id");
+
+        let unread = query_filter("unread", None, Some("trash-id")).unwrap().unwrap();
+        assert_eq!(unread["operator"], "AND");
+        assert!(unread["conditions"].as_array().unwrap().iter().any(|v| v.get("notKeyword") == Some(&json!("$seen"))));
+    }
+
+    #[test]
+    fn mailbox_scope_requires_id() {
+        assert!(query_filter("mailbox", None, None).is_err());
+        assert_eq!(query_filter("mailbox", Some("m1"), None).unwrap().unwrap()["inMailbox"], "m1");
+    }
+
+    #[test]
+    fn set_failures_accept_jmap_object_shape() {
+        assert!(reject_set_failures("Mailbox/set", json!({"notDestroyed": {}})).is_ok());
+        assert!(reject_set_failures("Mailbox/set", json!({
+            "notDestroyed": {"m1": {"type": "mailboxHasEmail"}}
+        })).unwrap_err().contains("mailboxHasEmail"));
+    }
+
 }

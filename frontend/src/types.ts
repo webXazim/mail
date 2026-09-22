@@ -58,14 +58,31 @@ export type ReaderThreadItem = {
   messageId?: string
   security?: SecurityVerdicts
 }
+export type DraftAttachment = {
+  id: string
+  filename: string
+  content_type: string
+  size: number
+  sha256_hex?: string
+  status?: string
+  expires_at?: string
+}
 export type Draft = {
   to: string
   cc: string
   bcc: string
   subject: string
   body: string
-  attachments: string[]
+  attachments: DraftAttachment[]
   scheduledAt: string
   from?: { name: string; email: string }
   receiptRequested?: boolean
+  /** Server-authoritative sender identity selected for this compose session. */
+  identityId?: string
+  /** Existing server draft row bound to this compose instance. */
+  serverDraftId?: string
+  /** Stable key making first remote draft creation idempotent. */
+  clientKey?: string
+  /** Stable key for one logical immediate-send attempt. */
+  sendKey?: string
 }

@@ -4,7 +4,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 import { isRemoteMail } from '../services/remote-mail'
 import { profileApi } from '../services/profile'
 
-const onboardedKey = 'harbor-mail:onboarded'
+const onboardedKey = 'cs-mail:onboarded'
 
 type Step = 'hidden' | 'checking' | 'welcome' | 'setup'
 
@@ -94,7 +94,7 @@ export function Onboarding() {
         aria-label="Welcome"
       >
         <header>
-          <p className="eyebrow">Harbor Mail</p>
+          <p className="eyebrow">CS Mail</p>
           <h2>Welcome to your inbox</h2>
           <p>A fast, focused mail client built for getting through your day.</p>
         </header>

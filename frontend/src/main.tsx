@@ -12,6 +12,7 @@ import {
   settingsApi,
 } from './services/settings'
 import { initTooltips } from './lib/tooltips'
+import './services/ws'
 import './styles/tokens.css'
 import './styles.css'
 
@@ -22,6 +23,11 @@ applyAccent(settingsApi.load().accent)
 
 // API-first hydration: replace cached settings with the server copy when signed in.
 void settingsApi.refresh()
+
+window.addEventListener('cs-mail-resource-changed', (incoming) => {
+  const detail = (incoming as CustomEvent<{ payload?: { resource?: string } }>).detail
+  if (detail?.payload?.resource === 'settings') void settingsApi.refresh()
+})
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {

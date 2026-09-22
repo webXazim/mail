@@ -1,4 +1,4 @@
-# cargo-audit configuration for the Harbor backend.
+# cargo-audit configuration for the CS Mail backend.
 #
 # This file is the ONLY place dependency-audit exceptions live. It is reviewed
 # as part of the security gate (docs/LAUNCH.md:192): the audit CI job (now
