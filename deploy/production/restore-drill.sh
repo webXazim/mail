@@ -3,7 +3,11 @@ set -euo pipefail
 ENV_FILE=${1:-/opt/cs-mail/.env.production}
 ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
+[[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
+set -a; source "$ENV_FILE"; set +a
 BACKUP_DIR=${CS_MAIL_BACKUP_DIR:-/opt/backups/cs-mail}
+PGUSER=${POSTGRES_USER:-csmail}
+PGDB=${POSTGRES_DB:-csmail}
 DUMP=${2:-$(ls -1t "$BACKUP_DIR"/cs-mail-*.dump 2>/dev/null | head -1)}
 [[ -n ${DUMP:-} && -f "$DUMP" ]] || { echo "no dump found" >&2; exit 1; }
 BASE=${DUMP%.dump}
@@ -18,17 +22,17 @@ expected=$(grep '^attachments_sha256=' "$MANIFEST" | cut -d= -f2)
 
 cd "$ROOT"
 DB=csmail_restore_drill
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U csmail --if-exists "$DB" >/dev/null
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db createdb -U csmail "$DB"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U "$PGUSER" --if-exists "$DB" >/dev/null
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db createdb -U "$PGUSER" "$DB"
 cleanup() {
   rm -f "${race_log:-}" "${race_second_log:-}" 2>/dev/null || true
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U csmail --if-exists "$DB" >/dev/null 2>&1 || true
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U "$PGUSER" --if-exists "$DB" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-cat "$DUMP" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db pg_restore -U csmail -d "$DB" --no-owner --no-privileges
+cat "$DUMP" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db pg_restore -U "$PGUSER" -d "$DB" --no-owner --no-privileges
 for t in users organizations organization_domains mailboxes mail_send_requests scheduled_sends staged_attachments mailbox_imports mailbox_app_passwords launch_certification_runs; do
-  live=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db psql -U csmail -d csmail -tAc "select count(*) from $t")
-  drill=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db psql -U csmail -d "$DB" -tAc "select count(*) from $t")
+  live=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db psql -U "$PGUSER" -d "$PGDB" -tAc "select count(*) from $t")
+  drill=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db psql -U "$PGUSER" -d "$DB" -tAc "select count(*) from $t")
   [[ ${live//[[:space:]]/} == ${drill//[[:space:]]/} ]] || { echo "row-count mismatch: $t" >&2; exit 1; }
 done
 
@@ -38,7 +42,7 @@ done
 # than creating the same domain for another business.
 db_psql() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
-    psql -U csmail -d "$DB" -v ON_ERROR_STOP=1 "$@"
+    psql -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 "$@"
 }
 race_tag=$(date -u +%s)-$$
 org1=$(db_psql -qAt -c "INSERT INTO organizations(name,slug) VALUES ('Certification race A','cert-race-a-$race_tag') RETURNING id" | tr -d '[:space:]')
@@ -77,5 +81,5 @@ race_second_log=
 echo "domain race drill PASS"
 
 trap - EXIT
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U csmail "$DB"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U "$PGUSER" "$DB"
 echo "restore drill PASS"

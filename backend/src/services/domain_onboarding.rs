@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn parses_required_zone_records() {
         let zone = r#"
-MX example.com. 10 mx.crescentsphere.com.
+MX example.com. 10 smtp.crescentsphere.com.
 TXT example.com. "v=spf1 mx -all"
 TXT 202609._domainkey.example.com. "v=DKIM1; k=rsa; p=abc"
 TXT _dmarc.example.com. "v=DMARC1; p=reject"

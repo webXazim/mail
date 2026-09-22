@@ -7,10 +7,7 @@ COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
 set -a; source "$ENV_FILE"; set +a
-if [[ -f "$STATE/runtime/current.env" ]]; then
-  # shellcheck disable=SC1090
-  source "$STATE/runtime/current.env"
-fi
+if [[ -f "$STATE/runtime/current.env" ]]; then source "$STATE/runtime/current.env"; fi
 export CS_MAIL_API_IMAGE=${CS_MAIL_API_IMAGE:-cs-mail-api:production}
 
 printf 'Release: %s\n' "${CS_MAIL_RELEASE_LABEL:-unknown}"
@@ -21,7 +18,9 @@ printf 'API image: %s\n\n' "$CS_MAIL_API_IMAGE"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps
 printf '\nLoopback API readiness: '
 if curl -fsS "http://127.0.0.1:${CS_MAIL_API_HOST_PORT:-18080}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
+printf 'Local HTTPS vhost readiness: '
+if curl -fsS --resolve "${CS_MAIL_WEB_HOST}:443:127.0.0.1" "${CS_MAIL_PUBLIC_ORIGIN}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
 printf 'Public API readiness: '
-if curl -fsS "${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
+if curl -fsS "${CS_MAIL_PUBLIC_ORIGIN}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
 printf 'Local admin listener: '
-if curl -fsS -H 'Host: localhost' http://127.0.0.1:18081/login >/dev/null; then echo PASS; else echo FAIL; fi
+if curl -fsS -H 'Host: localhost' "http://127.0.0.1:${CS_MAIL_ADMIN_HOST_PORT:-18081}/login" >/dev/null; then echo PASS; else echo FAIL; fi

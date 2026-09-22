@@ -242,7 +242,7 @@ export const seedAudit: AuditEntry[] = [
 ]
 
 export const dnsRecords: { id: keyof DnsStatus; name: string; value: string }[] = [
-  { id: 'mx', name: 'MX', value: 'crescentsphere.com. 300 IN MX 10 mail.crescentsphere.com.' },
+  { id: 'mx', name: 'MX', value: 'crescentsphere.com. 300 IN MX 10 smtp.crescentsphere.com.' },
   { id: 'spf', name: 'SPF', value: 'crescentsphere.com. TXT "v=spf1 include:crescentsphere.com ~all"' },
   {
     id: 'dkim',

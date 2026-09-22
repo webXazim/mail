@@ -8,8 +8,8 @@ STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 ENV_FILE=${1:-$STATE/.env.production}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 NGINX_SOURCE="$ROOT/deploy/production/nginx-mail.crescentsphere.com.conf"
-NGINX_SITE=${CS_MAIL_NGINX_SITE:-/etc/nginx/sites-available/cs-mail.conf}
-NGINX_LINK=${CS_MAIL_NGINX_LINK:-/etc/nginx/sites-enabled/cs-mail.conf}
+NGINX_SITE=/etc/nginx/sites-available/cs-mail.conf
+NGINX_LINK=/etc/nginx/sites-enabled/cs-mail.conf
 LOG_DIR=/var/log/cs-mail
 RUNTIME_DIR="$STATE/runtime"
 
@@ -47,12 +47,13 @@ source "$ENV_FILE"
 set +a
 KEEP_RELEASES=${CS_MAIL_KEEP_RELEASES:-5}
 [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || { echo "CS_MAIL_KEEP_RELEASES must be a positive integer" >&2; exit 1; }
+NGINX_SITE=${CS_MAIL_NGINX_SITE:-$NGINX_SITE}
+NGINX_LINK=${CS_MAIL_NGINX_LINK:-$NGINX_LINK}
 
-# Nginx is intentionally static and loopback-proxies the API on 18080.
-[[ ${CS_MAIL_API_HOST_PORT:-18080} == 18080 ]] || {
-  echo "CS_MAIL_API_HOST_PORT must remain 18080 unless the production Nginx template is changed too" >&2
-  exit 1
-}
+# API and platform-admin sockets remain loopback-only. Public web traffic is
+# handled by this VPS's shared Nginx on the standard 80/443 virtual hosts.
+[[ ${CS_MAIL_API_HOST_PORT:-18080} == 18080 ]] || { echo "CS_MAIL_API_HOST_PORT must remain 18080" >&2; exit 1; }
+[[ ${CS_MAIL_ADMIN_HOST_PORT:-18081} == 18081 ]] || { echo "CS_MAIL_ADMIN_HOST_PORT must remain 18081" >&2; exit 1; }
 
 "$ROOT/deploy/production/verify-release.sh"
 "$ROOT/deploy/production/preflight.sh" "$ENV_FILE"
@@ -187,13 +188,23 @@ fi
 ln -sfn "$WEB_RELEASE_DIR" "$STATE/www/current"
 systemctl reload nginx
 
-echo "[7/8] Running public/private post-deploy health gates..."
+echo "[7/8] Running loopback/local-TLS/public post-deploy health gates..."
 curl -fsS "http://127.0.0.1:${CS_MAIL_API_HOST_PORT:-18080}/api/health/ready" >/dev/null
-curl -fsS "${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}/api/health/ready" >/dev/null
-curl -fsS -H 'Host: localhost' http://127.0.0.1:18081/login >/dev/null
-[[ $(curl -sS -o /dev/null -w '%{http_code}' "${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}/api/admin/overview") == 404 ]]
-[[ $(curl -sS -o /dev/null -w '%{http_code}' "${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}/mail/admin") == 404 ]]
-[[ $(curl -sS -o /dev/null -w '%{http_code}' "${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}/api/metrics") == 404 ]]
+web_host=${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}
+public_origin=${CS_MAIL_PUBLIC_ORIGIN:-https://mail.crescentsphere.com}
+curl -fsS --resolve "$web_host:443:127.0.0.1" "$public_origin/api/health/ready" >/dev/null
+[[ $(curl -sS --resolve "$web_host:443:127.0.0.1" -o /dev/null -w '%{http_code}' "$public_origin/api/admin/overview") == 404 ]]
+[[ $(curl -sS --resolve "$web_host:443:127.0.0.1" -o /dev/null -w '%{http_code}' "$public_origin/mail/admin") == 404 ]]
+[[ $(curl -sS --resolve "$web_host:443:127.0.0.1" -o /dev/null -w '%{http_code}' "$public_origin/api/metrics") == 404 ]]
+curl -fsS -H 'Host: localhost' "http://127.0.0.1:${CS_MAIL_ADMIN_HOST_PORT:-18081}/login" >/dev/null
+if [[ ${CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH:-true} == true ]]; then
+  curl -fsS "$public_origin/api/health/ready" >/dev/null
+  [[ $(curl -sS -o /dev/null -w '%{http_code}' "$public_origin/api/admin/overview") == 404 ]]
+  [[ $(curl -sS -o /dev/null -w '%{http_code}' "$public_origin/mail/admin") == 404 ]]
+  [[ $(curl -sS -o /dev/null -w '%{http_code}' "$public_origin/api/metrics") == 404 ]]
+else
+  echo "Public HTTPS health gate skipped by CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH=false"
+fi
 
 # Persist deployment identity only after every health/security gate passes.
 new_meta="$RUNTIME_DIR/current.env.new"

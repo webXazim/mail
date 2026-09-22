@@ -18,14 +18,18 @@ There is intentionally **no Docker Compose file at the repository root**. This p
 
 ## Production deployment
 
-Production source is expected at `/opt/sites/cs-mail`; secrets/runtime state live outside Git under `/opt/cs-mail`.
+Production source is expected at `/opt/sites/cs-mail`; secrets/runtime state live outside Git under `/opt/cs-mail`. The public web app is a normal shared-Nginx vhost at `https://mail.crescentsphere.com`, while IMAP/SMTP and VPS PTR/rDNS remain on the existing DNS-only `smtp.crescentsphere.com` Stalwart identity.
 
 One-time host preparation after cloning the repository:
 
 ```bash
 sudo /opt/sites/cs-mail/deploy/production/bootstrap-vps.sh
-sudo nano /opt/cs-mail/.env.production
+sudoedit /opt/cs-mail/.env.production
+sudoedit /opt/cs-mail/secrets/alert-webhook-url
+sudo /opt/sites/cs-mail/deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
 ```
+
+See `deploy/production/CREDENTIALS.md` for the small set of operator-supplied Stalwart/TLS/alert values.
 
 Normal deployments from GitHub:
 
@@ -43,7 +47,7 @@ The deploy pipeline:
 5. creates a pre-deploy PostgreSQL + attachment backup when a live stack exists;
 6. starts PostgreSQL and the release-tagged API (SQLx migrations run at API startup);
 7. publishes frontend assets atomically under `/opt/cs-mail/www/current`;
-8. validates/reloads Nginx and verifies loopback/public readiness, private admin access and public admin/metrics blocking;
+8. validates/reloads the shared Nginx vhost and verifies loopback API, local/public HTTPS readiness, private admin access and admin/metrics blocking;
 9. records the deployed Git/source digest under `/opt/cs-mail/runtime/current.env`;
 10. cleans old build cache/release artifacts without touching secrets or persistent data.
 
@@ -64,14 +68,14 @@ Rollback is intentionally explicit because database migrations are forward-only:
 sudo ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
 ```
 
-See `deploy/production/README.md`, `docs/PRODUCTION.md` and `docs/LAUNCH.md`.
+See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/PRODUCTION.md` and `docs/LAUNCH.md`.
 
 ## Platform state
 
 API contract: **v32**  
 Migration head: **0041_full_saas_control_plane.sql**
 
-The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. Public Nginx returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI through an SSH tunnel to `127.0.0.1:18081`.
+The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. The public Nginx vhost returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI only through an SSH tunnel to `127.0.0.1:18081`.
 
 Acceptance testing currently keeps:
 

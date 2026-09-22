@@ -274,7 +274,7 @@ impl Config {
                 }
                 value
             },
-            mail_client_host: env_non_empty_or("CS_MAIL_CLIENT_HOST", "mail.crescentsphere.com"),
+            mail_client_host: env_non_empty_or("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com"),
             mail_client_imap_port: env_or("CS_MAIL_CLIENT_IMAP_PORT", "993").parse().unwrap_or(993),
             mail_client_smtp_port: env_or("CS_MAIL_CLIENT_SMTP_PORT", "587").parse().unwrap_or(587),
             mail_client_max_app_passwords: env_or("CS_MAIL_CLIENT_MAX_APP_PASSWORDS", "5").parse().unwrap_or(5),

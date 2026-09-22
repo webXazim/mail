@@ -24,7 +24,7 @@ manifest="$BACKUP_DIR/cs-mail-$stamp.manifest.txt"
 
 cd "$ROOT"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
-  pg_dump -U csmail -d csmail -Fc > "$dump"
+  pg_dump -U "${POSTGRES_USER:-csmail}" -d "${POSTGRES_DB:-csmail}" -Fc > "$dump"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" run --rm --no-deps -T \
   --entrypoint tar api -C /srv/attachments -czf - . > "$attachments"
 [[ -s "$dump" && -s "$attachments" ]]

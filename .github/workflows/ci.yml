@@ -166,7 +166,7 @@ jobs:
         run: ./deploy/production/verify-release.sh
 
   launch-cert-static:
-    name: Upgrade 36 release certification (static)
+    name: Upgrade 37 release certification (static)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

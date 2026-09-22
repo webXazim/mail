@@ -50,3 +50,6 @@ vite.config.d.ts
 *.dump
 *.tgz
 *.backup
+
+# Infrastructure/application secrets never belong in Git
+secrets/

@@ -1,20 +1,21 @@
 # CS Mail production deployment
 
-This directory is the **only authoritative production deployment path** for `mail.crescentsphere.com`.
+This directory is the only authoritative production deployment path.
 
-## Production topology
+## Topology
 
-- Host Nginx: public 80/443 plus localhost-only Platform Admin on `127.0.0.1:18081`.
-- CS Mail API: Docker, host loopback `127.0.0.1:18080` only.
-- CS Mail PostgreSQL: Docker private network only.
+- Web: `https://mail.crescentsphere.com` -> shared host Nginx 443 -> frontend/API.
+- API: `127.0.0.1:18080` only.
+- Platform Admin: `127.0.0.1:18081` only; SSH tunnel required.
+- Mail: existing shared Stalwart at DNS-only `smtp.crescentsphere.com` on 25/587/993.
+- PostgreSQL: Docker private network only.
 - Prometheus/Alertmanager: loopback only.
-- Stalwart: **existing shared provider**, external Docker network, owns host 25/587/993. Production compose never creates or binds a mail service.
-- Static frontend: immutable release directories under `/opt/cs-mail/www/releases`; Nginx serves the atomic `/opt/cs-mail/www/current` symlink.
-- Secrets/runtime metadata: `/opt/cs-mail`, outside Git.
+- Runtime config: `/opt/cs-mail/.env.production`, outside Git, `root:root 0600`.
 
-## One-time VPS preparation
+The Nginx site is name-based and safely coexists with the VPS's other projects
+on ports 80/443.
 
-Clone your private GitHub repository:
+## First VPS setup
 
 ```bash
 sudo install -d -m 0755 /opt/sites
@@ -23,103 +24,76 @@ cd /opt/sites/cs-mail
 sudo ./deploy/production/bootstrap-vps.sh
 ```
 
-`bootstrap-vps.sh` installs common Ubuntu/Debian host tools, verifies Docker Compose v2, creates production directories and enables the daily CS Mail backup timer. It does **not** install Docker because this VPS already hosts the shared mail stack and Docker ownership should remain deliberate.
-
-Configure `/opt/cs-mail/.env.production` (root:root, `0600`). Identify the existing Stalwart Docker network with `docker network ls` / `docker inspect` and configure dedicated CS Mail management/JMAP credentials. Create the root-only Alertmanager webhook file configured by `CS_MAIL_ALERT_WEBHOOK_FILE`.
-
-TLS for both Nginx HTTPS and Stalwart IMAPS/SMTP must already validate for `mail.crescentsphere.com` before `preflight.sh` will allow a production deploy.
-
-## Deploy from GitHub
-
-Normal production update:
+Then follow `CREDENTIALS.md`. In short:
 
 ```bash
-sudo /opt/sites/cs-mail/deploy/production/deploy-from-git.sh main
+sudoedit /opt/cs-mail/.env.production
+sudoedit /opt/cs-mail/secrets/alert-webhook-url
+sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/deploy-from-git.sh main
 ```
 
-To deploy an explicit immutable Git tag/commit:
+DNS expected:
+
+```text
+mail.crescentsphere.com  A  <VPS IP>  DNS only
+smtp.crescentsphere.com  A  <VPS IP>  DNS only   # existing
+<VPS IP> PTR -> smtp.crescentsphere.com          # existing
+```
+
+Do not point MX/IMAP/SMTP at the web hostname merely because the web UI is named
+`mail`. Stalwart's identity remains `smtp.crescentsphere.com`.
+
+## Normal GitHub -> VPS update
 
 ```bash
-sudo /opt/sites/cs-mail/deploy/production/deploy-from-git.sh <tag-or-commit>
+cd /opt/sites/cs-mail
+sudo ./deploy/production/deploy-from-git.sh main
 ```
 
-`deploy-from-git.sh` refuses local modifications/untracked files, fetches GitHub using `--ff-only` semantics for branches, cleans known generated directories, runs release verification, then delegates to `deploy.sh`.
-
-### What deploy.sh guarantees
-
-- single-deployer lock using `flock`;
-- production env permissions are checked;
-- static release certification and shared-Stalwart preflight must pass;
-- source identity is a deterministic SHA-256 of `git archive HEAD`;
-- frontend lint/typecheck/tests/build happen in a pinned Node 22 Docker image;
-- API Docker build runs rustfmt, blocking Clippy, Rust tests, then compiles from committed `Cargo.lock` using `cargo build --release --locked`;
-- images are tagged by Git/source identity;
-- existing live DB + attachments are backed up **before** a new API can run SQLx migrations;
-- API readiness must pass before frontend/Nginx cutover;
-- frontend publication is an atomic symlink switch outside the Git tree;
-- Nginx must pass `nginx -t` before reload;
-- public health, localhost admin, public-admin blocking and metrics blocking are checked after cutover;
-- successful release metadata is stored in `/opt/cs-mail/runtime/current.env`;
-- previous successful metadata is retained for an explicit rollback;
-- old frontend trees/dangling build cache are pruned while persistent volumes/backups are untouched.
-
-Deployment logs are written to `/var/log/cs-mail/deploy-*.log`.
+The deploy pipeline locks deployment, validates configuration and shared
+Stalwart, builds/tests frontend and backend in Docker, takes a pre-migration
+backup, starts the release-tagged API, atomically publishes frontend assets,
+validates/reloads only the CS Mail Nginx vhost, and runs local/public security
+health gates.
 
 ## Platform Admin
 
-Never expose TCP 18081 publicly. From an operator workstation:
+Never open 18081 in UFW/provider firewall:
 
 ```bash
 ssh -L 18081:127.0.0.1:18081 <user>@<vps>
 ```
 
-Then browse to `http://localhost:18081/mail/admin`.
+Browse to `http://localhost:18081/mail/admin`.
 
-## Backups
+## Backups and rollback
 
-The bootstrap installs `cs-mail-backup.timer`, which runs daily. Backups contain:
-
-- PostgreSQL custom-format dump;
-- CS Mail persistent attachment/MBOX staging volume;
-- manifest with checksums and deployed release identity.
-
-The shared Stalwart provider is intentionally not included. Its backup is a platform-level responsibility because restoring it affects every service using that mail server.
-
-Check the timer:
+`bootstrap-vps.sh` enables `cs-mail-backup.timer`. Shared Stalwart data requires
+its own host/provider backup because it is a platform-wide service.
 
 ```bash
 systemctl status cs-mail-backup.timer
-systemctl list-timers cs-mail-backup.timer
+sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
 ```
 
-Run a restore drill without touching the live database:
+Database migrations are forward-only. Review compatibility before:
 
 ```bash
-sudo /opt/sites/cs-mail/deploy/production/restore-drill.sh /opt/cs-mail/.env.production
+sudo ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
 ```
 
-## Rollback
+## Launch certification
 
-Code/static rollback cannot reverse SQL migrations. Review migration compatibility first, then:
-
-```bash
-sudo /opt/sites/cs-mail/deploy/production/rollback.sh \
-  /opt/cs-mail/.env.production \
-  --acknowledge-forward-migrations
-```
-
-If a deployment failed before being marked successful, rollback uses the preserved last-known-good metadata. After a successful deployment it uses `previous.env`.
-
-## Final public-launch certification
-
-Create `/opt/cs-mail/.env.certification` with disposable cross-tenant/app-password test credentials, root-owned mode `0600`, then run:
+Use disposable certification accounts in `/opt/cs-mail/.env.certification`
+(`root:root 0600`) and run:
 
 ```bash
-sudo /opt/sites/cs-mail/deploy/production/certify-launch.sh \
+sudo ./deploy/production/certify-launch.sh \
   /opt/cs-mail/.env.production \
   /opt/cs-mail/.env.certification
 ```
 
-The wrapper automatically merges the exact deployed source SHA from `/opt/cs-mail/runtime/current.env`; you no longer hand-maintain release hashes in `.env.production`.
-
-A public launch still requires external inbox-placement checks at unrelated providers and the deliberate switch from instant testing activation to payment-gated activation.
+Keep `CS_MAIL_BILLING_INSTANT_ACTIVATION=true` only during acceptance testing.

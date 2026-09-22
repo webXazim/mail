@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CS Mail Upgrade 36 production launch certification.
+"""CS Mail Upgrade 38 production launch certification.
 
 Runs static and live production gates without logging credentials. A live PASS
 requires real DNS/TLS, public API readiness, anti-relay, two-tenant IDOR probes,
@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Any, Callable
@@ -86,7 +87,7 @@ def run_cmd(cmd: list[str], *, cwd: Path | None = None, timeout: int = 120, inpu
 def json_request(url: str, *, method: str = "GET", token: str | None = None,
                  headers: dict[str, str] | None = None, body: Any = None,
                  timeout: float = 15.0) -> tuple[int, dict[str, Any], dict[str, str]]:
-    request_headers = {"Accept": "application/json", "User-Agent": "cs-mail-launch-certifier/36"}
+    request_headers = {"Accept": "application/json", "User-Agent": "cs-mail-launch-certifier/38"}
     if token:
         request_headers["Authorization"] = f"Bearer {token}"
     if headers:
@@ -135,6 +136,11 @@ def check_static(root: Path) -> str:
         root / "deploy/production/deploy-from-git.sh",
         root / "deploy/production/bootstrap-vps.sh",
         root / "deploy/production/verify-release.sh",
+        root / "deploy/production/CONFIGURATION.md",
+                root / "deploy/production/validate-env.py",
+        root / "deploy/production/setup-web-tls.sh",
+        root / "deploy/production/nginx-mail.crescentsphere.com.bootstrap.conf",
+        root / "deploy/production/CREDENTIALS.md",
         root / "frontend/Dockerfile.production",
     ]
     missing = [str(p.relative_to(root)) for p in required if not p.exists()]
@@ -171,6 +177,21 @@ def check_static(root: Path) -> str:
     nginx = (root / "deploy/production/nginx-mail.crescentsphere.com.conf").read_text()
     if "root /opt/cs-mail/www/current;" not in nginx:
         raise GateError("production Nginx must serve the atomically switched external frontend release")
+    if not re.search(r"listen\s+443\s+ssl;", nginx) or "server_name mail.crescentsphere.com;" not in nginx:
+        raise GateError("CS Mail web vhost must serve mail.crescentsphere.com directly on HTTPS :443")
+    if not re.search(r"listen\s+80;", nginx) or "return 301 https://$host$request_uri;" not in nginx:
+        raise GateError("CS Mail web vhost must own HTTP :80 for ACME and HTTPS redirect")
+    if "ssl_certificate /etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem;" not in nginx:
+        raise GateError("CS Mail web vhost must use the managed Let's Encrypt certificate")
+    if "listen 127.0.0.1:18081" not in nginx:
+        raise GateError("Platform Admin must remain bound to localhost :18081")
+    if "real_ip_header CF-Connecting-IP" in nginx or "listen 127.0.0.1:18082" in nginx:
+        raise GateError("legacy Cloudflare Tunnel origin directives must not remain")
+    env_example = (root / "deploy/production/.env.production.example").read_text()
+    if "CS_MAIL_CLIENT_HOST=smtp.crescentsphere.com" not in env_example or "CS_MAIL_EXPECTED_PTR=smtp.crescentsphere.com" not in env_example:
+        raise GateError("production env contract must use the existing smtp.crescentsphere.com mail/PTR identity")
+    if "CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH=true" not in env_example or "CS_MAIL_LETSENCRYPT_EMAIL=" not in env_example:
+        raise GateError("production env contract must include direct HTTPS/TLS operational settings")
     if not re.search(r"location = /api/metrics\s*\{[^}]*return 404;", nginx):
         raise GateError("production nginx must block public /api/metrics")
     if "Content-Security-Policy" not in nginx or "frame-ancestors 'none'" not in nginx:
@@ -310,7 +331,7 @@ def check_static(root: Path) -> str:
         raise GateError("localhost-only admin reverse proxy is missing")
     if "CS_MAIL_BILLING_INSTANT_ACTIVATION:-true" not in compose:
         raise GateError("acceptance-test release must keep instant billing activation enabled")
-    return "contract v32, migration 0041, full localhost SaaS control plane, deterministic Docker builds, atomic frontend publishing, release-tagged API deployment, pre-migration backup, GitHub-to-VPS deployment, payment-bound subscriptions and instant test activation are coherent"
+    return "contract v32, migration 0041, direct shared-Nginx HTTPS web vhost, smtp.crescentsphere.com mail/PTR identity, secure centralized production configuration, full localhost SaaS control plane, deterministic Docker builds, atomic frontend publishing, release-tagged API deployment, pre-migration backup, GitHub-to-VPS deployment, payment-bound subscriptions and instant test activation are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:
@@ -375,7 +396,7 @@ def check_public_admin_blocked(env: dict[str, str]) -> str:
     api_status, _, _ = json_request(origin + "/api/admin/overview")
     if api_status != 404:
         raise GateError(f"public /api/admin/* must return 404, got {api_status}")
-    req = urllib.request.Request(origin + "/mail/admin", headers={"User-Agent": "cs-mail-launch-certifier/36"})
+    req = urllib.request.Request(origin + "/mail/admin", headers={"User-Agent": "cs-mail-launch-certifier/38"})
     try:
         urllib.request.urlopen(req, timeout=15)
         status = 200
@@ -388,7 +409,7 @@ def check_public_admin_blocked(env: dict[str, str]) -> str:
 
 def check_https_headers(env: dict[str, str]) -> str:
     origin = env.get("CS_MAIL_PUBLIC_ORIGIN", DEFAULT_PUBLIC_ORIGIN).rstrip("/")
-    req = urllib.request.Request(origin + "/", headers={"User-Agent": "cs-mail-launch-certifier/36"})
+    req = urllib.request.Request(origin + "/", headers={"User-Agent": "cs-mail-launch-certifier/38"})
     with urllib.request.urlopen(req, timeout=15) as res:
         headers = {k.lower(): v for k, v in res.headers.items()}
     required = {
@@ -428,16 +449,23 @@ def tls_certificate(host: str, port: int, *, smtp_starttls: bool = False) -> tup
 
 
 def check_tls(env: dict[str, str]) -> str:
-    host = env.get("CS_MAIL_CLIENT_HOST", "mail.crescentsphere.com")
-    https_port = 443
-    _, https_days = tls_certificate(host, https_port)
-    _, imap_days = tls_certificate(host, int(env.get("CS_MAIL_CLIENT_IMAP_PORT", "993")))
-    _, smtp_days = tls_certificate(host, int(env.get("CS_MAIL_CLIENT_SMTP_PORT", "587")), smtp_starttls=True)
-    return f"HTTPS/IMAPS/SMTP STARTTLS certificates verify (min {min(https_days, imap_days, smtp_days)} days remaining)"
+    mail_host = env.get("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com")
+    public_origin = env.get("CS_MAIL_PUBLIC_ORIGIN", DEFAULT_PUBLIC_ORIGIN)
+    parsed = urllib.parse.urlparse(public_origin)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise GateError("CS_MAIL_PUBLIC_ORIGIN must be a valid HTTPS URL")
+    web_port = parsed.port or 443
+    _, web_days = tls_certificate(parsed.hostname, web_port)
+    _, imap_days = tls_certificate(mail_host, int(env.get("CS_MAIL_CLIENT_IMAP_PORT", "993")))
+    _, smtp_days = tls_certificate(mail_host, int(env.get("CS_MAIL_CLIENT_SMTP_PORT", "587")), smtp_starttls=True)
+    return (
+        f"Direct web HTTPS and IMAPS/SMTP STARTTLS certificates verify "
+        f"(min {min(web_days, imap_days, smtp_days)} days remaining)"
+    )
 
 
 def check_dns(env: dict[str, str]) -> str:
-    host = env.get("CS_MAIL_CLIENT_HOST", "mail.crescentsphere.com").rstrip(".")
+    host = env.get("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com").rstrip(".")
     domain = env.get("CS_MAIL_CERT_DOMAIN", env.get("CS_MAIL_MAIL_DEFAULT_DOMAIN", "crescentsphere.com")).rstrip(".")
     selector = env["CS_MAIL_DKIM_SELECTOR"].strip()
     addresses = dig(host, "A")
@@ -469,7 +497,7 @@ def check_dns(env: dict[str, str]) -> str:
 
 
 def check_no_open_relay(env: dict[str, str]) -> str:
-    host = env.get("CS_MAIL_CLIENT_HOST", "mail.crescentsphere.com")
+    host = env.get("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com")
     port = int(env.get("CS_MAIL_CLIENT_SMTP_PORT", "587"))
     context = ssl.create_default_context()
     with smtplib.SMTP(host, port, timeout=15) as client:
@@ -550,7 +578,7 @@ def check_tenant_isolation(env: dict[str, str]) -> str:
 
 
 def check_protocol_roundtrip(env: dict[str, str]) -> str:
-    host = env.get("CS_MAIL_CLIENT_HOST", "mail.crescentsphere.com")
+    host = env.get("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com")
     imap_port = int(env.get("CS_MAIL_CLIENT_IMAP_PORT", "993"))
     smtp_port = int(env.get("CS_MAIL_CLIENT_SMTP_PORT", "587"))
     a_user, a_password, b_user, b_password = require_env(
@@ -578,7 +606,7 @@ def check_protocol_roundtrip(env: dict[str, str]) -> str:
     msg["To"] = b_user
     msg["Subject"] = marker
     msg["Message-ID"] = f"<{marker}@{a_user.split('@',1)[-1]}>"
-    msg.set_content(f"CS Mail Upgrade 36 production certification marker: {marker}")
+    msg.set_content(f"CS Mail Upgrade 38 production certification marker: {marker}")
     with smtplib.SMTP(host, smtp_port, timeout=20) as smtp:
         smtp.ehlo()
         smtp.starttls(context=context)
@@ -647,7 +675,7 @@ def record_ledger(root: Path, env_file: Path, env: dict[str, str], report: Path,
     compose = root / "deploy/production/docker-compose.yml"
     report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
     release_hash = env["CS_MAIL_RELEASE_SHA256"].lower()
-    label = env.get("CS_MAIL_RELEASE_LABEL", "cs-mail-upgrade-30-public-launch-final-hardening")
+    label = env.get("CS_MAIL_RELEASE_LABEL", "cs-mail-upgrade-38-direct-nginx-secure-env")
     status = "passed" if passed else "failed"
     sql = r"""
 INSERT INTO launch_certification_runs(
@@ -660,7 +688,7 @@ INSERT INTO launch_certification_runs(
 """
     cmd = [
         "docker", "compose", "--env-file", str(env_file), "-f", str(compose),
-        "exec", "-T", "db", "psql", "-U", "csmail", "-d", "csmail", "-v", "ON_ERROR_STOP=1",
+        "exec", "-T", "db", "psql", "-U", env.get("POSTGRES_USER", "csmail"), "-d", env.get("POSTGRES_DB", "csmail"), "-v", "ON_ERROR_STOP=1",
         "-v", f"release_label={label}", "-v", f"release_sha256={release_hash}", "-v", f"status={status}",
         "-v", f"report_sha256={report_hash}", "-v", f"report_path={report}",
         "-v", f"mandatory_passed={summary['mandatory_passed']}",
