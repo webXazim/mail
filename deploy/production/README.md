@@ -55,8 +55,8 @@ sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Complete ../edge/README.md first: DNS-01 certificate and edge cutover.
-sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/deploy-from-git.sh main
+sh manage preflight
+sh manage deploy
 ```
 
 DNS expected:
@@ -74,8 +74,13 @@ Do not point MX/IMAP/SMTP at the web hostname merely because the web UI is named
 
 ```bash
 cd /opt/sites/cs-mail
-sudo ./deploy/production/deploy-from-git.sh main
+sh manage deploy
 ```
+
+`sh manage deploy` invokes the same `deploy-from-git.sh` pipeline and requests
+sudo when needed. `sh manage status`, `sh manage preflight`, and
+`sh manage help` provide the other common commands. The full scripts remain
+available for specialized operations.
 
 The deploy pipeline locks deployment, validates configuration and shared
 Stalwart, builds/tests frontend and backend in Docker, takes a pre-migration

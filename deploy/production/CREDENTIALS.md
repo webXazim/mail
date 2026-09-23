@@ -170,9 +170,9 @@ sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Follow deploy/edge/README.md for the DNS-01 certificate and edge cutover.
-sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/deploy-from-git.sh main
-sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
+sh manage preflight
+sh manage deploy
+sh manage status
 ```
 
 Platform Admin stays private. From your workstation:

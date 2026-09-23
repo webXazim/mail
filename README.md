@@ -34,9 +34,15 @@ See `deploy/production/CREDENTIALS.md` for the small set of operator-supplied St
 Normal deployments from GitHub:
 
 ```bash
-cd /opt/sites/cs-mail
-sudo ./deploy/production/deploy-from-git.sh main
+cd /srv/apps/mail
+sh manage deploy
 ```
+
+`sh manage deploy` runs the existing guarded Git pull, build, migration, backup,
+and health pipeline. It requests sudo when needed. Use `sh manage status` and
+`sh manage preflight` for operational checks; `sh manage help` lists the other
+short commands. The production environment remains at
+`/opt/cs-mail/.env.production`.
 
 The deploy pipeline:
 

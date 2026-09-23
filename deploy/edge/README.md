@@ -152,9 +152,9 @@ until this deployment completes.
 
 ```bash
 cd /opt/sites/cs-mail
-sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/deploy-from-git.sh main
-sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
+sh manage preflight
+sh manage deploy
+sh manage status
 curl --noproxy '*' --resolve mail.crescentsphere.com:443:127.0.0.1 \
   -fsS https://mail.crescentsphere.com/api/health/ready
 ```

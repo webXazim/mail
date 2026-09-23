@@ -1,0 +1,69 @@
+#!/bin/sh
+set -eu
+
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+CS_MAIL_ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+CS_MAIL_ENV_FILE=${CS_MAIL_ENV_FILE:-/opt/cs-mail/.env.production}
+export CS_MAIL_ROOT CS_MAIL_ENV_FILE
+
+usage() {
+    cat <<'EOF'
+Usage: sh manage COMMAND [ARGUMENT]
+
+Production commands (run from the CS Mail checkout):
+  deploy [REF]          Pull and deploy REF from origin (default: main)
+  deploy-current        Deploy the checked-out commit without pulling
+  preflight             Validate production environment and dependencies
+  status                Show release, containers, and health checks
+  backup                Back up the database and attachments
+  restore-drill         Verify and restore the latest backup in a test database
+  show-config           Show production configuration with secrets redacted
+  bootstrap-admin EMAIL Promote the first verified CS Mail account
+
+The scripts use /opt/cs-mail/.env.production by default and require root.
+Set CS_MAIL_ENV_FILE to use a different production environment file.
+EOF
+}
+
+run_root() {
+    root_resolved=$(CDPATH= cd -- "$CS_MAIL_ROOT" && pwd -P) || {
+        echo "CS_MAIL_ROOT is missing: $CS_MAIL_ROOT" >&2
+        exit 1
+    }
+    if [ "$root_resolved" != "$PROJECT_ROOT" ]; then
+        echo "CS_MAIL_ROOT points to a different checkout: $CS_MAIL_ROOT" >&2
+        exit 1
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo env CS_MAIL_ROOT="$CS_MAIL_ROOT" CS_MAIL_ENV_FILE="$CS_MAIL_ENV_FILE" "$@"
+    fi
+}
+
+command=${1:-help}
+case "$command" in
+    help|-h|--help)
+        usage
+        ;;
+    deploy)
+        [ "$#" -le 2 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/deploy-from-git.sh" "${2:-main}"
+        ;;
+    deploy-current)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/deploy.sh" "$CS_MAIL_ENV_FILE"
+        ;;
+    preflight|status|backup|restore-drill|show-config)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/$command.sh" "$CS_MAIL_ENV_FILE"
+        ;;
+    bootstrap-admin)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/bootstrap-first-admin.sh" "$2"
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
