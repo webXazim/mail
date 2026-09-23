@@ -402,8 +402,9 @@ impl StalwartService {
     /// service user's login on its own. Resolve the target from its provider
     /// account id so mail operations never authenticate into the wrong inbox.
     async fn impersonation_login(&self, account: &str) -> Result<String, StalwartError> {
-        let result = self
-            .management_read("x:Account/get", json!({ "ids": [account] }))
+        // Management reads use jmap_call too. Box this nested future to break
+        // the async call-size cycle through jmap_call -> impersonation_login.
+        let result = Box::pin(self.management_read("x:Account/get", json!({ "ids": [account] })))
             .await?;
         let item = result
             .get("list")
@@ -432,7 +433,7 @@ impl StalwartService {
                     operation: "mail impersonation".to_string(),
                     message: "target account has no domain id".to_string(),
                 })?;
-            let domain = self.management_read("x:Domain/get", json!({ "ids": [domain_id] })).await?;
+            let domain = Box::pin(self.management_read("x:Domain/get", json!({ "ids": [domain_id] }))).await?;
             let name = domain.get("list").and_then(Value::as_array)
                 .and_then(|items| items.first())
                 .and_then(|item| item.get("name"))

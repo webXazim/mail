@@ -17,6 +17,9 @@ done
 for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py; do
   [[ -x "$ROOT/deploy/production/$script" ]] || fail "production script is missing/not executable: $script"
 done
+for edge_file in .env.example docker-compose.yml haproxy.cfg nginx-mail.conf reload-on-renew.sh README.md; do
+  [[ -f "$ROOT/deploy/edge/$edge_file" ]] || fail "independent platform edge file is missing: $edge_file"
+done
 ok "production deployment scripts are present and executable"
 
 [[ -f "$ROOT/deploy/production/CONFIGURATION.md" ]] || fail "production configuration guide is missing"

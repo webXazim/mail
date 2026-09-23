@@ -50,7 +50,7 @@ KEEP_RELEASES=${CS_MAIL_KEEP_RELEASES:-5}
 NGINX_SITE=${CS_MAIL_NGINX_SITE:-$NGINX_SITE}
 NGINX_LINK=${CS_MAIL_NGINX_LINK:-$NGINX_LINK}
 WEB_PROXY_MODE=${CS_MAIL_WEB_PROXY_MODE:-host}
-case "$WEB_PROXY_MODE" in host|messenger) ;; *) echo "CS_MAIL_WEB_PROXY_MODE must be host or messenger" >&2; exit 1 ;; esac
+case "$WEB_PROXY_MODE" in host|messenger|edge) ;; *) echo "CS_MAIL_WEB_PROXY_MODE must be host, messenger, or edge" >&2; exit 1 ;; esac
 
 # API and platform-admin sockets remain loopback-only. Public web traffic is
 # handled by this VPS's shared Nginx on the standard 80/443 virtual hosts.
@@ -168,7 +168,7 @@ if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then
   echo "$STATE/www/current exists but is not a symlink; refusing unsafe frontend cutover" >&2
   exit 1
 fi
-if [[ "$WEB_PROXY_MODE" == messenger ]]; then
+if [[ "$WEB_PROXY_MODE" == messenger || "$WEB_PROXY_MODE" == edge ]]; then
   ln -sfn "$WEB_RELEASE_DIR" "$STATE/www/current"
   docker compose --profile shared_proxy --env-file "$ENV_FILE" -f "$COMPOSE" up -d --no-build web web_admin
   docker exec "$(docker compose --profile shared_proxy --env-file "$ENV_FILE" -f "$COMPOSE" ps -q web)" nginx -t

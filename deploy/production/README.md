@@ -14,7 +14,11 @@ For the current shared VPS, start with `QUICKSTART.md`.
 - Runtime config: `/opt/cs-mail/.env.production`, outside Git, `root:root 0600`.
 
 The active VPS proxy is `cs-messenger-nginx-1`. Follow `SHARED_PROXY.md` for
-the first deployment. The host-Nginx TLS script is for a different topology.
+the first deployment, then `../edge/README.md` to move public 80/443 into an
+independent platform edge. CS Mail's application-owned tenancy uses the
+organization and mailbox schema; it does not require Stalwart Enterprise
+tenants. Complete `GO_LIVE.md` before accepting other businesses. The
+host-Nginx TLS script is for a different topology.
 
 ## First VPS setup
 

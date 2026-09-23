@@ -1,0 +1,64 @@
+name: cs-platform-edge
+
+services:
+  edge:
+    image: haproxy:3.2.23-alpine
+    restart: unless-stopped
+    ports:
+      - "${CS_EDGE_HTTP_BIND:-127.0.0.1:18082}:80"
+      - "${CS_EDGE_HTTPS_BIND:-127.0.0.1:18443}:443"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      messenger: {}
+      edge_private:
+        ipv4_address: 172.29.41.10
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    read_only: true
+    mem_limit: 128m
+    cpus: "0.35"
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mail_tls:
+    image: nginx:1.30.4-alpine
+    restart: unless-stopped
+    volumes:
+      - ${CS_EDGE_MAIL_CONFIG:-./nginx-mail.conf}:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/letsencrypt:/var/www/letsencrypt:ro
+    networks:
+      messenger: {}
+      edge_private:
+        ipv4_address: 172.29.41.11
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=101,gid=101,mode=700
+      - /var/run:rw,noexec,nosuid,size=1m,uid=0,gid=0,mode=700
+    mem_limit: 128m
+    cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/healthz | grep -q '^ok$'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  messenger:
+    external: true
+    name: cs-messenger_messenger
+  edge_private:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.41.0/24
+          gateway: 172.29.41.1

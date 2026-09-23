@@ -35,7 +35,7 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0041_full_saas_control_plane.sql"
+EXPECTED_MIGRATION = "0042_launch_safety_defaults.sql"
 DEFAULT_PUBLIC_ORIGIN = "https://mail.crescentsphere.com"
 
 
@@ -232,7 +232,7 @@ def check_static(root: Path) -> str:
         raise GateError("platform-admin lifecycle/history migration is incomplete")
     if "Migrated existing subscription" not in lifecycle_migration or "assignment_source IN ('bootstrap'" not in lifecycle_migration:
         raise GateError("legacy/bootstrap subscriptions must receive operator-visible lifecycle history")
-    migration = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    migration = (root / "backend/migrations/0041_full_saas_control_plane.sql").read_text()
     if "CREATE TABLE IF NOT EXISTS platform_controls" not in migration or "mailbox_provisioning_enabled" not in migration:
         raise GateError("database-backed SaaS runtime controls migration is incomplete")
     if "status_reason" not in migration or "status_changed_by" not in migration or "status_changed_at" not in migration:
@@ -346,7 +346,10 @@ def check_static(root: Path) -> str:
         raise GateError("localhost-only admin reverse proxy is missing")
     if "CS_MAIL_BILLING_INSTANT_ACTIVATION:-false" not in compose:
         raise GateError("production billing must default to payment approval")
-    return "contract v32, migration 0041, shared Messenger Nginx HTTPS edge, smtp.crescentsphere.com mail/PTR identity, secure centralized production configuration, localhost SaaS control plane, deterministic Docker builds, atomic frontend publishing, release-tagged API deployment, pre-migration backup, GitHub-to-VPS deployment, and payment approval by default are coherent"
+    safety = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    if "public_signup_enabled=FALSE" not in safety or "outbound_sending_enabled=FALSE" not in safety:
+        raise GateError("production launch controls must default closed")
+    return "contract v32, migration 0042, independent edge option, smtp.crescentsphere.com mail/PTR identity, private control plane, deterministic Docker builds, atomic frontend publishing, pre-migration backup, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

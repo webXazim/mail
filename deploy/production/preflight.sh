@@ -28,7 +28,7 @@ set -a; source "$ENV_FILE"; set +a
 case ${CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH:-true} in true|false) ;; *) fail "CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH must be true or false" ;; esac
 case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} in true|false) ;; *) fail "CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false" ;; esac
 proxy_mode=${CS_MAIL_WEB_PROXY_MODE:-host}
-case "$proxy_mode" in host|messenger) ;; *) fail "CS_MAIL_WEB_PROXY_MODE must be host or messenger" ;; esac
+case "$proxy_mode" in host|messenger|edge) ;; *) fail "CS_MAIL_WEB_PROXY_MODE must be host, messenger, or edge" ;; esac
 [[ ${CS_MAIL_CLIENT_HOST:-smtp.crescentsphere.com} == smtp.crescentsphere.com ]] || fail "CS_MAIL_CLIENT_HOST must remain smtp.crescentsphere.com"
 [[ ${CS_MAIL_EXPECTED_PTR:-smtp.crescentsphere.com} == smtp.crescentsphere.com ]] || fail "CS_MAIL_EXPECTED_PTR must remain smtp.crescentsphere.com"
 [[ ${CS_MAIL_CLIENT_HOST} != ${CS_MAIL_WEB_HOST} ]] || fail "web and mail protocol hostnames must be different"
@@ -36,15 +36,21 @@ case "$proxy_mode" in host|messenger) ;; *) fail "CS_MAIL_WEB_PROXY_MODE must be
 [[ ${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem} == /etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem ]] || fail "CS_MAIL_WEB_TLS_KEY must use the managed mail.crescentsphere.com Let's Encrypt path"
 [[ -n ${CS_MAIL_SHARED_PROVIDER_NETWORK:-} ]] || fail "shared provider Docker network is not configured"
 docker network inspect "$CS_MAIL_SHARED_PROVIDER_NETWORK" >/dev/null 2>&1 || fail "Docker network $CS_MAIL_SHARED_PROVIDER_NETWORK does not exist"
-if [[ "$proxy_mode" == messenger ]]; then
+if [[ "$proxy_mode" == messenger || "$proxy_mode" == edge ]]; then
   web_network=${CS_MAIL_SHARED_WEB_NETWORK:-cs-messenger_messenger}
   docker network inspect "$web_network" >/dev/null 2>&1 || fail "Docker network $web_network does not exist"
   [[ ${CS_MAIL_TRUSTED_PROXY_IPS:-} == '172.29.40.10,172.29.40.11' ]] || fail "shared proxy mode requires only the two fixed CS Mail web proxy IPs"
   [[ ${CS_MAIL_BACKEND_SUBNET:-} == '172.29.40.0/24' ]] || fail "shared proxy mode requires the reserved backend subnet"
   edge_container=${CS_MAIL_SHARED_EDGE_CONTAINER:-cs-messenger-nginx-1}
   docker inspect "$edge_container" >/dev/null 2>&1 || fail "shared edge container $edge_container is missing"
-  docker exec "$edge_container" nginx -t >/dev/null 2>&1 || fail "shared edge Nginx configuration is invalid"
-  docker exec "$edge_container" nginx -T 2>&1 | grep 'server_name mail.crescentsphere.com;' >/dev/null || fail "shared edge has no CS Mail vhost"
+  if [[ "$proxy_mode" == messenger ]]; then
+    docker exec "$edge_container" nginx -t >/dev/null 2>&1 || fail "shared edge Nginx configuration is invalid"
+    docker exec "$edge_container" nginx -T 2>&1 | grep 'server_name mail.crescentsphere.com;' >/dev/null || fail "shared edge has no CS Mail vhost"
+  else
+    [[ "$edge_container" == cs-platform-edge-edge-1 ]] || fail "edge mode requires CS_MAIL_SHARED_EDGE_CONTAINER=cs-platform-edge-edge-1"
+    docker exec "$edge_container" haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg >/dev/null 2>&1 || fail "platform edge configuration is invalid"
+    docker exec cs-platform-edge-mail_tls-1 nginx -t >/dev/null 2>&1 || fail "CS Mail TLS gateway configuration is invalid"
+  fi
 fi
 [[ ${CS_MAIL_SMTP_HOST:-} == smtp.crescentsphere.com ]] || fail "private SMTP must use the Stalwart TLS certificate name"
 [[ ${CS_MAIL_SMTP_PORT:-} == 465 ]] || fail "private SMTP must use authenticated implicit TLS on port 465"
@@ -91,7 +97,7 @@ key=${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey
 [[ -s "$cert" && -s "$key" ]] || fail "web TLS certificate is missing; follow deploy/production/SHARED_PROXY.md"
 openssl x509 -in "$cert" -noout -checkend 604800 >/dev/null || fail "web TLS certificate expires within 7 days"
 openssl x509 -in "$cert" -noout -checkhost "${CS_MAIL_WEB_HOST}" >/dev/null || fail "web TLS certificate does not cover ${CS_MAIL_WEB_HOST}"
-if [[ "$proxy_mode" == messenger ]]; then
+if [[ "$proxy_mode" == messenger || "$proxy_mode" == edge ]]; then
   curl --noproxy '*' --resolve "${CS_MAIL_WEB_HOST}:443:127.0.0.1" \
     -sS -o /dev/null "https://${CS_MAIL_WEB_HOST}/" \
     || fail "shared edge web certificate is not publicly trusted or the vhost is unreachable"
