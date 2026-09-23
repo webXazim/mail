@@ -13,7 +13,8 @@ services:
     networks:
       - backend
     security_opt: ["no-new-privileges:true"]
-    cap_drop: ["ALL"]
+    # The official Postgres entrypoint must chown/chmod a new data volume and
+    # switch from root to the postgres user before starting the server.
     mem_limit: ${CS_MAIL_DB_MEMORY_LIMIT:-1g}
     cpus: ${CS_MAIL_DB_CPU_LIMIT:-1.0}
     healthcheck:

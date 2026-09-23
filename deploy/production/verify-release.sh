@@ -58,6 +58,10 @@ ok "no obvious production secret/key files are present"
 if grep -Eq '^[[:space:]]{2}(mail|stalwart):[[:space:]]*$' "$ROOT/deploy/production/docker-compose.yml"; then
   fail "production compose must not define a mail/Stalwart service"
 fi
+db_compose=$(sed -n '/^  db:/,/^  api:/p' "$ROOT/deploy/production/docker-compose.yml")
+if grep -q 'cap_drop:.*ALL' <<< "$db_compose"; then
+  fail "Postgres must retain entrypoint capabilities to initialize its data volume"
+fi
 for port in 25 465 587 993; do
   if grep -Eq "^[[:space:]]*-[[:space:]]*['\"]?[^#]*:${port}([:/\"']|$)" "$ROOT/deploy/production/docker-compose.yml"; then
     fail "production compose must not bind host mail port $port"
