@@ -95,7 +95,12 @@ async fn account_for(state: &AppState, user: &AuthUser) -> Result<Option<String>
     if !state.stalwart.enabled() {
         return Ok(None);
     }
-    match state.stalwart.find_account_by_email(&mailbox.address).await {
+    match state.stalwart.find_owned_mailbox_account(
+        &mailbox.address,
+        mailbox.provider_domain_id.as_deref(),
+        &mailbox.provider_marker,
+        mailbox.domain_is_system,
+    ).await {
         Ok(Some(id)) => {
             let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
             sqlx::query(

@@ -56,7 +56,12 @@ async fn account_for(state: &AppState, user_id: Uuid, mailbox_id: Uuid) -> Resul
     if !state.stalwart.enabled() {
         return Err(ApiError::forbidden("No mailbox provisioned for this account"));
     }
-    match state.stalwart.find_account_by_email(&mailbox.address).await {
+    match state.stalwart.find_owned_mailbox_account(
+        &mailbox.address,
+        mailbox.provider_domain_id.as_deref(),
+        &mailbox.provider_marker,
+        mailbox.domain_is_system,
+    ).await {
         Ok(Some(id)) => {
             sqlx::query("UPDATE mailboxes SET provider_account_id=$1,sync_status='ready',sync_error='',updated_at=now() WHERE id=$2")
                 .bind(&id)

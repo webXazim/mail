@@ -13,6 +13,12 @@ pub struct PrimaryMailbox {
     pub display_name: String,
     pub status: String,
     pub provider_account_id: Option<String>,
+    #[serde(skip_serializing)]
+    pub provider_domain_id: Option<String>,
+    #[serde(skip_serializing)]
+    pub provider_marker: String,
+    #[serde(skip_serializing)]
+    pub domain_is_system: bool,
     pub sync_status: String,
     pub quota_bytes: i64,
 }
@@ -81,8 +87,10 @@ pub async fn active_mailbox(
     if let Some(org_id) = organization_id {
         let row = sqlx::query_as::<_, ActiveMailbox>(
             "SELECT m.id,m.organization_id,m.domain_id,m.address::text,m.display_name,
-                    m.status,m.provider_account_id,m.sync_status,m.quota_bytes
+                    m.status,m.provider_account_id,m.sync_status,m.quota_bytes,
+                    d.provider_domain_id,m.provider_marker,d.is_system AS domain_is_system
              FROM mailboxes m
+             JOIN organization_domains d ON d.id=m.domain_id
              JOIN organization_memberships om
                ON om.organization_id=m.organization_id AND om.user_id=$1 AND om.status='active'
              JOIN organizations o ON o.id=m.organization_id AND o.status='active'
@@ -102,8 +110,10 @@ pub async fn active_mailbox(
 
     sqlx::query_as::<_, ActiveMailbox>(
         "SELECT m.id,m.organization_id,m.domain_id,m.address::text,m.display_name,
-                m.status,m.provider_account_id,m.sync_status,m.quota_bytes
+                m.status,m.provider_account_id,m.sync_status,m.quota_bytes,
+                d.provider_domain_id,m.provider_marker,d.is_system AS domain_is_system
          FROM mailboxes m
+         JOIN organization_domains d ON d.id=m.domain_id
          JOIN organization_memberships om
            ON om.organization_id=m.organization_id AND om.user_id=$1 AND om.status='active'
          JOIN organizations o ON o.id=m.organization_id AND o.status='active'
@@ -126,8 +136,10 @@ async fn mailbox_by_id(
 ) -> Result<Option<ActiveMailbox>, ApiError> {
     sqlx::query_as::<_, ActiveMailbox>(
         "SELECT m.id,m.organization_id,m.domain_id,m.address::text,m.display_name,
-                m.status,m.provider_account_id,m.sync_status,m.quota_bytes
+                m.status,m.provider_account_id,m.sync_status,m.quota_bytes,
+                d.provider_domain_id,m.provider_marker,d.is_system AS domain_is_system
          FROM mailboxes m
+         JOIN organization_domains d ON d.id=m.domain_id
          JOIN organization_memberships om
            ON om.organization_id=m.organization_id AND om.user_id=$1 AND om.status='active'
          JOIN organizations o ON o.id=m.organization_id AND o.status='active'

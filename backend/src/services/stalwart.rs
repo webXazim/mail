@@ -1273,20 +1273,46 @@ impl StalwartService {
             .map(str::to_string))
     }
 
-    pub async fn find_account(&self, local: &str) -> Result<Option<String>, StalwartError> {
+    async fn find_account(&self, local: &str, domain_id: &str) -> Result<Option<String>, StalwartError> {
         let local = local.trim();
-        if local.is_empty() || local.contains('@') {
+        if local.is_empty() || local.contains('@') || domain_id.is_empty() {
             return Err(StalwartError::InvalidAddress(local.to_string()));
         }
         let result = self
-            .management_read("x:Account/query", json!({ "filter": { "name": local } }))
+            .management_read("x:Account/query", json!({ "filter": { "name": local, "domainId": domain_id } }))
             .await?;
-        Ok(result
+        let ids = result
             .get("ids")
             .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(Value::as_str)
-            .map(str::to_string))
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let accounts = self
+            .management_read("x:Account/get", json!({ "ids": ids }))
+            .await?;
+        let mut matches = accounts
+            .get("list")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|item| {
+                item.get("@type").and_then(Value::as_str) == Some("User")
+                    && item.get("name").and_then(Value::as_str).is_some_and(|name| name.eq_ignore_ascii_case(local))
+                    && item.get("domainId").and_then(Value::as_str) == Some(domain_id)
+            })
+            .filter_map(|item| item.get("id").and_then(Value::as_str));
+        let first = matches.next().map(str::to_string);
+        if matches.next().is_some() {
+            return Err(StalwartError::Protocol {
+                operation: "account lookup".to_string(),
+                message: "multiple exact provider accounts matched one mailbox".to_string(),
+            });
+        }
+        Ok(first)
     }
 
     pub async fn find_account_by_email(
@@ -1294,8 +1320,30 @@ impl StalwartService {
         email: &str,
     ) -> Result<Option<String>, StalwartError> {
         let (local, domain) = split_managed_email(email, &self.config.default_domain)?;
-        debug_assert!(!domain.is_empty());
-        self.find_account(local).await
+        let Some(domain_id) = self.domain_id(domain).await? else {
+            return Ok(None);
+        };
+        self.find_account(local, &domain_id).await
+    }
+
+    pub async fn find_owned_mailbox_account(
+        &self,
+        email: &str,
+        provider_domain_id: Option<&str>,
+        marker: &str,
+        is_system: bool,
+    ) -> Result<Option<String>, StalwartError> {
+        if is_system {
+            return self.find_account_by_email(email).await;
+        }
+        let (local, _) = email.split_once('@')
+            .ok_or_else(|| StalwartError::InvalidAddress(email.to_string()))?;
+        let domain_id = provider_domain_id.filter(|id| !id.is_empty())
+            .ok_or_else(|| StalwartError::Protocol {
+                operation: "customer mailbox lookup".to_string(),
+                message: "customer domain has no provider id".to_string(),
+            })?;
+        self.find_customer_account(domain_id, local, marker).await
     }
 
     pub async fn ensure_mailbox_with_quota(
@@ -1315,7 +1363,7 @@ impl StalwartService {
             });
         };
 
-        if let Some(id) = self.find_account(local).await? {
+        if let Some(id) = self.find_account(local, &domain_id).await? {
             // Reconciliation is idempotent: if creation previously succeeded
             // but the API response was lost, a retry discovers the same
             // account and applies the current authoritative quota.
@@ -1360,7 +1408,7 @@ impl StalwartService {
         // A concurrent worker/manual action may have created the account
         // after our initial read but before x:Account/set. Re-resolve before
         // treating notCreated as terminal so ensure remains idempotent.
-        if let Some(id) = self.find_account(local).await? {
+        if let Some(id) = self.find_account(local, &domain_id).await? {
             self.set_account_quota(&id, quota_bytes).await?;
             return Ok(Some(id));
         }

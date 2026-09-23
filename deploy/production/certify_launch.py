@@ -475,6 +475,9 @@ def check_dns(env: dict[str, str]) -> str:
     mx = dig(domain, "MX")
     if not mx:
         raise GateError(f"{domain} has no MX record")
+    mx_hosts = {record.split()[-1].rstrip(".").lower() for record in mx}
+    if mx_hosts != {host.lower()}:
+        raise GateError(f"{domain} MX must point only to {host}; found {', '.join(sorted(mx_hosts))}")
     spf = " ".join(dig(domain, "TXT"))
     if "v=spf1" not in spf.lower():
         raise GateError(f"{domain} has no SPF TXT policy")
