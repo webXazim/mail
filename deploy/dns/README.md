@@ -32,11 +32,12 @@ automation may still use that integration.
 
 ## Root-domain sending through Mailer
 
-The current Mailer domain-provisioning code refuses to adopt a Stalwart domain
-already owned outside Mailer. Do not try to resolve that conflict by deleting
-Stalwart's root domain. Mailer must gain an explicitly approved shared-domain
-path before it can verify `crescentsphere.com` and create its root DKIM key.
-At that point publish the exact new `_mailer-verification.crescentsphere.com`,
+Mailer supports this through an explicitly configured shared-domain path.
+Keep CS Mail's existing Stalwart root domain and mailboxes. Set
+`STALWART_SHARED_DOMAIN=crescentsphere.com` and
+`STALWART_SHARED_WORKSPACE_ID` to the chosen Mailer workspace UUID in the
+Mailer production environment, deploy Mailer, then add the root domain in that
+workspace. Publish the exact new `_mailer-verification.crescentsphere.com`,
 `<selector>._domainkey.crescentsphere.com`, and
 `bounce.crescentsphere.com` MX/SPF values shown in Mailer. They cannot be
 invented in advance. The initial root SPF in this file authorizes the existing
