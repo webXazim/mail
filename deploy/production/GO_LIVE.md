@@ -27,8 +27,12 @@ Before accepting another business, complete these checks in order:
    deliberately after the gates pass.
 4. Verify a real mailbox over web, IMAP TLS 993, and authenticated SMTP TLS
    465. Send externally, receive externally, reply, attach a file, and confirm
-   sent, inbox, and spam behavior. Check that Stalwart permits the CS Mail
-   submission identity to send only authorized customer domains.
+   sent, inbox, and spam behavior. Apply the shared sender policy in Mailer's
+   `STALWART_DOMAIN_PROVISIONING.md` to Stalwart's AUTH and MAIL FROM stages.
+   Confirm `cs-mail-submit` accepts an existing mailbox sender but rejects a
+   Mailer bounce sender; confirm `mailer-submit` accepts a verified Mailer
+   bounce sender but rejects a CS Mail mailbox sender. Test these negative
+   cases with authenticated SMTP, not just the applications' API checks.
 5. For each customer domain, verify ownership before provisioning. Publish MX
    to `smtp.crescentsphere.com` only after the destination mailbox is ready;
    publish the provider's actual DKIM key, a single valid SPF policy and a
@@ -46,6 +50,10 @@ Before accepting another business, complete these checks in order:
    sending, allocate a separate outbound IP or mail node and change Mailer's
    egress/DNS/PTR accordingly; CS Mail business mail should retain its own
    stable sending identity.
+8. Reconcile every pre-existing Mailer domain and DKIM signature against its
+   Mailer database provider IDs before opening either product to customers.
+   Existing unmarked provider domains require an operator ownership review;
+   never attach a CS Mail domain to Mailer merely because its name matches.
 
 After launch, deploy pinned images and schema changes through the checked
 release pipeline, preserve a predeploy backup, and run the public health and
