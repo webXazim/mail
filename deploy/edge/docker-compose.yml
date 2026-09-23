@@ -39,9 +39,12 @@ services:
         ipv4_address: 172.29.41.11
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
+    # The official Nginx master creates/chowns temporary directories, then
+    # starts workers as the nginx user. Keep only those required capabilities.
+    cap_add: ["CHOWN", "SETGID", "SETUID"]
     read_only: true
     tmpfs:
-      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=101,gid=101,mode=700
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=0,gid=0,mode=755
       - /var/run:rw,noexec,nosuid,size=1m,uid=0,gid=0,mode=700
     mem_limit: 128m
     cpus: "0.25"
