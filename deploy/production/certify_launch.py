@@ -188,7 +188,23 @@ def check_static(root: Path) -> str:
     if "real_ip_header CF-Connecting-IP" in nginx or "listen 127.0.0.1:18082" in nginx:
         raise GateError("legacy Cloudflare Tunnel origin directives must not remain")
     env_example = (root / "deploy/production/.env.production.example").read_text()
-    if "CS_MAIL_WEB_PROXY_MODE=messenger" in env_example:
+    if "CS_MAIL_WEB_PROXY_MODE=edge" in env_example:
+        platform_edge = (root / "deploy/edge/docker-compose.yml").read_text()
+        edge_mail = (root / "deploy/edge/nginx-mail.conf").read_text()
+        public_inner = (root / "deploy/production/nginx-inner.conf").read_text()
+        admin_inner = (root / "deploy/production/nginx-admin-inner.conf").read_text()
+        if "cs-mail-web" not in compose or "cs-platform-web" not in compose or "name: cs-platform-web" not in platform_edge:
+            raise GateError("independent platform web network and CS Mail web alias are required")
+        if "127.0.0.1:${CS_MAIL_ADMIN_HOST_PORT:-18081}:8081" not in compose:
+            raise GateError("CS Mail admin web must bind only to VPS loopback")
+        if "ssl_certificate /etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem;" not in edge_mail:
+            raise GateError("CS Mail TLS gateway must use its own public Let's Encrypt certificate")
+        for blocked in ("/api/admin", "/mail/admin", "/api/metrics"):
+            if blocked not in edge_mail or blocked not in public_inner:
+                raise GateError(f"public CS Mail web must block {blocked}")
+        if 'proxy_set_header X-CS-Admin-Local "1";' not in admin_inner:
+            raise GateError("localhost-only admin web must mark admin requests")
+    elif "CS_MAIL_WEB_PROXY_MODE=messenger" in env_example:
         edge = (root / "deploy/production/nginx-shared-edge.conf").read_text()
         public_inner = (root / "deploy/production/nginx-inner.conf").read_text()
         admin_inner = (root / "deploy/production/nginx-admin-inner.conf").read_text()

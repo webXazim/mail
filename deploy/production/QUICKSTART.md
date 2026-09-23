@@ -37,8 +37,8 @@ sudo ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/secrets/alert-webhook-url
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
-## This VPS uses Messenger's Docker Nginx on 80/443. Follow SHARED_PROXY.md
-## to add the CS Mail vhost and issue its publicly trusted web certificate.
+# Follow ../edge/README.md to issue the web certificate with DNS-01,
+# stage the independent edge, and move 80/443 from Messenger to the edge.
 sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/deploy-from-git.sh main
 sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
@@ -48,6 +48,9 @@ Fill the operator values listed in `CREDENTIALS.md`. In particular:
 
 ```dotenv
 CS_MAIL_SHARED_PROVIDER_NETWORK=crescentsphere-mail-transport
+CS_MAIL_WEB_PROXY_MODE=edge
+CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web
+CS_MAIL_SHARED_EDGE_CONTAINER=cs-platform-edge-edge-1
 CS_MAIL_SMTP_HOST=smtp.crescentsphere.com
 CS_MAIL_SMTP_PORT=465
 CS_MAIL_BILLING_INSTANT_ACTIVATION=false

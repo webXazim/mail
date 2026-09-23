@@ -34,7 +34,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/letsencrypt:/var/www/letsencrypt:ro
     networks:
-      messenger: {}
+      platform_web: {}
       edge_private:
         ipv4_address: 172.29.41.11
     security_opt: ["no-new-privileges:true"]
@@ -55,6 +55,10 @@ networks:
   messenger:
     external: true
     name: cs-messenger_messenger
+  platform_web:
+    name: cs-platform-web
+    driver: bridge
+    internal: true
   edge_private:
     driver: bridge
     internal: true

@@ -8,7 +8,7 @@ mail protocol/storage provider and keep its admin API private.
 
 Before accepting another business, complete these checks in order:
 
-1. Deploy the application, first through `SHARED_PROXY.md` and then through
+1. Deploy the independent platform edge and then CS Mail using
    `../edge/README.md`. Verify the direct HTTPS certificate for
    `mail.crescentsphere.com`, the private admin route over an SSH tunnel, and
    that `/api/admin`, `/mail/admin`, and `/api/metrics` return 404 publicly.

@@ -27,20 +27,18 @@ credentials, Compose lifecycle, and backups separate.
    `sh manage deploy`. Its frontend stays behind its Cloudflare Tunnel and its
    API/worker keep their existing database and queue. Run the Mailer public
    health check and a verified-domain send test.
-5. Deploy CS Mail behind the existing Messenger Nginx by following
-   `SHARED_PROXY.md`. Keep public admission controls closed. Verify its local
-   and public health checks, private admin path, and initial mailbox. Preserve
-   the current MX records until receiving mail is proven on Stalwart.
-6. Stage the independent platform edge on loopback ports using
-   `../edge/README.md`. Test `mail`, `dm`, and root/`www` through the staged
-   edge. Only then recreate Messenger Nginx from the new production Compose
-   without public port bindings and publish the edge on 80/443. Perform this
-   short port handoff in a maintenance window and keep the documented rollback
-   ready.
-7. Switch CS Mail's proxy mode to `edge`, deploy it again, and run the full
-   `GO_LIVE.md` and `certify-launch.sh` gates. Validate direct HTTPS for
+5. Issue the CS Mail web certificate with DNS-01 and stage the independent
+   platform edge on loopback ports using `../edge/README.md`. Test `mail` TLS,
+   `dm`, and root/`www` through the staged edge. A 502 for `mail` is expected
+   before CS Mail is deployed. The CS Mail backend network does not exist yet.
+6. Recreate Messenger Nginx from the new production Compose without public
+   port bindings and publish the edge on 80/443. Perform this short port
+   handoff in a maintenance window and keep the documented rollback ready.
+7. Set CS Mail's proxy mode to `edge`, deploy it for the first time, and run
+   the full `GO_LIVE.md` and `certify-launch.sh` gates. Validate HTTPS for
    `mail.crescentsphere.com`, Messenger through the edge, and Mailer through
-   its Tunnel. Cut over a business domain's MX only after its mailbox, DNS and
+   its Tunnel. Keep public admission controls closed. Cut over a business
+   domain's MX only after its mailbox, DNS and
    external send/receive tests pass. Do not turn on open signup or instant
    paid-plan activation during the test.
 

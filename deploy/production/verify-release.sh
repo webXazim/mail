@@ -30,7 +30,8 @@ grep -q 'listen 80;' "$nginx_file" || fail "web vhost must listen on shared HTTP
 grep -q 'listen 127.0.0.1:18081;' "$nginx_file" || fail "Platform Admin must remain localhost-only"
 if grep -q 'listen 127.0.0.1:18082' "$nginx_file"; then fail "legacy Cloudflare Tunnel origin must not remain"; fi
 if grep -q 'real_ip_header CF-Connecting-IP' "$nginx_file"; then fail "Cloudflare-only real-IP trust must not remain in direct-DNS mode"; fi
-grep -q 'CS_MAIL_WEB_PROXY_MODE=messenger' "$ROOT/deploy/production/.env.production.example" || fail "Messenger proxy mode is missing from the production env contract"
+grep -q 'CS_MAIL_WEB_PROXY_MODE=edge' "$ROOT/deploy/production/.env.production.example" || fail "edge proxy mode is missing from the production env contract"
+grep -q 'CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web' "$ROOT/deploy/production/.env.production.example" || fail "platform web network is missing from the production env contract"
 grep -q 'aliases: \[cs-mail-web\]' "$ROOT/deploy/production/docker-compose.yml" || fail "CS Mail private web alias is missing"
 grep -q '127.0.0.1:.*:8081' "$ROOT/deploy/production/docker-compose.yml" || fail "admin web must bind only to loopback"
 grep -q 'server_name mail.crescentsphere.com;' "$ROOT/deploy/production/nginx-shared-edge.conf" || fail "Messenger edge CS Mail vhost is missing"
@@ -38,7 +39,8 @@ grep -q 'ssl_certificate /etc/letsencrypt/live/mail.crescentsphere.com/fullchain
 for route in '/api/admin' '/mail/admin' '/api/metrics'; do
   grep -q "$route" "$ROOT/deploy/production/nginx-inner.conf" || fail "public inner web is missing protected route $route"
 done
-ok "shared Messenger proxy topology is configured"
+grep -q 'name: cs-platform-web' "$ROOT/deploy/edge/docker-compose.yml" || fail "independent platform web network is missing"
+ok "independent platform edge topology is configured"
 
 for generated in frontend/node_modules frontend/dist frontend/coverage backend/target backend/.cs-mail-target .cache; do
   [[ ! -e "$ROOT/$generated" ]] || fail "generated path must not be committed: $generated"

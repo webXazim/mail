@@ -1,4 +1,7 @@
-# CS Mail on the existing Messenger web proxy
+# Legacy Messenger proxy bridge
+
+The direct first-deployment path is `../edge/README.md`. Use this bridge only
+if the independent platform edge cannot be staged during a separate migration.
 
 The current VPS publishes web ports 80/443 from `cs-messenger-nginx-1` on the
 `cs-messenger_messenger` Docker network. Host Nginx must stay inactive. CS Mail

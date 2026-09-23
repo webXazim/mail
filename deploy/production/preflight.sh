@@ -37,7 +37,12 @@ case "$proxy_mode" in host|messenger|edge) ;; *) fail "CS_MAIL_WEB_PROXY_MODE mu
 [[ -n ${CS_MAIL_SHARED_PROVIDER_NETWORK:-} ]] || fail "shared provider Docker network is not configured"
 docker network inspect "$CS_MAIL_SHARED_PROVIDER_NETWORK" >/dev/null 2>&1 || fail "Docker network $CS_MAIL_SHARED_PROVIDER_NETWORK does not exist"
 if [[ "$proxy_mode" == messenger || "$proxy_mode" == edge ]]; then
-  web_network=${CS_MAIL_SHARED_WEB_NETWORK:-cs-messenger_messenger}
+  if [[ "$proxy_mode" == edge ]]; then
+    web_network=${CS_MAIL_SHARED_WEB_NETWORK:-cs-platform-web}
+    [[ "$web_network" == cs-platform-web ]] || fail "edge mode requires CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web"
+  else
+    web_network=${CS_MAIL_SHARED_WEB_NETWORK:-cs-messenger_messenger}
+  fi
   docker network inspect "$web_network" >/dev/null 2>&1 || fail "Docker network $web_network does not exist"
   [[ ${CS_MAIL_TRUSTED_PROXY_IPS:-} == '172.29.40.10,172.29.40.11' ]] || fail "shared proxy mode requires only the two fixed CS Mail web proxy IPs"
   [[ ${CS_MAIL_BACKEND_SUBNET:-} == '172.29.40.0/24' ]] || fail "shared proxy mode requires the reserved backend subnet"
@@ -94,7 +99,7 @@ ok "host tooling, environment permissions and free disk are valid"
 
 cert=${CS_MAIL_WEB_TLS_CERT:-/etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem}
 key=${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem}
-[[ -s "$cert" && -s "$key" ]] || fail "web TLS certificate is missing; follow deploy/production/SHARED_PROXY.md"
+[[ -s "$cert" && -s "$key" ]] || fail "web TLS certificate is missing; use DNS-01 in deploy/edge/README.md for edge mode"
 openssl x509 -in "$cert" -noout -checkend 604800 >/dev/null || fail "web TLS certificate expires within 7 days"
 openssl x509 -in "$cert" -noout -checkhost "${CS_MAIL_WEB_HOST}" >/dev/null || fail "web TLS certificate does not cover ${CS_MAIL_WEB_HOST}"
 if [[ "$proxy_mode" == messenger || "$proxy_mode" == edge ]]; then

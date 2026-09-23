@@ -16,16 +16,16 @@ GitHub.
 
 ## Fixed production topology
 
-- `mail.crescentsphere.com` — DNS-only A record to the VPS; Messenger's Docker Nginx owns 80/443. Follow `SHARED_PROXY.md`.
+- `mail.crescentsphere.com` — DNS-only A record to the VPS; the independent platform edge owns 80/443. Follow `../edge/README.md`.
 - `127.0.0.1:18080` — CS Mail Rust API, never public.
 - `127.0.0.1:18081` — Platform Admin, SSH tunnel only.
 - `smtp.crescentsphere.com` — existing DNS-only Stalwart mail/PTR identity.
 - Stalwart remains the existing shared service on 25/465/993.
 - PostgreSQL and monitoring remain private/loopback.
 
-The CS Mail Nginx site is a normal name-based vhost, so it safely shares 80/443
-with other projects on the same VPS. It does not install a default server and
-does not edit other site files.
+The platform edge routes `mail` to CS Mail's private TLS gateway and routes
+root/`www` and `dm` to Messenger's existing private Nginx. CS Mail does not
+install a host Nginx vhost in this topology.
 
 ## Environment organization
 
@@ -47,15 +47,10 @@ See `CREDENTIALS.md` for discovery/setup commands.
 
 ## TLS
 
-After `mail.crescentsphere.com` points to the VPS and port 80 is reachable, run:
-
-```bash
-# Follow deploy/production/SHARED_PROXY.md for the Messenger edge TLS setup.
-```
-
-The script temporarily installs an HTTP-only vhost for ACME, obtains the first
-Let's Encrypt certificate using webroot validation, installs the production
-HTTPS vhost, validates Nginx, reloads it, and installs a renewal deploy hook.
+Issue the first `mail.crescentsphere.com` certificate through the Cloudflare
+DNS-01 procedure in `../edge/README.md`. This does not require taking port 80
+from Messenger. Then stage and publish the independent platform edge and install
+the documented Certbot renewal hook.
 
 Stalwart's separate certificate on `smtp.crescentsphere.com:465/993` is not
 managed by CS Mail; the preflight verifies that it is publicly trusted.

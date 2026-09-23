@@ -231,7 +231,7 @@ networks:
     name: ${CS_MAIL_SHARED_PROVIDER_NETWORK:?set the existing Stalwart Docker network name}
   shared_web:
     external: true
-    name: ${CS_MAIL_SHARED_WEB_NETWORK:-cs-messenger_messenger}
+    name: ${CS_MAIL_SHARED_WEB_NETWORK:-cs-platform-web}
 
 volumes:
   pgdata:
