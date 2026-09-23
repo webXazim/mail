@@ -209,10 +209,17 @@ services:
     user: "0:0"
     restart: unless-stopped
     profiles: ["monitoring"]
-    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
     volumes:
       - /opt/cs-mail/secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - /opt/cs-mail/secrets/alert-smtp-password:/run/secrets/cs_mail_alert_smtp_password:ro
+      - type: volume
+        source: alertmanager-data
+        target: /alertmanager
+        volume:
+          nocopy: true
     ports:
       - "127.0.0.1:19093:9093"
     networks: [backend, shared_mail]
@@ -238,3 +245,4 @@ networks:
 volumes:
   pgdata:
   api-attachments:
+  alertmanager-data:

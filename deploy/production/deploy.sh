@@ -34,6 +34,7 @@ on_error() {
   fi
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps 2>/dev/null || true
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" logs --tail=120 api 2>/dev/null || true
+  docker compose --profile monitoring --env-file "$ENV_FILE" -f "$COMPOSE" logs --tail=80 alertmanager 2>/dev/null || true
   exit "$rc"
 }
 trap on_error ERR
@@ -163,6 +164,15 @@ done
 echo "[5/8] Starting monitoring stack..."
 "$ROOT/deploy/production/render-alertmanager.py"
 docker compose --profile monitoring --env-file "$ENV_FILE" -f "$COMPOSE" up -d --force-recreate alertmanager prometheus
+alertmanager_ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:19093/-/ready >/dev/null 2>&1; then
+    alertmanager_ready=1
+    break
+  fi
+  sleep 2
+done
+[[ $alertmanager_ready -eq 1 ]] || { echo "Alertmanager failed readiness" >&2; exit 1; }
 
 echo "[6/8] Validating Nginx and atomically publishing frontend..."
 if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then

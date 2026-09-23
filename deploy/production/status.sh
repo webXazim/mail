@@ -16,6 +16,8 @@ printf 'Source SHA-256: %s\n' "${CS_MAIL_RELEASE_SHA256:-unknown}"
 printf 'API image: %s\n\n' "$CS_MAIL_API_IMAGE"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps
+printf '\nAlertmanager readiness: '
+if curl -fsS http://127.0.0.1:19093/-/ready >/dev/null; then echo PASS; else echo FAIL; fi
 printf '\nLoopback API readiness: '
 if curl -fsS "http://127.0.0.1:${CS_MAIL_API_HOST_PORT:-18080}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
 printf 'Local HTTPS vhost readiness: '
