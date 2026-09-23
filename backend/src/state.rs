@@ -8,6 +8,7 @@ use crate::metrics::Metrics;
 use crate::middleware::rate_limit::RateLimiter;
 use crate::services::provisioning::ProvisioningService;
 use crate::services::stalwart::StalwartService;
+use crate::services::mailer::MailerClient;
 use crate::ws::EventHub;
 
 /// Application state shared via axum State extracts.
@@ -30,6 +31,7 @@ pub struct AppState {
     pub return_token_links: bool,
     pub cookie_secure: bool,
     pub stalwart: StalwartService,
+    pub system_mailer: Option<MailerClient>,
     pub provisioning: ProvisioningService,
     pub two_factor_key: String,
     pub mail_client_host: String,

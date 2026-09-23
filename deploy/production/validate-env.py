@@ -55,6 +55,13 @@ def main() -> int:
     for key in REQUIRED_NONEMPTY:
         if not values.get(key, "").strip():
             print(f"{key} must be configured before production deployment", file=sys.stderr); return 1
+    mailer_url = values.get("CS_MAILER_API_URL", "").strip()
+    mailer_key = values.get("CS_MAILER_API_KEY", "").strip()
+    if mailer_url or mailer_key:
+        if mailer_url != "https://mailer.crescentsphere.com/api/v1/emails":
+            print("CS_MAILER_API_URL must use the public Mailer HTTPS endpoint", file=sys.stderr); return 1
+        if not mailer_key.startswith("cs_live_"):
+            print("CS_MAILER_API_KEY must be a production sending key", file=sys.stderr); return 1
 
     if values.get("CS_MAIL_WEB_HOST", "mail.crescentsphere.com") != "mail.crescentsphere.com":
         print("CS_MAIL_WEB_HOST must be mail.crescentsphere.com", file=sys.stderr); return 1

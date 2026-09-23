@@ -7,6 +7,7 @@ use cs_mail_api::middleware::rate_limit::RateLimiter;
 use cs_mail_api::router::build_router;
 use cs_mail_api::services::provisioning::{self, ProvisioningService};
 use cs_mail_api::services::stalwart::{StalwartConfig, StalwartService};
+use cs_mail_api::services::mailer::MailerClient;
 use cs_mail_api::state::AppState;
 use cs_mail_api::ws::{spawn_realtime, EventHub};
 use sqlx::postgres::PgPoolOptions;
@@ -84,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
             retry_base_delay: Duration::from_millis(config.mail_retry_base_ms),
             smtp: config.smtp.clone(),
         })?,
+        system_mailer: MailerClient::from_env()?,
         provisioning: ProvisioningService::new(
             config.provisioning_key,
             Duration::from_secs(config.provisioning_poll_secs),

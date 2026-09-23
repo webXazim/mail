@@ -3,6 +3,7 @@ pub mod automation;
 pub mod billing;
 pub mod entitlements;
 pub mod email;
+pub mod mailer;
 pub mod imap;
 pub mod mime;
 pub mod provisioning;

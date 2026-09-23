@@ -24,6 +24,29 @@ pub fn random_token() -> String {
     format!("{a}{b}")
 }
 
+async fn submit_system_mail(state: &AppState, outgoing: &mime::Outgoing) -> Result<(), ApiError> {
+    let result = if let Some(mailer) = &state.system_mailer {
+        mailer.send(outgoing).await
+    } else {
+        let bytes = outgoing
+            .build()
+            .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
+        let recipients = outgoing.to.iter().chain(outgoing.cc.iter())
+            .map(|address| address.email.clone()).collect::<Vec<_>>();
+        state.stalwart.submit_raw(&outgoing.from.email, &recipients, &bytes).await
+            .map(|_| ())
+            .map_err(|error| ApiError::new(StatusCode::BAD_GATEWAY, "mail_submission", error.public_message()))
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if state.return_token_links => {
+            tracing::warn!(error=%error.message, "system email skipped in development mode");
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 async fn persist_token(
     state: &AppState,
     user_id: Uuid,
@@ -91,8 +114,8 @@ pub async fn send_password_reset(
     Ok(link)
 }
 
-/// Build and submit a one-off transactional email via the configured SMTP
-/// relay. The sender is always a CS Mail service address on the managed
+/// Build and submit a one-off transactional email via Mailer when configured,
+/// or the existing SMTP relay otherwise. The sender is a service address on the managed
 /// default domain. Login/contact identities are no longer assumed to be local
 /// mailboxes, so verification and reset messages must be deliverable to an
 /// arbitrary external address without spoofing that recipient as the sender.
@@ -133,40 +156,7 @@ async fn deliver(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-
-    match state
-        .stalwart
-        .submit_raw(&from_email, &[to_email.to_string()], &bytes)
-        .await
-    {
-        Ok(reply) => {
-            tracing::info!(
-                email = %to_email,
-                subject = %subject,
-                reply = %reply,
-                "transactional email submitted via SMTP"
-            );
-            Ok(())
-        }
-        Err(e) if state.return_token_links => {
-            // Dev-only fallback: the link is echoed in the API response, so a
-            // missing relay must not block local flows. Log loudly instead.
-            tracing::warn!(email = %to_email, subject = %subject, error = %e,
-                "SMTP unavailable; transactional email skipped (development mode)");
-            Ok(())
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, email = %to_email, "transactional mail submission failed");
-            Err(ApiError::new(
-                StatusCode::BAD_GATEWAY,
-                "mail_submission",
-                e.public_message(),
-            ))
-        },
-    }
+    submit_system_mail(state, &outgoing).await
 }
 
 /// Deliver a forwarding-destination verification code to an arbitrary target.
@@ -202,26 +192,7 @@ pub async fn send_forwarding_verification(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-    match state
-        .stalwart
-        .submit_raw(&from_email, &[target_email.to_string()], &bytes)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if state.return_token_links => {
-            tracing::warn!(email=%target_email, %error,
-                "SMTP unavailable; forwarding verification skipped in development mode");
-            Ok(())
-        }
-        Err(error) => Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "mail_submission",
-            error.public_message(),
-        )),
-    }
+    submit_system_mail(state, &outgoing).await
 }
 
 /// Deliver a sender-identity ownership verification code to an address that is
@@ -258,29 +229,10 @@ pub async fn send_sender_identity_verification(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-    match state
-        .stalwart
-        .submit_raw(&from_email, &[target_email.to_string()], &bytes)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if state.return_token_links => {
-            tracing::warn!(email=%target_email, %error,
-                "SMTP unavailable; sender identity verification skipped in development mode");
-            Ok(())
-        }
-        Err(error) => Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "mail_submission",
-            error.public_message(),
-        )),
-    }
+    submit_system_mail(state, &outgoing).await
 }
 
-/// Deliver a support-agent reply to the ticket requester. SMTP failure is
+/// Deliver a support-agent reply to the ticket requester. Delivery failure is
 /// surfaced to the agent before the reply is committed to ticket history, so
 /// the support UI never claims a customer-visible email was sent when it was not.
 pub async fn send_support_reply(
@@ -315,26 +267,7 @@ pub async fn send_support_reply(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-    match state
-        .stalwart
-        .submit_raw(&from_email, &[target_email.to_string()], &bytes)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if state.return_token_links => {
-            tracing::warn!(email=%target_email, %error,
-                "SMTP unavailable; support reply skipped in development mode");
-            Ok(())
-        }
-        Err(error) => Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "mail_submission",
-            error.public_message(),
-        )),
-    }
+    submit_system_mail(state, &outgoing).await
 }
 
 /// Deliver a business-membership invitation. The login email is intentionally
@@ -371,26 +304,7 @@ pub async fn send_business_invitation(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-    match state
-        .stalwart
-        .submit_raw(&from_email, &[target_email.to_string()], &bytes)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if state.return_token_links => {
-            tracing::warn!(email=%target_email, %error,
-                "SMTP unavailable; business invitation skipped in development mode");
-            Ok(())
-        }
-        Err(error) => Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "mail_submission",
-            error.public_message(),
-        )),
-    }
+    submit_system_mail(state, &outgoing).await
 }
 
 /// Deliver an invitation that reserves and assigns a real business mailbox.
@@ -467,19 +381,5 @@ pub async fn send_billing_document(
         message_id_local: Uuid::new_v4().as_simple().to_string(),
         domain: state.stalwart.default_domain().to_string(),
     };
-    let bytes = outgoing
-        .build()
-        .map_err(|e| ApiError::internal(format!("MIME build failed: {e}")))?;
-    match state.stalwart.submit_raw(&from_email, &[target_email.to_string()], &bytes).await {
-        Ok(_) => Ok(()),
-        Err(error) if state.return_token_links => {
-            tracing::warn!(email=%target_email,%error,"billing email skipped in development mode");
-            Ok(())
-        }
-        Err(error) => Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "mail_submission",
-            error.public_message(),
-        )),
-    }
+    submit_system_mail(state, &outgoing).await
 }

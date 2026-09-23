@@ -79,6 +79,7 @@ async fn test_app() -> Option<TestApp> {
             smtp: SmtpConfig::default(),
         })
         .expect("build disabled test mail provider"),
+        system_mailer: None,
         provisioning: ProvisioningService::new(
             TEST_PROVISIONING_KEY.into(),
             std::time::Duration::from_secs(1),
