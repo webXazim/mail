@@ -1,0 +1,36 @@
+;; CrescentSphere DNS rebuild for Cloudflare import.
+;; Source: Cloudflare export dated 2026-09-23 18:10:39.
+;; Cloudflare creates SOA and NS; do not import those records.
+;; Keep the cf-proxied tags for website and DNS-only mail hosts.
+;; After Mailer supports the existing root Stalwart domain, add its
+;; _mailer-verification, root DKIM, and bounce.crescentsphere.com records.
+
+;; A Records
+crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
+dm.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
+mail.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:false
+smtp.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:false
+
+;; CNAME Records
+mailer.crescentsphere.com.	1	IN	CNAME	be598929-c979-4394-ba6b-90b3905507d9.cfargotunnel.com. ; cf_tags=cf-proxied:true
+notes.crescentsphere.com.	1	IN	CNAME	f3d6e74e-2a3c-4566-9fd5-491bd6902e10.cfargotunnel.com. ; cf_tags=cf-proxied:true
+www.crescentsphere.com.	1	IN	CNAME	crescentsphere.com. ; cf_tags=cf-proxied:true
+
+;; MX Records
+crescentsphere.com.	1	IN	MX	10 smtp.crescentsphere.com.
+bounce.mail.crescentsphere.com.	1	IN	MX	10 smtp.crescentsphere.com. ; Managed by CrescentSphere Mailer
+bounce.mailer.crescentsphere.com.	1	IN	MX	10 smtp.crescentsphere.com. ; Managed by CrescentSphere Mailer
+
+;; TXT Records
+crescentsphere.com.	1	IN	TXT	"v=spf1 ip4:152.53.178.165 -all"
+_dmarc.crescentsphere.com.	1	IN	TXT	"v=DMARC1; p=none"
+bounce.mail.crescentsphere.com.	1	IN	TXT	"v=spf1 ip4:152.53.178.165 -all" ; Managed by CrescentSphere Mailer
+bounce.mailer.crescentsphere.com.	1	IN	TXT	"v=spf1 ip4:152.53.178.165 -all" ; Managed by CrescentSphere Mailer
+crescentsphere.com.	1	IN	TXT	"cloudflare_oauth_client_publisher=0cf8efb0e4f2a30f6d719382eff22d6a"
+cs20260923-52feacb7._domainkey.mail.crescentsphere.com.	1	IN	TXT	"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp4SMUYbbmZdWKCRaOdwlnbx4p4KUgM6wBxEhObmE1BdfGNaUmQoIM9GfqGko8DSkEe8G8I4udvC8ZYRCqzP8El2wDRIlQb3ZaOF2Y+6nXM8gOvsEsBe8ZWn8lj4P/yI9U19i3saYFoCQxyVdZglja0JJ3CCRFYxLyFlcekDoWmA8DWp6ZjwXiU+Z6VhbfY1DY" "PTN5d8ms67HiziYiDdPi2tgk5xjdQX4XU9Wq+ZhdRBy7kNpSNap08yvIb+J9fpkJy3zeqetp00mNHTf+ErrXs7z/+/rrYESoWpbFcw/AFvTBUpm83W0yB/NGNeflDpvrYd1HOoQh8ZUxOYDRlJ9rQIDAQAB" ; Managed by CrescentSphere Mailer
+_dmarc.mail.crescentsphere.com.	1	IN	TXT	"v=DMARC1; p=none" ; Managed by CrescentSphere Mailer
+_dmarc.mailer.crescentsphere.com.	1	IN	TXT	"v=DMARC1; p=none" ; Managed by CrescentSphere Mailer
+_mailer-verification.mail.crescentsphere.com.	1	IN	TXT	"mailer-verification=dd414af1-48c0-4452-ae0b-b91e45371683" ; Managed by CrescentSphere Mailer
+_mailer-verification.mailer.crescentsphere.com.	1	IN	TXT	"mailer-verification=c41db7d3-ae5c-4c0a-81a1-1733f1b43b53" ; Managed by CrescentSphere Mailer
+v1-ed25519-20260905._domainkey.mailer.crescentsphere.com.	300	IN	TXT	"v=DKIM1; k=ed25519; h=sha256; p=oW5AgGfjF33s/Bxq+qVJZqq8t68640EL+NijEF80Fic="
+v1-rsa-20260905._domainkey.mailer.crescentsphere.com.	1	IN	TXT	"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvPEQLDwIl3XCrnCpPjAFYvu+xcmQ5pkmYUSbSiREG9zZ9Oo8fOmcPKcriWcLjvk2e36d6fp3rxzBbrp6lzWGv2aq5CpGBdeHsYN5NSgYQu88TLgGF9ENi0Dge6CFqt1kHusA+FrtRsZkKQlizO1PMARyYFtUmoHJUfwac8GFy5Q+cs2hwng5az4KWLoQ5Vie5" "rmUVUsarbx10p4bTLvMnfbZ6Lx7vbjooCwvy3FGbHVY+EhiCYn9yqwPPbqSdITulGW2m7+cESCc76ougem8vFvwo6AohXX5j53cu+OIrxq55GtgK+QF01H9/MDo0+zDazfy58wQ7l9Msj19YdPDCQIDAQAB" ; Managed by CrescentSphere Mailer
