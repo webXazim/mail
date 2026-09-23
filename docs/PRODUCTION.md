@@ -7,7 +7,7 @@ binds `127.0.0.1:18081`, and PostgreSQL/monitoring stay private.
 
 The existing shared Stalwart remains the mail transport. Its public identity is
 `smtp.crescentsphere.com`, which is DNS-only and also matches the VPS PTR/rDNS.
-It owns host ports 25/587/993. CS Mail production Compose never starts a second
+It owns host ports 25/465/993. CS Mail production Compose never starts a second
 mail server or binds those ports.
 
 Production deploys are Git-driven and deterministic. Builds/tests happen in

@@ -20,7 +20,7 @@ fn hash_token(value: &str) -> String {
 }
 
 async fn require_feature(state: &AppState, user_id: Uuid, feature: &str) -> Result<(), ApiError> {
-    entitlements::require_feature(state, user_id, feature).await
+    entitlements::require_feature(state, user_id, feature).await.map(|_| ())
 }
 
 async fn active_mailbox(state: &AppState, auth: &AuthUser) -> Result<tenancy::ActiveMailbox, ApiError> {

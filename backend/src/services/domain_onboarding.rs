@@ -227,7 +227,7 @@ pub async fn refresh_one(state: &AppState, domain_id: Uuid) -> Result<DnsReadine
     let row: Option<(String, Option<String>, String, String, String)> = sqlx::query_as(
         "SELECT domain::text, provider_domain_id, provider_marker, dns_zone_file, status FROM organization_domains WHERE id=$1",
     ).bind(domain_id).fetch_optional(&state.db).await.map_err(|e| e.to_string())?;
-    let Some((domain, provider_id, marker, mut zone, status)) = row else { return Err("domain not found".into()); };
+    let Some((domain, provider_id, marker, _zone, status)) = row else { return Err("domain not found".into()); };
     let provider_id = provider_id.filter(|value| !value.trim().is_empty()).ok_or_else(|| "domain is not provisioned".to_string())?;
     if marker.trim().is_empty() { return Err("provider ownership marker is missing".into()); }
 
@@ -246,7 +246,7 @@ pub async fn refresh_one(state: &AppState, domain_id: Uuid) -> Result<DnsReadine
         ).bind(domain_id).bind(next_status).bind(reason).execute(&state.db).await;
         return Err(reason.to_string());
     }
-    zone = snapshot.dns_zone_file;
+    let zone = snapshot.dns_zone_file;
     sqlx::query("UPDATE organization_domains SET dns_zone_file=$2, provider_synced_at=now(), updated_at=now() WHERE id=$1")
         .bind(domain_id).bind(&zone).execute(&state.db).await.map_err(|e| e.to_string())?;
     if zone.trim().is_empty() { return Err("mail provider has not generated DNS records yet".into()); }

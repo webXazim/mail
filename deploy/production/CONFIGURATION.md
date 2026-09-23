@@ -20,7 +20,7 @@ GitHub.
 - `127.0.0.1:18080` — CS Mail Rust API, never public.
 - `127.0.0.1:18081` — Platform Admin, SSH tunnel only.
 - `smtp.crescentsphere.com` — existing DNS-only Stalwart mail/PTR identity.
-- Stalwart remains the existing shared service on 25/587/993.
+- Stalwart remains the existing shared service on 25/465/993.
 - PostgreSQL and monitoring remain private/loopback.
 
 The CS Mail Nginx site is a normal name-based vhost, so it safely shares 80/443
@@ -40,7 +40,7 @@ Only the following normal first-deploy values require operator input:
 3. `CS_MAIL_MAIL_JMAP_USERNAME`
 4. `CS_MAIL_MAIL_JMAP_SECRET`
 5. `CS_MAIL_LETSENCRYPT_EMAIL`
-6. `CS_MAIL_SMTP_USERNAME` / `CS_MAIL_SMTP_PASSWORD` only when Stalwart requires SMTP AUTH on the private relay
+6. `CS_MAIL_SMTP_USERNAME` / `CS_MAIL_SMTP_PASSWORD` for dedicated TLS submission
 7. `/opt/cs-mail/secrets/alert-webhook-url`
 
 See `CREDENTIALS.md` for discovery/setup commands.
@@ -57,7 +57,7 @@ The script temporarily installs an HTTP-only vhost for ACME, obtains the first
 Let's Encrypt certificate using webroot validation, installs the production
 HTTPS vhost, validates Nginx, reloads it, and installs a renewal deploy hook.
 
-Stalwart's separate certificate on `smtp.crescentsphere.com:587/993` is not
+Stalwart's separate certificate on `smtp.crescentsphere.com:465/993` is not
 managed by CS Mail; the preflight verifies that it is publicly trusted.
 
 ## Safe inspection
@@ -72,6 +72,6 @@ lengths before Compose is touched.
 
 ## Billing testing flag
 
-`CS_MAIL_BILLING_INSTANT_ACTIVATION=true` remains intentional during acceptance
-testing. Set it to `false` before real paid public launch so payment approval is
-required for entitlement activation.
+`CS_MAIL_BILLING_INSTANT_ACTIVATION=false` is the production default. Temporarily
+enable instant activation only for isolated acceptance tests; restore `false`
+before accepting real paid orders.

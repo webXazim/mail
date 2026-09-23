@@ -48,9 +48,9 @@ services:
       CS_MAIL_COOKIE_SECURE: "true"
       CS_MAIL_REQUIRE_VERIFICATION: "true"
       CS_MAIL_DEV_RETURN_TOKEN_LINKS: "false"
-      CS_MAIL_BILLING_INSTANT_ACTIVATION: ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true}
+      CS_MAIL_BILLING_INSTANT_ACTIVATION: ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-false}
       # Shared Stalwart. This compose file intentionally has NO mail service and
-      # binds none of 25/465/587/993. Those host-wide ports remain owned by the
+      # binds none of 25/465/993. Those host-wide ports remain owned by the
       # existing provider used by the developer mailer project.
       CS_MAIL_MAIL_ADMIN_URL: ${CS_MAIL_MAIL_ADMIN_URL:?set shared Stalwart management URL}
       CS_MAIL_MAIL_ADMIN_USERNAME: ${CS_MAIL_MAIL_ADMIN_USERNAME:-admin}
@@ -64,7 +64,7 @@ services:
       CS_MAIL_MAIL_READ_RETRIES: ${CS_MAIL_MAIL_READ_RETRIES:-2}
       CS_MAIL_MAIL_RETRY_BASE_MS: ${CS_MAIL_MAIL_RETRY_BASE_MS:-150}
       # API-to-provider relay stays on the private shared-provider Docker network.
-      # It is separate from customer submission on public :587.
+      # It is separate from customer app-password submission on public :465.
       CS_MAIL_SMTP_HOST: ${CS_MAIL_SMTP_HOST:?set shared Stalwart service hostname}
       CS_MAIL_SMTP_PORT: ${CS_MAIL_SMTP_PORT:-25}
       CS_MAIL_SMTP_USERNAME: ${CS_MAIL_SMTP_USERNAME:-}
@@ -72,7 +72,7 @@ services:
       CS_MAIL_SMTP_TIMEOUT_SECS: ${CS_MAIL_SMTP_TIMEOUT_SECS:-30}
       CS_MAIL_CLIENT_HOST: ${CS_MAIL_CLIENT_HOST:-smtp.crescentsphere.com}
       CS_MAIL_CLIENT_IMAP_PORT: ${CS_MAIL_CLIENT_IMAP_PORT:-993}
-      CS_MAIL_CLIENT_SMTP_PORT: ${CS_MAIL_CLIENT_SMTP_PORT:-587}
+      CS_MAIL_CLIENT_SMTP_PORT: ${CS_MAIL_CLIENT_SMTP_PORT:-465}
       CS_MAIL_CLIENT_MAX_APP_PASSWORDS: ${CS_MAIL_CLIENT_MAX_APP_PASSWORDS:-5}
       CS_MAIL_IMPORT_MAX_BYTES: ${CS_MAIL_IMPORT_MAX_BYTES:-2147483648}
       CS_MAIL_IMPORT_MESSAGE_MAX_BYTES: ${CS_MAIL_IMPORT_MESSAGE_MAX_BYTES:-52428800}

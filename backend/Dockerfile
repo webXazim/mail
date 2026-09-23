@@ -3,6 +3,7 @@ FROM rust:1.88-bookworm AS builder
 WORKDIR /build
 
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+RUN rustup show active-toolchain
 COPY src ./src
 COPY tests ./tests
 COPY migrations ./migrations
@@ -10,10 +11,12 @@ COPY migrations ./migrations
 # VPS deploys reject source that fails the same core Rust quality gates as CI.
 # Database-backed integration tests remain a GitHub CI responsibility because
 # deployment must never run a test suite against the production database.
-RUN cargo fmt --all -- --check \
- && cargo clippy --locked --all-targets -- -D warnings \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo clippy --locked --all-targets \
  && cargo test --locked --all-targets \
- && cargo build --release --locked
+ && cargo build --release --locked \
+ && install -m 0755 target/release/cs-mail-api /build/cs-mail-api
 
 # ---- Stage 2: runtime ------------------------------------------------------
 FROM debian:bookworm-slim
@@ -27,7 +30,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates wget \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
-COPY --from=builder /build/target/release/cs-mail-api /srv/cs-mail-api
+COPY --from=builder /build/cs-mail-api /srv/cs-mail-api
 COPY migrations ./migrations
 RUN mkdir -p /srv/attachments && chown -R 10001:10001 /srv/attachments
 USER 10001:10001

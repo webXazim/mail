@@ -37,6 +37,7 @@ struct ScheduledRow {
     error: String,
     attempt_count: i32,
     next_attempt_at: Option<DateTime<Utc>>,
+    #[allow(dead_code)]
     idempotency_key: String,
     request_hash: String,
     created_at: DateTime<Utc>,
@@ -732,8 +733,6 @@ pub fn spawn_worker(state: AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn retry_backoff_is_bounded() {
         // Keep the arithmetic helper honest without constructing AppState.

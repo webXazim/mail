@@ -45,7 +45,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
     expect(authApi.login).toHaveBeenCalledWith('alex@cs-mail.test', 'Strong-Pass!1')
-    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/inbox'))
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/inbox', { replace: true }))
     expect(auditApi.add).toHaveBeenCalled()
   })
 
@@ -72,7 +72,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: /verify and sign in/i }))
 
     expect(authApi.verifyTwoFactor).toHaveBeenCalledWith('challenge-1', '123456')
-    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/inbox'))
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/inbox', { replace: true }))
   })
 
   it('surfaces the login error instead of navigating', async () => {

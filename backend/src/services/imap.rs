@@ -296,7 +296,7 @@ pub async fn thread_previews(
 
     let result = match bridge.mail_read("Email/query", args.clone()).await {
         Ok(result) => (result, false),
-        Err(err) if anchor.is_some() && err.to_ascii_lowercase().contains("anchor") => {
+        Err(err) if anchor.is_some() && err.to_string().to_ascii_lowercase().contains("anchor") => {
             // The anchor can disappear when another client moves/deletes mail
             // between page requests. Restart from position zero and signal the
             // browser to discard the mixed snapshot instead of surfacing a
@@ -308,7 +308,7 @@ pub async fn thread_previews(
             }
             (bridge.mail_read("Email/query", args).await?, true)
         }
-        Err(err) => return Err(err),
+        Err(err) => return Err(err.to_string()),
     };
     let (result, anchor_reset) = result;
     let query_state = result.get("queryState").and_then(Value::as_str).unwrap_or("");
@@ -792,15 +792,15 @@ pub async fn search(
 
     let result = match bridge.mail_read("Email/query", args.clone()).await {
         Ok(result) => (result, false),
-        Err(err) if anchor.is_some() && err.to_ascii_lowercase().contains("anchor") => {
+        Err(err) if anchor.is_some() && err.to_string().to_ascii_lowercase().contains("anchor") => {
             if let Some(object) = args.as_object_mut() {
                 object.remove("anchor");
                 object.remove("anchorOffset");
                 object.insert("position".into(), json!(0));
             }
-            (bridge.mail_read("Email/query", args).await.map_err(SearchError::Store)?, true)
+            (bridge.mail_read("Email/query", args).await.map_err(|error| SearchError::Store(error.to_string()))?, true)
         }
-        Err(err) => return Err(SearchError::Store(err)),
+        Err(err) => return Err(SearchError::Store(err.to_string())),
     };
     let (result, anchor_reset) = result;
     let query_state = result.get("queryState").and_then(Value::as_str).unwrap_or("");

@@ -34,6 +34,9 @@ case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} in true|false) ;; *) fail "CS_M
 [[ ${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem} == /etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem ]] || fail "CS_MAIL_WEB_TLS_KEY must use the managed mail.crescentsphere.com Let's Encrypt path"
 [[ -n ${CS_MAIL_SHARED_PROVIDER_NETWORK:-} ]] || fail "shared provider Docker network is not configured"
 docker network inspect "$CS_MAIL_SHARED_PROVIDER_NETWORK" >/dev/null 2>&1 || fail "Docker network $CS_MAIL_SHARED_PROVIDER_NETWORK does not exist"
+[[ ${CS_MAIL_SMTP_HOST:-} == smtp.crescentsphere.com ]] || fail "private SMTP must use the Stalwart TLS certificate name"
+[[ ${CS_MAIL_SMTP_PORT:-} == 465 ]] || fail "private SMTP must use authenticated implicit TLS on port 465"
+[[ -n ${CS_MAIL_SMTP_USERNAME:-} && -n ${CS_MAIL_SMTP_PASSWORD:-} ]] || fail "dedicated Stalwart SMTP submission credentials are required"
 
 # This VPS hosts multiple web projects. Refuse a duplicate enabled vhost for the
 # exact CS Mail hostname rather than relying on Nginx's conflict warning/order.
@@ -92,16 +95,16 @@ if docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --services | grep 
 fi
 ok "production compose has no Stalwart service"
 
-for port in 25 587 993; do
+for port in 25 465 993; do
   ss -lnt | awk '{print $4}' | grep -Eq "[:.]${port}$" || fail "shared Stalwart is not listening on host TCP $port"
 done
-ok "shared Stalwart owns 25/587/993"
+ok "shared Stalwart owns 25/465/993"
 
 mail_host=${CS_MAIL_CLIENT_HOST:-smtp.crescentsphere.com}
 timeout 15 openssl s_client -connect "$mail_host:993" -servername "$mail_host" -verify_return_error </dev/null 2>/dev/null | grep -q 'Verify return code: 0' \
   || fail "IMAPS certificate verification failed for $mail_host:993"
-timeout 15 openssl s_client -starttls smtp -connect "$mail_host:587" -servername "$mail_host" -verify_return_error </dev/null 2>/dev/null | grep -q 'Verify return code: 0' \
-  || fail "SMTP STARTTLS certificate verification failed for $mail_host:587"
+timeout 15 openssl s_client -connect "$mail_host:465" -servername "$mail_host" -verify_return_error </dev/null 2>/dev/null | grep -q 'Verify return code: 0' \
+  || fail "SMTP submission certificate verification failed for $mail_host:465"
 ok "public IMAPS/SMTP TLS verifies for $mail_host"
 
 web_host=${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}

@@ -1531,10 +1531,13 @@ mod tests {
     #[test]
     fn provisioning_secret_payload_binds_user_and_email() {
         let user_id = Uuid::new_v4();
-        let payload = ProvisioningService::secret_payload(user_id, "Alice@Example.com", "secret");
-        let mut parts = payload.splitn(3, '\n');
+        let mailbox_id = Uuid::new_v4();
+        let payload = ProvisioningService::secret_payload(user_id, mailbox_id, "Alice@Example.com", "secret");
+        let mut parts = payload.splitn(4, '\n');
         let user_id_text = user_id.to_string();
         assert_eq!(parts.next(), Some(user_id_text.as_str()));
+        let mailbox_id_text = mailbox_id.to_string();
+        assert_eq!(parts.next(), Some(mailbox_id_text.as_str()));
         assert_eq!(parts.next(), Some("alice@example.com"));
         assert_eq!(parts.next(), Some("secret"));
     }

@@ -20,6 +20,8 @@ REQUIRED_NONEMPTY = (
     "CS_MAIL_MAIL_JMAP_USERNAME",
     "CS_MAIL_MAIL_JMAP_SECRET",
     "CS_MAIL_LETSENCRYPT_EMAIL",
+    "CS_MAIL_SMTP_USERNAME",
+    "CS_MAIL_SMTP_PASSWORD",
 )
 
 
@@ -60,6 +62,8 @@ def main() -> int:
         print("CS_MAIL_CLIENT_HOST must be smtp.crescentsphere.com for this VPS", file=sys.stderr); return 1
     if values.get("CS_MAIL_EXPECTED_PTR", "smtp.crescentsphere.com") != "smtp.crescentsphere.com":
         print("CS_MAIL_EXPECTED_PTR must remain smtp.crescentsphere.com", file=sys.stderr); return 1
+    if values.get("CS_MAIL_SMTP_HOST") != "smtp.crescentsphere.com" or values.get("CS_MAIL_SMTP_PORT") != "465":
+        print("private SMTP must use smtp.crescentsphere.com:465 with verified TLS", file=sys.stderr); return 1
     if values.get("CS_MAIL_WEB_HOST") == values.get("CS_MAIL_CLIENT_HOST"):
         print("web and mail protocol hostnames must be different", file=sys.stderr); return 1
     if values.get("CS_MAIL_PUBLIC_ORIGIN", "").rstrip("/") != "https://mail.crescentsphere.com":

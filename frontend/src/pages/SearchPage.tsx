@@ -311,9 +311,9 @@ export function SearchPage() {
           <p className="eyebrow">Workspace / Search</p>
           <h1>Search mail</h1>
           <p>
-            {searchPhrase ? (
+            {query ? (
               <>
-                Across all of your mailboxes for <strong>{searchPhrase}</strong>.
+                Across all of your mailboxes for <strong>{query}</strong>.
               </>
             ) : (
               'Search across all your mailboxes with Gmail-style operators.'

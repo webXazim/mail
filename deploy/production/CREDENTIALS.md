@@ -38,6 +38,8 @@ docker inspect <stalwart-container> --format '{{json .NetworkSettings.Networks}}
 
 CS Mail joins this existing external network. Production Compose deliberately
 does not start another Stalwart instance.
+For the Mailer Compose stack in this workspace, the network name is
+`crescentsphere-mail-transport`; verify it exists on the VPS before entering it.
 
 ### 2. Stalwart management token
 
@@ -57,11 +59,13 @@ Docker network:
 ```env
 CS_MAIL_MAIL_ADMIN_URL=http://stalwart:8080/
 CS_MAIL_MAIL_ADMIN_USERNAME=admin
-CS_MAIL_SMTP_HOST=stalwart
+CS_MAIL_SMTP_HOST=smtp.crescentsphere.com
 ```
 
-If the existing container/network alias is different, change the hostname in
-those two URL/host settings to its actual Docker network alias.
+If the management network alias differs, change only the hostname in
+`CS_MAIL_MAIL_ADMIN_URL`. Keep `CS_MAIL_SMTP_HOST` at
+`smtp.crescentsphere.com` so its TLS certificate verifies; the Mailer Stalwart
+Compose file supplies this private network alias.
 
 ### 3. Stalwart JMAP service account
 
@@ -74,18 +78,23 @@ CS_MAIL_MAIL_JMAP_SECRET=<strong-service-secret>
 
 Do not reuse a normal customer mailbox credential.
 
-### 4. Private SMTP relay credential — only if your Stalwart policy needs it
+### 4. Dedicated Stalwart SMTP submission credential
 
-The API relays transactional/customer sends to Stalwart on the private Docker
-network. If Stalwart authorizes that internal source without SMTP AUTH, keep:
+The API submits customer messages to Stalwart through the private Docker
+network using verified implicit TLS on port 465. Create a dedicated submission
+principal with a sender policy restricted to hosted business domains, then set:
 
 ```env
-CS_MAIL_SMTP_USERNAME=
-CS_MAIL_SMTP_PASSWORD=
+CS_MAIL_SMTP_HOST=smtp.crescentsphere.com
+CS_MAIL_SMTP_PORT=465
+CS_MAIL_SMTP_USERNAME=<business-mail-submission-user>
+CS_MAIL_SMTP_PASSWORD=<strong-service-password>
 ```
 
-If the provider requires SMTP AUTH, set a dedicated relay service credential.
-This is unrelated to customers using public submission on port 587.
+The Docker network aliases `smtp.crescentsphere.com` directly to Stalwart, so
+certificate verification does not depend on public hairpin routing. Keep this
+credential separate from Mailer's developer-mail submission principal and from
+customer app passwords.
 
 ### 5. Let's Encrypt contact email
 
@@ -126,11 +135,11 @@ CS_MAIL_API_HOST_PORT=18080
 CS_MAIL_ADMIN_HOST_PORT=18081
 CS_MAIL_CLIENT_HOST=smtp.crescentsphere.com
 CS_MAIL_CLIENT_IMAP_PORT=993
-CS_MAIL_CLIENT_SMTP_PORT=587
+CS_MAIL_CLIENT_SMTP_PORT=465
 CS_MAIL_EXPECTED_PTR=smtp.crescentsphere.com
 CS_MAIL_PROVIDER_NAMESPACE=cs-mail
 CS_MAIL_MAIL_DEFAULT_DOMAIN=crescentsphere.com
-CS_MAIL_BILLING_INSTANT_ACTIVATION=true
+CS_MAIL_BILLING_INSTANT_ACTIVATION=false
 ```
 
 `smtp.crescentsphere.com` remains the existing DNS-only Stalwart/PTR identity.

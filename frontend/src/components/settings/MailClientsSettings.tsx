@@ -160,7 +160,7 @@ export function MailClientsSettings() {
           <>
             <div className="billing-row"><div><strong>Username</strong><small>Full mailbox address</small></div><span className="admin-record">{overview.config.username}</span></div>
             <div className="billing-row"><div><strong>Incoming mail</strong><small>IMAP over TLS</small></div><span className="admin-record">{overview.config.incoming.host}:{overview.config.incoming.port}</span></div>
-            <div className="billing-row"><div><strong>Outgoing mail</strong><small>SMTP submission with STARTTLS</small></div><span className="admin-record">{overview.config.outgoing.host}:{overview.config.outgoing.port}</span></div>
+            <div className="billing-row"><div><strong>Outgoing mail</strong><small>SMTP submission with {overview.config.outgoing.security}</small></div><span className="admin-record">{overview.config.outgoing.host}:{overview.config.outgoing.port}</span></div>
           </>
         )}
       </div>

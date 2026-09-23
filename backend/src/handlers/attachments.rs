@@ -93,7 +93,9 @@ struct StoredAttachment {
     byte_size: i64,
     sha256_hex: String,
     storage_key: String,
+    #[allow(dead_code)]
     status: String,
+    #[allow(dead_code)]
     expires_at: DateTime<Utc>,
 }
 

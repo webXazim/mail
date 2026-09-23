@@ -15,7 +15,7 @@ use crate::domain::quota;
 use crate::error::ApiError;
 use crate::handlers::auth::valid_email;
 use crate::middleware::auth::AdminUser;
-use crate::services::{automation, billing, email, entitlements, imap, provisioning};
+use crate::services::{automation, billing, email, imap, provisioning};
 use crate::state::AppState;
 
 const DEFAULT_AUDIT_LIMIT: i64 = 50;
@@ -328,7 +328,7 @@ pub async fn update_user(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let (role, current_platform_role, current_status, current_plan, email, quota_bytes, current_override, mail_account_id) =
+    let (role, current_platform_role, current_status, current_plan, email, _quota_bytes, current_override, mail_account_id) =
         current.ok_or_else(|| ApiError::not_found("User not found"))?;
 
     if let Some(raw) = body.display_name {

@@ -27,6 +27,7 @@ const MAX_RULE_VALUE: usize = 1024;
 
 #[derive(sqlx::FromRow, Clone)]
 struct RuleRow {
+    #[allow(dead_code)]
     id: Uuid,
     name: String,
     enabled: bool,

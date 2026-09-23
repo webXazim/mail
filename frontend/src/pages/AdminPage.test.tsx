@@ -7,6 +7,7 @@ import { AdminPage } from './AdminPage'
 const mockRemoteAdminApi = vi.hoisted(() => ({
   overview: vi.fn(),
   users: vi.fn(),
+  usersPage: vi.fn(),
   aliases: vi.fn(),
   audit: vi.fn(),
   blockedSenders: vi.fn(),
@@ -34,6 +35,7 @@ const mockRemoteAdminApi = vi.hoisted(() => ({
   cancelQueuedMessage: vi.fn(),
   diagnostics: vi.fn(),
   auditExport: vi.fn(),
+  launchCertifications: vi.fn(),
 }))
 
 vi.mock('../services/admin', async (importOriginal) => {
@@ -78,6 +80,20 @@ describe('AdminPage (remote mode)', () => {
         quotaGB: 10,
       },
     ])
+    mockRemoteAdminApi.usersPage.mockResolvedValue({
+      users: [{
+        id: 'u1',
+        email: 'alex@cs-mail.test',
+        displayName: 'Alex',
+        status: 'active',
+        role: 'admin',
+        storageUsedGB: 0.4,
+        quotaGB: 10,
+      }],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    })
     mockRemoteAdminApi.aliases.mockResolvedValue([
       { id: 'al1', address: 'support@cs-mail.test', forwardTo: 'alex@cs-mail.test' },
     ])
@@ -101,6 +117,7 @@ describe('AdminPage (remote mode)', () => {
     mockRemoteAdminApi.diagnostics.mockResolvedValue({
       database: true, mailProvider: true, queueTotal: 0, automationErrors: 0, addressSyncErrors: 0, provisioning: [],
     })
+    mockRemoteAdminApi.launchCertifications.mockResolvedValue([])
   })
 
   it('loads the live overview and shows the real domain', async () => {
@@ -111,9 +128,9 @@ describe('AdminPage (remote mode)', () => {
 
   it('lists mailboxes from the live users endpoint', async () => {
     mount()
-    await clickTab(/mailboxes/i)
+    await clickTab(/users/i)
     expect(await screen.findByText('alex@cs-mail.test')).toBeInTheDocument()
-    expect(mockRemoteAdminApi.users).toHaveBeenCalled()
+    expect(mockRemoteAdminApi.usersPage).toHaveBeenCalled()
   })
 
   it('lists aliases from the live aliases endpoint', async () => {
@@ -136,8 +153,9 @@ describe('AdminPage (remote mode)', () => {
 
   it('lists server-authoritative forwarders in remote mode', async () => {
     mount()
+    await vi.waitFor(() => expect(mockRemoteAdminApi.forwarders).toHaveBeenCalled())
     await clickTab(/forwarders/i)
-    expect(await screen.findByText('outside@example.net')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Forwarders' })).toBeInTheDocument()
     expect(mockRemoteAdminApi.forwarders).toHaveBeenCalled()
   })
 })

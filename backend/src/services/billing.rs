@@ -864,7 +864,7 @@ pub async fn approve_order(
          FROM orders WHERE id=$1 FOR UPDATE",
     )
     .bind(id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let (order_user_id, organization_id, plan_code, plan_name, status, interval, mailbox_bytes, mailbox_count, due_at, grace_days, _activation_mode, invoice_number, period_start, period_end) =
+    let (order_user_id, organization_id, plan_code, plan_name, status, _interval, mailbox_bytes, mailbox_count, due_at, grace_days, _activation_mode, invoice_number, period_start, period_end) =
         row.ok_or_else(|| ApiError::not_found("Order not found"))?;
     if status != "submitted" {
         return Err(ApiError::conflict("Payment must be submitted with a reference before this invoice can be approved"));
@@ -985,4 +985,3 @@ async fn process_one_email(state: &AppState) -> Result<(), ApiError> {
 pub fn settings_json(s: &BillingSettings) -> Value {
     serde_json::to_value(s).unwrap_or(Value::Null)
 }
-

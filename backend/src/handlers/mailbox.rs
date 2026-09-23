@@ -524,12 +524,12 @@ pub async fn attachment(
         t.as_bytes().to_vec()
     } else if let Some(b) = item.get("data:asBase64").and_then(Value::as_str) {
         B64.decode(b)
-            .map_err(|_| bridge_err("attachment decode failure".into()))?
+            .map_err(|_| bridge_err("attachment decode failure"))?
     } else if let Some(b) = item.get("data:asOctets").and_then(Value::as_str) {
         B64.decode(b)
-            .map_err(|_| bridge_err("attachment decode failure".into()))?
+            .map_err(|_| bridge_err("attachment decode failure"))?
     } else {
-        return Err(bridge_err("attachment blob missing data".into()));
+        return Err(bridge_err("attachment blob missing data"));
     };
 
     if bytes.len() > attachments::MAX_DOWNLOAD_BYTES {
@@ -566,7 +566,7 @@ pub async fn attachment(
     );
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&disposition).map_err(|_| bridge_err("bad disposition".into()))?,
+        HeaderValue::from_str(&disposition).map_err(|_| bridge_err("bad disposition"))?,
     );
     resp.headers_mut().insert(
         header::CONTENT_LENGTH,

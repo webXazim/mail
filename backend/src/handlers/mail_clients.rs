@@ -297,6 +297,7 @@ async fn rotate_hidden_provider_password(state: &AppState, account_id: &str) {
 }
 
 fn client_config(state: &AppState, address: &str) -> Value {
+    let smtp_security = if state.mail_client_smtp_port == 465 { "TLS" } else { "STARTTLS" };
     json!({
         "username": address,
         "incoming": {
@@ -310,7 +311,7 @@ fn client_config(state: &AppState, address: &str) -> Value {
             "protocol": "SMTP",
             "host": state.mail_client_host,
             "port": state.mail_client_smtp_port,
-            "security": "STARTTLS",
+            "security": smtp_security,
             "authentication": "app_password"
         }
     })
@@ -600,7 +601,7 @@ pub async fn autoconfig(
     <outgoingServer type="smtp">
       <hostname>{host}</hostname>
       <port>{smtp_port}</port>
-      <socketType>STARTTLS</socketType>
+      <socketType>{smtp_socket_type}</socketType>
       <authentication>password-cleartext</authentication>
       <username>%EMAILADDRESS%</username>
     </outgoingServer>
@@ -609,6 +610,7 @@ pub async fn autoconfig(
         host = state.mail_client_host,
         imap_port = state.mail_client_imap_port,
         smtp_port = state.mail_client_smtp_port,
+        smtp_socket_type = if state.mail_client_smtp_port == 465 { "SSL" } else { "STARTTLS" },
     );
     let mut response = xml.into_response();
     response.headers_mut().insert(

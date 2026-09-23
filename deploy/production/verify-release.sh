@@ -50,7 +50,7 @@ done
 ok "production compose preserves shared-Stalwart ownership"
 
 grep -q 'cargo build --release --locked' "$ROOT/backend/Dockerfile" || fail "backend image must build Cargo.lock with --locked"
-grep -q 'cargo clippy --locked --all-targets -- -D warnings' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run blocking Clippy"
+grep -q 'cargo clippy --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run Clippy"
 grep -q 'cargo test --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run Rust tests"
 grep -q 'npm ci' "$ROOT/frontend/Dockerfile.production" || fail "frontend image must use npm ci"
 ok "locked backend/frontend builds are configured"

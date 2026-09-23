@@ -1,13 +1,14 @@
 # CS Mail production deployment
 
 This directory is the only authoritative production deployment path.
+For the current shared VPS, start with `QUICKSTART.md`.
 
 ## Topology
 
 - Web: `https://mail.crescentsphere.com` -> shared host Nginx 443 -> frontend/API.
 - API: `127.0.0.1:18080` only.
 - Platform Admin: `127.0.0.1:18081` only; SSH tunnel required.
-- Mail: existing shared Stalwart at DNS-only `smtp.crescentsphere.com` on 25/587/993.
+- Mail: existing shared Stalwart at DNS-only `smtp.crescentsphere.com` on 25/465/993.
 - PostgreSQL: Docker private network only.
 - Prometheus/Alertmanager: loopback only.
 - Runtime config: `/opt/cs-mail/.env.production`, outside Git, `root:root 0600`.
@@ -16,6 +17,25 @@ The Nginx site is name-based and safely coexists with the VPS's other projects
 on ports 80/443.
 
 ## First VPS setup
+
+If the checkout is already at `/srv/apps/mail` (as on this VPS), make the
+path expected by the deployment and backup service point to that checkout once:
+
+```bash
+sudo install -d -m 0755 /opt/sites
+test ! -e /opt/sites/cs-mail && sudo ln -s /srv/apps/mail /opt/sites/cs-mail
+cd /opt/sites/cs-mail
+```
+
+Before deploying CS Mail, update the **existing** Mailer-owned Stalwart stack to
+publish IMAPS 993 and confirm its TLS certificate covers
+`smtp.crescentsphere.com`. Its Docker network is
+`crescentsphere-mail-transport`. Create separate CS Mail management, JMAP and
+SMTP submission credentials there; do not reuse Mailer's developer-mail
+submission identity. The CS Mail application uses authenticated implicit TLS
+to `smtp.crescentsphere.com:465` through that network.
+
+If this is a new checkout, use the clone sequence below instead.
 
 ```bash
 sudo install -d -m 0755 /opt/sites
@@ -96,4 +116,5 @@ sudo ./deploy/production/certify-launch.sh \
   /opt/cs-mail/.env.certification
 ```
 
-Keep `CS_MAIL_BILLING_INSTANT_ACTIVATION=true` only during acceptance testing.
+Keep `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` for production. Enable it only
+temporarily for isolated acceptance testing.

@@ -29,6 +29,17 @@ fn bridge_err(e: impl std::fmt::Display) -> ApiError {
     ApiError::new(StatusCode::BAD_GATEWAY, "mail_store", e.to_string())
 }
 
+async fn plan_for(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<crate::domain::quota::PlanLimits, ApiError> {
+    let entitlements = entitlements::for_user(state, user_id).await?;
+    if !matches!(entitlements.subscription_status.as_str(), "active" | "trial") {
+        return Err(ApiError::forbidden("This business subscription is not active"));
+    }
+    Ok(entitlements.plan)
+}
+
 async fn account_for(state: &AppState, user_id: Uuid, mailbox_id: Uuid) -> Result<String, ApiError> {
     let mailbox = tenancy::active_mailbox(&state.db, user_id, None, Some(mailbox_id))
         .await?
@@ -572,7 +583,12 @@ pub async fn deliver(
     push_env(&outgoing.to);
     push_env(&outgoing.cc);
     push_env(&bcc);
-    let self_copy = account_email.to_lowercase();
+    let self_copy: String = sqlx::query_scalar("SELECT address::text FROM mailboxes WHERE id = $1")
+        .bind(mailbox_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let self_copy = self_copy.to_lowercase();
     if seen.insert(self_copy.clone()) {
         envelope.push(self_copy);
     }

@@ -1,22 +1,22 @@
-//! Minimal async SMTP submission client (WS2.3). Plaintext SMTP today: the
-//! Stalwart relay in this dev stack runs on :25 with no AUTH, so the whole
-//! dance is greet / EHLO / MAIL / RCPT / DATA. Callers only ever see
-//! `SmtpConfig` + (`from`, `to`, bytes), so authenticated submission
-//! (587/STARTTLS) can be layered in without touching them.
+//! Minimal async SMTP submission client. Port 465 uses verified implicit TLS;
+//! plaintext port 25 remains available only for unauthenticated development
+//! relays. Credentials are never sent over a plaintext connection.
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tokio_rustls::rustls::{pki_types::ServerName, ClientConfig, RootCertStore};
+use tokio_rustls::TlsConnector;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_PORT: u16 = 25;
 
-/// Immutable SMTP endpoint config. Empty `username`/`password` = anonymous
-/// relay (dev). Both set = AUTH LOGIN.
+/// Immutable SMTP endpoint config. Port 465 is implicit TLS. Empty credentials
+/// permit an unauthenticated relay only when the server policy allows it.
 #[derive(Clone, Debug)]
 pub struct SmtpConfig {
     pub host: String,
@@ -81,7 +81,14 @@ pub async fn send(
         return Err(format!("invalid envelope sender {from:?}"));
     }
 
-    let stream = tokio::time::timeout(
+    if config.username.is_empty() != config.password.is_empty() {
+        return Err("SMTP username and password must be set together".into());
+    }
+    if !config.username.is_empty() && config.port != 465 {
+        return Err("SMTP credentials require verified implicit TLS on port 465".into());
+    }
+
+    let tcp = tokio::time::timeout(
         config.timeout,
         TcpStream::connect((config.host.as_str(), config.port)),
     )
@@ -93,7 +100,25 @@ pub async fn send(
             config.host, config.port
         )
     })?;
-    let (read, write) = stream.into_split();
+    let stream: Box<dyn SmtpStream> = if config.port == 465 {
+        let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let tls = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let server_name = ServerName::try_from(config.host.clone())
+            .map_err(|_| "SMTP TLS hostname is invalid".to_string())?;
+        let encrypted = tokio::time::timeout(
+            config.timeout,
+            TlsConnector::from(std::sync::Arc::new(tls)).connect(server_name, tcp),
+        )
+        .await
+        .map_err(|_| "SMTP TLS handshake timed out".to_string())?
+        .map_err(|e| format!("SMTP TLS certificate/handshake failed: {e}"))?;
+        Box::new(encrypted)
+    } else {
+        Box::new(tcp)
+    };
+    let (read, write) = tokio::io::split(stream);
     let mut conn = Connection {
         reader: BufReader::new(read),
         writer: write,
@@ -113,12 +138,6 @@ pub async fn send(
     require_code(&ehlo, 2, "EHLO")?;
     let features = ehlo_features(&ehlo);
 
-    if !config.username.is_empty() && config.password.is_empty() {
-        return Err("SMTP_USERNAME set without SMTP_PASSWORD".into());
-    }
-    if !config.password.is_empty() && config.username.is_empty() {
-        return Err("SMTP_PASSWORD set without SMTP_USERNAME".into());
-    }
     if !config.username.is_empty() {
         if !features.contains("auth") {
             return Err("relay advertises no AUTH but credentials were configured".into());
@@ -177,9 +196,12 @@ pub async fn send(
     Ok(done.lines.join(" ").trim().to_string())
 }
 
+trait SmtpStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> SmtpStream for T {}
+
 struct Connection {
-    reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
-    writer: tokio::net::tcp::OwnedWriteHalf,
+    reader: BufReader<tokio::io::ReadHalf<Box<dyn SmtpStream>>>,
+    writer: tokio::io::WriteHalf<Box<dyn SmtpStream>>,
 }
 
 impl Connection {
@@ -320,5 +342,26 @@ mod tests {
         };
         assert!(require_code(&four, 3, "DATA").is_ok());
         assert!(require_code(&five, 2, "MAIL FROM").is_err());
+    }
+
+    #[tokio::test]
+    async fn refuses_credentials_without_tls_before_connecting() {
+        let config = SmtpConfig {
+            host: "127.0.0.1".into(),
+            port: 25,
+            username: "service".into(),
+            password: "secret".into(),
+            timeout: Duration::from_secs(1),
+        };
+        let result = send(
+            &config,
+            "sender@example.com",
+            &["to@example.com".into()],
+            b"test",
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .contains("require verified implicit TLS"));
     }
 }

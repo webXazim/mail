@@ -276,7 +276,7 @@ impl Config {
             },
             mail_client_host: env_non_empty_or("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com"),
             mail_client_imap_port: env_or("CS_MAIL_CLIENT_IMAP_PORT", "993").parse().unwrap_or(993),
-            mail_client_smtp_port: env_or("CS_MAIL_CLIENT_SMTP_PORT", "587").parse().unwrap_or(587),
+            mail_client_smtp_port: env_or("CS_MAIL_CLIENT_SMTP_PORT", "465").parse().unwrap_or(465),
             mail_client_max_app_passwords: env_or("CS_MAIL_CLIENT_MAX_APP_PASSWORDS", "5").parse().unwrap_or(5),
             mail_import_max_bytes: env_or("CS_MAIL_IMPORT_MAX_BYTES", "2147483648").parse().unwrap_or(2 * 1024 * 1024 * 1024),
             mail_import_message_max_bytes: env_or("CS_MAIL_IMPORT_MESSAGE_MAX_BYTES", "52428800").parse().unwrap_or(50 * 1024 * 1024),
@@ -351,7 +351,7 @@ impl Config {
             attachment_cleanup_secs: env_or("CS_MAIL_ATTACHMENT_CLEANUP_SECS", "900")
                 .parse()
                 .unwrap_or(900),
-            billing_instant_activation: env_or("CS_MAIL_BILLING_INSTANT_ACTIVATION", "true")
+            billing_instant_activation: env_or("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false")
                 .parse()
                 .unwrap_or(true),
             smtp: SmtpConfig::from_env(),

@@ -167,7 +167,7 @@ pub async fn create(
     let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
     let mailbox_quota=crate::services::entitlements::default_mailbox_allocation_tx(&mut tx,organization_id).await?;
 
-    let mut assigned_user = body.member_user_id;
+    let assigned_user = body.member_user_id;
     if let Some(user_id) = assigned_user {
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM organization_memberships WHERE organization_id=$1 AND user_id=$2 AND status='active')",

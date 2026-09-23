@@ -759,7 +759,6 @@ fn event_to_ics(row: &EventRow) -> String {
     let uid = if row.external_uid.is_empty() { format!("{}@cs-mail", row.id) } else { row.external_uid.clone() };
     let offset = Duration::minutes(row.timezone_offset_minutes as i64);
     let local_start = row.starts_at + offset;
-    let local_end = row.ends_at + offset;
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_string(),
         "VERSION:2.0".to_string(),

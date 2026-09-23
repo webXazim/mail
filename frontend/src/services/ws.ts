@@ -192,7 +192,10 @@ export class CSMailSocket {
 
   private connectNow() {
     if (!this.started || !isLiveSession() || !navigator.onLine) return
-    if (this.socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(this.socket.readyState)) return
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.CONNECTING || this.socket.readyState === WebSocket.OPEN)
+    ) return
     this.clearReconnect()
     this.pollAbort?.abort()
     this.pollAbort = null
@@ -331,7 +334,7 @@ export class CSMailSocket {
       if (kind === '*' || event.kind === kind) callback(event)
     }
     this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return () => { this.listeners.delete(listener) }
   }
 }
 

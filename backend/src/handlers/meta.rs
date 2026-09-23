@@ -5,8 +5,10 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 enum CapabilityState {
     Server,
+    #[allow(dead_code)]
     Partial,
     ClientOnly,
+    #[allow(dead_code)]
     Planned,
 }
 
