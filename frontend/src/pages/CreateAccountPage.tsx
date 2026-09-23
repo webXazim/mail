@@ -33,7 +33,7 @@ export function CreateAccountPage() {
         localStorage.setItem('cs-mail:display-name', name.trim())
         navigate('/mail/business')
       } else {
-        navigate('/verify-email')
+        navigate('/verify-email', { state: { email: email.trim().toLowerCase() } })
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to create account')

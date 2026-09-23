@@ -89,6 +89,18 @@ describe('LoginPage', () => {
     expect(navigateMock).not.toHaveBeenCalled()
   })
 
+  it('offers the verification resend flow when sign-in requires verification', async () => {
+    const user = userEvent.setup()
+    vi.mocked(authApi.login).mockRejectedValue(new Error('Please verify your email before signing in'))
+    mount()
+
+    await user.type(screen.getByLabelText('Email address'), 'alex@cs-mail.test')
+    await user.type(screen.getByLabelText('Password'), 'Strong-Pass!1')
+    await user.click(screen.getByRole('button', { name: /sign in/i }))
+
+    expect(await screen.findByRole('link', { name: /resend verification email/i })).toHaveAttribute('href', '/verify-email')
+  })
+
   it('toggles password visibility from the reveal button', async () => {
     const user = userEvent.setup()
     mount()

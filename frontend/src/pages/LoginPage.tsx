@@ -22,6 +22,7 @@ export function LoginPage() {
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
+  const [unverifiedEmail, setUnverifiedEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [challengeToken, setChallengeToken] = useState('')
   const [factorCode, setFactorCode] = useState('')
@@ -30,6 +31,7 @@ export function LoginPage() {
     event.preventDefault()
     const form = new FormData(event.currentTarget as HTMLFormElement)
     setError('')
+    setUnverifiedEmail('')
     setLoading(true)
     try {
       const result = await authApi.login(String(form.get('email')), String(form.get('password')))
@@ -42,6 +44,9 @@ export function LoginPage() {
       await continueAfterLogin()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to sign in')
+      if (cause instanceof Error && /verify your email/i.test(cause.message)) {
+        setUnverifiedEmail(String(form.get('email') || '').trim().toLowerCase())
+      }
     } finally {
       setLoading(false)
     }
@@ -163,6 +168,11 @@ export function LoginPage() {
             <p className="form-error" role="alert">
               {error}
             </p>
+          )}
+          {unverifiedEmail && (
+            <Link to="/verify-email" state={{ email: unverifiedEmail }} className="text-button">
+              Resend verification email
+            </Link>
           )}
           <label className="remember">
             <input

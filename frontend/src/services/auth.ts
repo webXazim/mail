@@ -102,7 +102,7 @@ export const authApi = {
     if (!name.trim() || !email.includes('@') || password.length < 12)
       throw new Error('Please fill in all fields correctly')
     try {
-      const result = await apiFetch<AuthResponse>(
+      const result = await apiFetch<AuthResponse | { ok: boolean; message: string }>(
         '/api/auth/register',
         {
           method: 'POST',
@@ -111,7 +111,8 @@ export const authApi = {
         { retry: false },
       )
       clearProfileCache()
-      tokenStore.set(result.access)
+      if ('access' in result && result.access) tokenStore.set(result.access)
+      else tokenStore.clear()
       authApi.setDemo(false)
       return result
     } catch (cause) {

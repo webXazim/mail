@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, BadgeCheck, KeyRound, UserPlus } from 'lucide-react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { AuthShell } from '../components/AuthShell'
 import { authApi } from '../services/auth'
 import { auditApi } from '../services/audit'
 
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams()
-  const navigate = useNavigate()
+  const location = useLocation()
   const token = searchParams.get('token') || ''
+  const initialEmail = (location.state as { email?: string } | null)?.email || ''
   const [error, setError] = useState('')
   const [sentTo, setSentTo] = useState('')
   const [verified, setVerified] = useState(false)
@@ -37,12 +38,6 @@ export function VerifyEmailPage() {
     try {
       await authApi.verifyEmail(token)
       auditApi.add('security', 'Email verified', 'You confirmed your email address')
-      const returnTo = sessionStorage.getItem('cs-mail:return-to')
-      if (returnTo) {
-        sessionStorage.removeItem('cs-mail:return-to')
-        navigate(returnTo, { replace: true })
-        return
-      }
       setVerified(true)
     } catch (cause) {
       setError(
@@ -98,12 +93,16 @@ export function VerifyEmailPage() {
         </div>
       ) : (
         <form onSubmit={resend}>
+          <p className="auth-status" role="status">
+            Check your inbox and spam folder for the verification link. If it has not arrived, request a new one below.
+          </p>
           <label>
             Email address
             <input
               name="email"
               type="email"
               autoComplete="email"
+              defaultValue={initialEmail}
               placeholder="you@example.com"
               required
             />

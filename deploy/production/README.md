@@ -93,6 +93,16 @@ ssh -L 18081:127.0.0.1:18081 <user>@<vps>
 
 Browse to `http://localhost:18081/mail/admin`.
 
+Platform Admin has no separate password in `.env.production`. After the first
+CS Mail account has verified its email, promote that exact account once:
+
+```bash
+sudo ./deploy/production/bootstrap-first-admin.sh you@example.com
+```
+
+The command refuses to run if an active platform admin already exists. Sign in
+through the SSH tunnel using that account's normal CS Mail email and password.
+
 ## Backups and rollback
 
 `bootstrap-vps.sh` enables `cs-mail-backup.timer`. Shared Stalwart data requires
