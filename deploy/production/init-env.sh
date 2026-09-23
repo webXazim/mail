@@ -82,7 +82,7 @@ chmod 600 "$ENV_FILE"
 
 echo "CS Mail environment initialized: $ENV_FILE"
 echo "Generated CS Mail-owned secrets were preserved if already present."
-echo "Operator input still required: Stalwart network/token/JMAP credentials, Let's Encrypt email, alert webhook."
+echo "Operator input still required: Stalwart network/token/JMAP/SMTP credentials and an alert email sender/recipient."
 echo "Web: https://mail.crescentsphere.com via the independent platform edge"
 echo "Mail protocols/PTR: smtp.crescentsphere.com (DNS-only)"
 echo "Next: sudoedit $ENV_FILE, then follow deploy/edge/README.md before the first deploy."

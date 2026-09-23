@@ -229,9 +229,9 @@ def check_static(root: Path) -> str:
         raise GateError("production nginx must ship the outer SPA Content-Security-Policy")
     if not re.search(r"location = /api/mail-imports\s*\{[\s\S]*?client_max_body_size\s+2100m;", nginx):
         raise GateError("MBOX body-size exception must be scoped to /api/mail-imports")
-    alertmanager = (root / "deploy/monitoring/alertmanager.yml").read_text()
-    if "url_file: /run/secrets/cs_mail_alert_webhook_url" not in alertmanager:
-        raise GateError("Alertmanager must use the mounted production webhook secret")
+    alertmanager = (root / "deploy/monitoring/alertmanager.production.yml").read_text()
+    if "email_configs:" not in alertmanager or "smtp_auth_password_file: /run/secrets/cs_mail_alert_smtp_password" not in alertmanager:
+        raise GateError("Alertmanager production receiver must use email and the mounted SMTP secret")
     if "127.0.0.1:9099" in alertmanager:
         raise GateError("Alertmanager still contains the legacy localhost receiver")
     audit = root / "backend/.cargo/audit.toml"
@@ -380,23 +380,19 @@ def check_env_file(env_file: Path, env: dict[str, str]) -> str:
         "CS_MAIL_PROVISIONING_KEY", "CS_MAIL_TOTP_KEY", "CS_MAIL_MAIL_ADMIN_TOKEN",
         "CS_MAIL_MAIL_JMAP_USERNAME", "CS_MAIL_MAIL_JMAP_SECRET",
         "CS_MAIL_SHARED_PROVIDER_NETWORK", "CS_MAIL_RELEASE_SHA256",
-        "CS_MAIL_DKIM_SELECTOR", "CS_MAIL_ALERT_WEBHOOK_FILE",
+        "CS_MAIL_DKIM_SELECTOR", "CS_MAIL_SMTP_USERNAME", "CS_MAIL_SMTP_PASSWORD",
     )
     sha = env["CS_MAIL_RELEASE_SHA256"].lower()
     if not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise GateError("CS_MAIL_RELEASE_SHA256 must be the 64-character deployed source-tree SHA-256")
     if env.get("CS_MAIL_PROVIDER_NAMESPACE", "cs-mail") != "cs-mail":
         raise GateError("CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail")
-    alert_file = Path(env["CS_MAIL_ALERT_WEBHOOK_FILE"])
-    if not alert_file.is_file():
-        raise GateError(f"missing Alertmanager webhook secret file: {alert_file}")
-    alert_mode = alert_file.stat().st_mode & 0o777
-    if alert_mode & 0o077:
-        raise GateError(f"{alert_file} permissions are {alert_mode:o}; require 600 or stricter")
-    alert_url = alert_file.read_text().strip()
-    if not re.fullmatch(r"https://[^\s]+", alert_url):
-        raise GateError("Alertmanager webhook secret must contain exactly one HTTPS URL")
-    return f"production secrets/config present; mode={mode:o}; alert secret mode={alert_mode:o}; release={sha[:12]}…"
+    alert_from = env.get("CS_MAIL_ALERT_EMAIL_FROM") or env["CS_MAIL_SMTP_USERNAME"]
+    alert_to = env.get("CS_MAIL_ALERT_EMAIL_TO") or env.get("CS_MAIL_LETSENCRYPT_EMAIL", "")
+    for label, address in (("sender", alert_from), ("recipient", alert_to)):
+        if not re.fullmatch(r"[^\s@,]+@[^\s@,]+\.[^\s@,]+", address):
+            raise GateError(f"Alertmanager {label} must be one valid email address")
+    return f"production secrets/config present; mode={mode:o}; email recipient configured; release={sha[:12]}…"
 
 
 def check_subprocess_script(root: Path, env_file: Path, script: str, timeout: int) -> str:

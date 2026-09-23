@@ -1,11 +1,8 @@
-# CS Mail Alertmanager config (compose: docker-compose.yml::alertmanager, L190
-# gate, `docker compose --profile monitoring up -d prometheus alertmanager`).
+# Development-only Alertmanager webhook fixture. Production renders
+# alertmanager.production.yml into a private SMTP email configuration.
 #
-# Routing lives in deploy/monitoring/alertmanager.yml (this file) and the
-# notification receiver contract is verified as part of the LAUNCH L190 gate:
-# each alert's `runbook:` annotation points at a real anchor in
-# deploy/monitoring/RUNBOOK.md, and the blocking CI "Monitoring" job re-checks
-# that the rules + test stay in sync (see .github/workflows/ci.yml).
+# Production routing is checked by the launch gate; alert rules and runbooks
+# are checked separately by CI.
 route:
   group_by: ['alertname']
   # Group a few minutes of related fires into one notification instead of

@@ -133,8 +133,8 @@ need direct HTTPS.
 
 ## 4. Deploy CS Mail
 
-Set a real HTTPS alert receiver in
-`/opt/cs-mail/secrets/alert-webhook-url` (one line, root-owned, mode 0600).
+Set `CS_MAIL_ALERT_EMAIL_TO` in `/opt/cs-mail/.env.production` and set
+`CS_MAIL_ALERT_EMAIL_FROM` if the SMTP username is not a permitted sender address.
 Then use the normal production pipeline, which now detects Messenger mode and
 starts the two private CS Mail web containers instead of host Nginx:
 

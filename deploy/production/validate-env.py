@@ -85,6 +85,11 @@ def main() -> int:
     email=values.get("CS_MAIL_LETSENCRYPT_EMAIL", "")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         print("CS_MAIL_LETSENCRYPT_EMAIL must be a valid email address", file=sys.stderr); return 1
+    alert_from = values.get("CS_MAIL_ALERT_EMAIL_FROM", "") or values.get("CS_MAIL_SMTP_USERNAME", "")
+    alert_to = values.get("CS_MAIL_ALERT_EMAIL_TO", "") or email
+    for label, address in (("CS_MAIL_ALERT_EMAIL_FROM", alert_from), ("CS_MAIL_ALERT_EMAIL_TO", alert_to)):
+        if not re.fullmatch(r"[^\s@,]+@[^\s@,]+\.[^\s@,]+", address):
+            print(f"{label} must resolve to one valid email address", file=sys.stderr); return 1
     return 0
 
 

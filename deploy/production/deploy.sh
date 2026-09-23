@@ -161,7 +161,8 @@ done
 [[ $ready -eq 1 ]] || { echo "new API failed readiness" >&2; exit 1; }
 
 echo "[5/8] Starting monitoring stack..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --profile monitoring prometheus alertmanager
+"$ROOT/deploy/production/render-alertmanager.py"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --profile monitoring --force-recreate alertmanager prometheus
 
 echo "[6/8] Validating Nginx and atomically publishing frontend..."
 if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then

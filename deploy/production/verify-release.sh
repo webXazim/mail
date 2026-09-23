@@ -14,7 +14,7 @@ for shared_file in nginx-inner.conf nginx-admin-inner.conf nginx-shared-edge.boo
   [[ -f "$ROOT/deploy/production/$shared_file" ]] || fail "shared Messenger proxy file is missing: $shared_file"
 done
 [[ -f "$ROOT/deploy/production/CREDENTIALS.md" ]] || fail "production credential checklist is missing"
-for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py; do
+for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py render-alertmanager.py; do
   [[ -x "$ROOT/deploy/production/$script" ]] || fail "production script is missing/not executable: $script"
 done
 for edge_file in .env.example docker-compose.yml haproxy.cfg nginx-mail.conf reload-on-renew.sh README.md; do

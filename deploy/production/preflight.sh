@@ -109,15 +109,12 @@ if [[ "$proxy_mode" == messenger || "$proxy_mode" == edge ]]; then
 fi
 ok "web TLS certificate exists, matches hostname and is not near expiry"
 
-alert_file=${CS_MAIL_ALERT_WEBHOOK_FILE:-/opt/cs-mail/secrets/alert-webhook-url}
-[[ -f "$alert_file" ]] || fail "missing Alertmanager webhook secret: $alert_file"
-alert_perm=$(stat -c '%a' "$alert_file")
-(( 10#$alert_perm <= 600 )) || fail "$alert_file must be mode 600 or stricter (got $alert_perm)"
-mapfile -t alert_lines < <(sed '/^[[:space:]]*$/d' "$alert_file")
-(( ${#alert_lines[@]} == 1 )) || fail "$alert_file must contain exactly one non-empty line"
-alert_url=${alert_lines[0]%$'\r'}
-[[ "$alert_url" =~ ^https://[^[:space:]]+$ ]] || fail "$alert_file must contain exactly one HTTPS webhook URL"
-ok "Alertmanager receiver secret is present and private"
+alert_from=${CS_MAIL_ALERT_EMAIL_FROM:-${CS_MAIL_SMTP_USERNAME:-}}
+alert_to=${CS_MAIL_ALERT_EMAIL_TO:-${CS_MAIL_LETSENCRYPT_EMAIL:-}}
+[[ "$alert_from" =~ ^[^[:space:]@,]+@[^[:space:]@,]+\.[^[:space:]@,]+$ ]] || fail "set CS_MAIL_ALERT_EMAIL_FROM to a permitted sender email address"
+[[ "$alert_to" =~ ^[^[:space:]@,]+@[^[:space:]@,]+\.[^[:space:]@,]+$ ]] || fail "set CS_MAIL_ALERT_EMAIL_TO to one valid alert recipient"
+[[ ${CS_MAIL_SMTP_PASSWORD:-} != *$'\n'* && ${CS_MAIL_SMTP_PASSWORD:-} != *$'\r'* ]] || fail "SMTP credential must be one line"
+ok "Alertmanager email sender and recipient are configured"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config >/dev/null
 if docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --services | grep -qx mail; then

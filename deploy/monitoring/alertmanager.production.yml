@@ -1,0 +1,21 @@
+# Rendered by deploy/production/render-alertmanager.py before deployment.
+global:
+  smtp_smarthost: smtp.crescentsphere.com:465
+  smtp_from: __ALERT_FROM__
+  smtp_auth_username: __SMTP_USERNAME__
+  smtp_auth_password_file: /run/secrets/cs_mail_alert_smtp_password
+  # Alertmanager v0.27 uses TLS immediately on :465; STARTTLS must stay off.
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: cs-mail-ops
+
+receivers:
+  - name: cs-mail-ops
+    email_configs:
+      - to: __ALERT_TO__
+        send_resolved: true

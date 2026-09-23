@@ -31,11 +31,6 @@ install -d -m 0700 /opt/backups/cs-mail /var/log/cs-mail
 
 "$SCRIPT_DIR/init-env.sh" "$ENV_FILE"
 
-# Create the alert secret file if absent, but never guess a receiver URL.
-if [[ ! -e "$STATE/secrets/alert-webhook-url" ]]; then
-  install -o root -g root -m 0600 /dev/null "$STATE/secrets/alert-webhook-url"
-fi
-
 install -m 0644 "$SCRIPT_DIR/systemd/cs-mail-backup.service" /etc/systemd/system/cs-mail-backup.service
 install -m 0644 "$SCRIPT_DIR/systemd/cs-mail-backup.timer" /etc/systemd/system/cs-mail-backup.timer
 systemctl daemon-reload
@@ -44,7 +39,7 @@ systemctl enable --now cs-mail-backup.timer
 echo "CS Mail VPS bootstrap PASS"
 echo "1) Edit: sudoedit $ENV_FILE"
 echo "2) Fill the REQUIRED OPERATOR INPUT values documented in CREDENTIALS.md"
-echo "3) Put one HTTPS alert receiver URL in $STATE/secrets/alert-webhook-url"
+echo "3) Set CS_MAIL_ALERT_EMAIL_TO and, if needed, CS_MAIL_ALERT_EMAIL_FROM in $ENV_FILE"
 echo "4) Create DNS-only A mail.crescentsphere.com -> this VPS"
 echo "5) Follow: $SCRIPT_DIR/../edge/README.md for DNS-01 TLS and independent edge cutover"
 echo "6) Deploy: $SCRIPT_DIR/deploy-from-git.sh main"

@@ -5,13 +5,14 @@
 | Location | Purpose | Security |
 |---|---|---|
 | `/opt/cs-mail/.env.production` | runtime settings + application/provider credentials | `root:root 0600`, outside Git |
-| `/opt/cs-mail/secrets/alert-webhook-url` | Alertmanager receiver | `root:root 0600` |
+| `/opt/cs-mail/secrets/alertmanager.yml` | Rendered Alertmanager email config | `root:root 0600` |
+| `/opt/cs-mail/secrets/alert-smtp-password` | Alertmanager SMTP password | `root:root 0600` |
 | `/opt/cs-mail/runtime/` | generated deployment metadata | `root:root 0700` |
 | `/opt/cs-mail/www/releases/` | immutable frontend releases | no secrets |
 | `/opt/cs-mail/www/current` | atomic active frontend symlink | no secrets |
 | `/etc/letsencrypt/` | web TLS private key/certificate | managed by Certbot |
 
-Never put the live env, TLS private keys, provider tokens or alert webhook in
+Never put the live env, TLS private keys, provider tokens or alert SMTP password in
 GitHub.
 
 ## Fixed production topology
@@ -41,7 +42,7 @@ Only the following normal first-deploy values require operator input:
 4. `CS_MAIL_MAIL_JMAP_SECRET`
 5. `CS_MAIL_LETSENCRYPT_EMAIL`
 6. `CS_MAIL_SMTP_USERNAME` / `CS_MAIL_SMTP_PASSWORD` for dedicated TLS submission
-7. `/opt/cs-mail/secrets/alert-webhook-url`
+7. `CS_MAIL_ALERT_EMAIL_TO` and, if the SMTP username is not a permitted sender address, `CS_MAIL_ALERT_EMAIL_FROM`
 
 See `CREDENTIALS.md` for discovery/setup commands.
 

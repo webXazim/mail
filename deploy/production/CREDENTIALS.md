@@ -107,24 +107,21 @@ CS_MAIL_LETSENCRYPT_EMAIL=you@example.com
 This is not an application login. It is used by Certbot for the certificate on
 `mail.crescentsphere.com`.
 
-### 6. Alert receiver webhook
+### 6. Alert email
 
-Put exactly one HTTPS webhook URL in:
+Alertmanager uses the dedicated CS Mail SMTP credential above over verified
+implicit TLS on port 465. Set the recipient in `.env.production`:
 
-```text
-/opt/cs-mail/secrets/alert-webhook-url
+```env
+CS_MAIL_ALERT_EMAIL_TO=you@example.com
+CS_MAIL_ALERT_EMAIL_FROM=alerts@crescentsphere.com
 ```
 
-Commands:
-
-```bash
-sudoedit /opt/cs-mail/secrets/alert-webhook-url
-sudo chown root:root /opt/cs-mail/secrets/alert-webhook-url
-sudo chmod 600 /opt/cs-mail/secrets/alert-webhook-url
-```
-
-The URL is intentionally stored separately from `.env.production` because
-Alertmanager supports a file-based secret.
+The recipient defaults to `CS_MAIL_LETSENCRYPT_EMAIL` if left blank. The sender
+defaults to `CS_MAIL_SMTP_USERNAME` when that username is a full email address.
+The sender must be allowed by the Stalwart submission principal's sender policy.
+Deployment writes the SMTP password into a private, root-owned file for
+Alertmanager. The old `alert-webhook-url` file is unused.
 
 ## Values already fixed for your VPS design
 
@@ -170,7 +167,7 @@ Cloudflare proxy trust configuration.
 cd /opt/sites/cs-mail
 sudo ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
-sudoedit /opt/cs-mail/secrets/alert-webhook-url
+sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Follow deploy/edge/README.md for the DNS-01 certificate and edge cutover.
 sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production

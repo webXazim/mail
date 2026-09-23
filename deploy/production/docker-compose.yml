@@ -205,15 +205,16 @@ services:
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
+    user: "0:0"
     restart: unless-stopped
     profiles: ["monitoring"]
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
     volumes:
-      - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - ${CS_MAIL_ALERT_WEBHOOK_FILE:-/opt/cs-mail/secrets/alert-webhook-url}:/run/secrets/cs_mail_alert_webhook_url:ro
+      - /opt/cs-mail/secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /opt/cs-mail/secrets/alert-smtp-password:/run/secrets/cs_mail_alert_smtp_password:ro
     ports:
       - "127.0.0.1:19093:9093"
-    networks: [backend]
+    networks: [backend, shared_mail]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     mem_limit: 192m
