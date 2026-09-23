@@ -172,7 +172,7 @@ sudo ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/secrets/alert-webhook-url
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+# Follow deploy/production/SHARED_PROXY.md for the Messenger edge TLS setup.
 sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/deploy-from-git.sh main
 sudo ./deploy/production/status.sh /opt/cs-mail/.env.production

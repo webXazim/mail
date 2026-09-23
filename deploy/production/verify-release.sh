@@ -10,6 +10,9 @@ ok(){ echo "ok: $*"; }
 [[ -f "$ROOT/deploy/production/docker-compose.yml" ]] || fail "production compose is missing"
 [[ -f "$ROOT/deploy/production/nginx-mail.crescentsphere.com.conf" ]] || fail "production Nginx config is missing"
 [[ -f "$ROOT/deploy/production/nginx-mail.crescentsphere.com.bootstrap.conf" ]] || fail "TLS bootstrap Nginx config is missing"
+for shared_file in nginx-inner.conf nginx-admin-inner.conf nginx-shared-edge.bootstrap.conf nginx-shared-edge.conf SHARED_PROXY.md; do
+  [[ -f "$ROOT/deploy/production/$shared_file" ]] || fail "shared Messenger proxy file is missing: $shared_file"
+done
 [[ -f "$ROOT/deploy/production/CREDENTIALS.md" ]] || fail "production credential checklist is missing"
 for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py; do
   [[ -x "$ROOT/deploy/production/$script" ]] || fail "production script is missing/not executable: $script"
@@ -24,7 +27,15 @@ grep -q 'listen 80;' "$nginx_file" || fail "web vhost must listen on shared HTTP
 grep -q 'listen 127.0.0.1:18081;' "$nginx_file" || fail "Platform Admin must remain localhost-only"
 if grep -q 'listen 127.0.0.1:18082' "$nginx_file"; then fail "legacy Cloudflare Tunnel origin must not remain"; fi
 if grep -q 'real_ip_header CF-Connecting-IP' "$nginx_file"; then fail "Cloudflare-only real-IP trust must not remain in direct-DNS mode"; fi
-ok "direct shared-Nginx web topology is configured"
+grep -q 'CS_MAIL_WEB_PROXY_MODE=messenger' "$ROOT/deploy/production/.env.production.example" || fail "Messenger proxy mode is missing from the production env contract"
+grep -q 'aliases: \[cs-mail-web\]' "$ROOT/deploy/production/docker-compose.yml" || fail "CS Mail private web alias is missing"
+grep -q '127.0.0.1:.*:8081' "$ROOT/deploy/production/docker-compose.yml" || fail "admin web must bind only to loopback"
+grep -q 'server_name mail.crescentsphere.com;' "$ROOT/deploy/production/nginx-shared-edge.conf" || fail "Messenger edge CS Mail vhost is missing"
+grep -q 'ssl_certificate /etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem;' "$ROOT/deploy/production/nginx-shared-edge.conf" || fail "Messenger edge must use a public Let's Encrypt certificate"
+for route in '/api/admin' '/mail/admin' '/api/metrics'; do
+  grep -q "$route" "$ROOT/deploy/production/nginx-inner.conf" || fail "public inner web is missing protected route $route"
+done
+ok "shared Messenger proxy topology is configured"
 
 for generated in frontend/node_modules frontend/dist frontend/coverage backend/target backend/.cs-mail-target .cache; do
   [[ ! -e "$ROOT/$generated" ]] || fail "generated path must not be committed: $generated"

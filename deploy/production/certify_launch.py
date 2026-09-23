@@ -188,6 +188,21 @@ def check_static(root: Path) -> str:
     if "real_ip_header CF-Connecting-IP" in nginx or "listen 127.0.0.1:18082" in nginx:
         raise GateError("legacy Cloudflare Tunnel origin directives must not remain")
     env_example = (root / "deploy/production/.env.production.example").read_text()
+    if "CS_MAIL_WEB_PROXY_MODE=messenger" in env_example:
+        edge = (root / "deploy/production/nginx-shared-edge.conf").read_text()
+        public_inner = (root / "deploy/production/nginx-inner.conf").read_text()
+        admin_inner = (root / "deploy/production/nginx-admin-inner.conf").read_text()
+        if "cs-mail-web" not in compose or "cs-messenger_messenger" not in compose:
+            raise GateError("Messenger shared edge network and CS Mail web alias are required")
+        if "127.0.0.1:${CS_MAIL_ADMIN_HOST_PORT:-18081}:8081" not in compose:
+            raise GateError("CS Mail admin web must bind only to VPS loopback")
+        if "server_name mail.crescentsphere.com;" not in edge or "ssl_certificate /etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem;" not in edge:
+            raise GateError("Messenger CS Mail edge must use its own public Let's Encrypt certificate")
+        for blocked in ("/api/admin", "/mail/admin", "/api/metrics"):
+            if blocked not in edge or blocked not in public_inner:
+                raise GateError(f"public CS Mail web must block {blocked}")
+        if 'proxy_set_header X-CS-Admin-Local "1";' not in admin_inner:
+            raise GateError("localhost-only admin web must mark admin requests")
     if "CS_MAIL_CLIENT_HOST=smtp.crescentsphere.com" not in env_example or "CS_MAIL_EXPECTED_PTR=smtp.crescentsphere.com" not in env_example:
         raise GateError("production env contract must use the existing smtp.crescentsphere.com mail/PTR identity")
     if "CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH=true" not in env_example or "CS_MAIL_LETSENCRYPT_EMAIL=" not in env_example:
@@ -331,7 +346,7 @@ def check_static(root: Path) -> str:
         raise GateError("localhost-only admin reverse proxy is missing")
     if "CS_MAIL_BILLING_INSTANT_ACTIVATION:-false" not in compose:
         raise GateError("production billing must default to payment approval")
-    return "contract v32, migration 0041, direct shared-Nginx HTTPS web vhost, smtp.crescentsphere.com mail/PTR identity, secure centralized production configuration, full localhost SaaS control plane, deterministic Docker builds, atomic frontend publishing, release-tagged API deployment, pre-migration backup, GitHub-to-VPS deployment, and payment approval by default are coherent"
+    return "contract v32, migration 0041, shared Messenger Nginx HTTPS edge, smtp.crescentsphere.com mail/PTR identity, secure centralized production configuration, localhost SaaS control plane, deterministic Docker builds, atomic frontend publishing, release-tagged API deployment, pre-migration backup, GitHub-to-VPS deployment, and payment approval by default are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

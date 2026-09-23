@@ -27,6 +27,8 @@ set -a; source "$ENV_FILE"; set +a
 [[ ${CS_MAIL_CORS_ORIGINS:-} == *"https://${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}"* ]] || fail "CS_MAIL_CORS_ORIGINS must include the public web origin"
 case ${CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH:-true} in true|false) ;; *) fail "CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH must be true or false" ;; esac
 case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} in true|false) ;; *) fail "CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false" ;; esac
+proxy_mode=${CS_MAIL_WEB_PROXY_MODE:-host}
+case "$proxy_mode" in host|messenger) ;; *) fail "CS_MAIL_WEB_PROXY_MODE must be host or messenger" ;; esac
 [[ ${CS_MAIL_CLIENT_HOST:-smtp.crescentsphere.com} == smtp.crescentsphere.com ]] || fail "CS_MAIL_CLIENT_HOST must remain smtp.crescentsphere.com"
 [[ ${CS_MAIL_EXPECTED_PTR:-smtp.crescentsphere.com} == smtp.crescentsphere.com ]] || fail "CS_MAIL_EXPECTED_PTR must remain smtp.crescentsphere.com"
 [[ ${CS_MAIL_CLIENT_HOST} != ${CS_MAIL_WEB_HOST} ]] || fail "web and mail protocol hostnames must be different"
@@ -34,26 +36,38 @@ case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} in true|false) ;; *) fail "CS_M
 [[ ${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem} == /etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem ]] || fail "CS_MAIL_WEB_TLS_KEY must use the managed mail.crescentsphere.com Let's Encrypt path"
 [[ -n ${CS_MAIL_SHARED_PROVIDER_NETWORK:-} ]] || fail "shared provider Docker network is not configured"
 docker network inspect "$CS_MAIL_SHARED_PROVIDER_NETWORK" >/dev/null 2>&1 || fail "Docker network $CS_MAIL_SHARED_PROVIDER_NETWORK does not exist"
+if [[ "$proxy_mode" == messenger ]]; then
+  web_network=${CS_MAIL_SHARED_WEB_NETWORK:-cs-messenger_messenger}
+  docker network inspect "$web_network" >/dev/null 2>&1 || fail "Docker network $web_network does not exist"
+  [[ ${CS_MAIL_TRUSTED_PROXY_IPS:-} == '172.29.40.10,172.29.40.11' ]] || fail "shared proxy mode requires only the two fixed CS Mail web proxy IPs"
+  [[ ${CS_MAIL_BACKEND_SUBNET:-} == '172.29.40.0/24' ]] || fail "shared proxy mode requires the reserved backend subnet"
+  edge_container=${CS_MAIL_SHARED_EDGE_CONTAINER:-cs-messenger-nginx-1}
+  docker inspect "$edge_container" >/dev/null 2>&1 || fail "shared edge container $edge_container is missing"
+  docker exec "$edge_container" nginx -t >/dev/null 2>&1 || fail "shared edge Nginx configuration is invalid"
+  docker exec "$edge_container" nginx -T 2>&1 | grep 'server_name mail.crescentsphere.com;' >/dev/null || fail "shared edge has no CS Mail vhost"
+fi
 [[ ${CS_MAIL_SMTP_HOST:-} == smtp.crescentsphere.com ]] || fail "private SMTP must use the Stalwart TLS certificate name"
 [[ ${CS_MAIL_SMTP_PORT:-} == 465 ]] || fail "private SMTP must use authenticated implicit TLS on port 465"
 [[ -n ${CS_MAIL_SMTP_USERNAME:-} && -n ${CS_MAIL_SMTP_PASSWORD:-} ]] || fail "dedicated Stalwart SMTP submission credentials are required"
 
 # This VPS hosts multiple web projects. Refuse a duplicate enabled vhost for the
 # exact CS Mail hostname rather than relying on Nginx's conflict warning/order.
-our_link=${CS_MAIL_NGINX_LINK:-/etc/nginx/sites-enabled/cs-mail.conf}
-our_real=$(readlink -f "$our_link" 2>/dev/null || true)
-conflicts=()
-for dir in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
-  [[ -d "$dir" ]] || continue
-  while IFS= read -r -d '' f; do
-    real=$(readlink -f "$f" 2>/dev/null || printf '%s' "$f")
-    [[ -n "$our_real" && "$real" == "$our_real" ]] && continue
-    if grep -Eq 'server_name[[:space:]]+[^;]*mail\.crescentsphere\.com([^[:alnum:].-]|;)' "$f"; then
-      conflicts+=("$f")
-    fi
-  done < <(find -L "$dir" -maxdepth 1 -type f -print0)
-done
-(( ${#conflicts[@]} == 0 )) || fail "mail.crescentsphere.com is already declared by another enabled Nginx config: ${conflicts[*]}"
+if [[ "$proxy_mode" == host ]]; then
+  our_link=${CS_MAIL_NGINX_LINK:-/etc/nginx/sites-enabled/cs-mail.conf}
+  our_real=$(readlink -f "$our_link" 2>/dev/null || true)
+  conflicts=()
+  for dir in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
+    [[ -d "$dir" ]] || continue
+    while IFS= read -r -d '' f; do
+      real=$(readlink -f "$f" 2>/dev/null || printf '%s' "$f")
+      [[ -n "$our_real" && "$real" == "$our_real" ]] && continue
+      if grep -Eq 'server_name[[:space:]]+[^;]*mail\.crescentsphere\.com([^[:alnum:].-]|;)' "$f"; then
+        conflicts+=("$f")
+      fi
+    done < <(find -L "$dir" -maxdepth 1 -type f -print0)
+  done
+  (( ${#conflicts[@]} == 0 )) || fail "mail.crescentsphere.com is already declared by another enabled Nginx config: ${conflicts[*]}"
+fi
 
 # Catch the common exact Docker subnet collision before Compose attempts to
 # create its bridge. Existing cs-mail-prod_backend is expected on upgrades.
@@ -74,9 +88,14 @@ ok "host tooling, environment permissions and free disk are valid"
 
 cert=${CS_MAIL_WEB_TLS_CERT:-/etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem}
 key=${CS_MAIL_WEB_TLS_KEY:-/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem}
-[[ -s "$cert" && -s "$key" ]] || fail "web TLS certificate is missing; run deploy/production/setup-web-tls.sh first"
+[[ -s "$cert" && -s "$key" ]] || fail "web TLS certificate is missing; follow deploy/production/SHARED_PROXY.md"
 openssl x509 -in "$cert" -noout -checkend 604800 >/dev/null || fail "web TLS certificate expires within 7 days"
 openssl x509 -in "$cert" -noout -checkhost "${CS_MAIL_WEB_HOST}" >/dev/null || fail "web TLS certificate does not cover ${CS_MAIL_WEB_HOST}"
+if [[ "$proxy_mode" == messenger ]]; then
+  curl --noproxy '*' --resolve "${CS_MAIL_WEB_HOST}:443:127.0.0.1" \
+    -sS -o /dev/null "https://${CS_MAIL_WEB_HOST}/" \
+    || fail "shared edge web certificate is not publicly trusted or the vhost is unreachable"
+fi
 ok "web TLS certificate exists, matches hostname and is not near expiry"
 
 alert_file=${CS_MAIL_ALERT_WEBHOOK_FILE:-/opt/cs-mail/secrets/alert-webhook-url}

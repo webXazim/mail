@@ -16,7 +16,7 @@ GitHub.
 
 ## Fixed production topology
 
-- `mail.crescentsphere.com` — DNS-only A record to the VPS; shared host Nginx on 80/443.
+- `mail.crescentsphere.com` — DNS-only A record to the VPS; Messenger's Docker Nginx owns 80/443. Follow `SHARED_PROXY.md`.
 - `127.0.0.1:18080` — CS Mail Rust API, never public.
 - `127.0.0.1:18081` — Platform Admin, SSH tunnel only.
 - `smtp.crescentsphere.com` — existing DNS-only Stalwart mail/PTR identity.
@@ -50,7 +50,7 @@ See `CREDENTIALS.md` for discovery/setup commands.
 After `mail.crescentsphere.com` points to the VPS and port 80 is reachable, run:
 
 ```bash
-sudo ./deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+# Follow deploy/production/SHARED_PROXY.md for the Messenger edge TLS setup.
 ```
 
 The script temporarily installs an HTTP-only vhost for ACME, obtains the first

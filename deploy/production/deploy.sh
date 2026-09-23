@@ -49,6 +49,8 @@ KEEP_RELEASES=${CS_MAIL_KEEP_RELEASES:-5}
 [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || { echo "CS_MAIL_KEEP_RELEASES must be a positive integer" >&2; exit 1; }
 NGINX_SITE=${CS_MAIL_NGINX_SITE:-$NGINX_SITE}
 NGINX_LINK=${CS_MAIL_NGINX_LINK:-$NGINX_LINK}
+WEB_PROXY_MODE=${CS_MAIL_WEB_PROXY_MODE:-host}
+case "$WEB_PROXY_MODE" in host|messenger) ;; *) echo "CS_MAIL_WEB_PROXY_MODE must be host or messenger" >&2; exit 1 ;; esac
 
 # API and platform-admin sockets remain loopback-only. Public web traffic is
 # handled by this VPS's shared Nginx on the standard 80/443 virtual hosts.
@@ -162,31 +164,38 @@ echo "[5/8] Starting monitoring stack..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --profile monitoring prometheus alertmanager
 
 echo "[6/8] Validating Nginx and atomically publishing frontend..."
-nginx_backup=""
-if [[ -f "$NGINX_SITE" ]]; then
-  nginx_backup=$(mktemp)
-  cp -a "$NGINX_SITE" "$nginx_backup"
-fi
-install -m 0644 "$NGINX_SOURCE" "$NGINX_SITE"
-ln -sfn "$NGINX_SITE" "$NGINX_LINK"
-if ! nginx -t; then
-  if [[ -n "$nginx_backup" ]]; then
-    cp -a "$nginx_backup" "$NGINX_SITE"
-  else
-    rm -f "$NGINX_SITE" "$NGINX_LINK"
-  fi
-  [[ -z "$nginx_backup" ]] || rm -f "$nginx_backup"
-  nginx -t >/dev/null 2>&1 || true
-  echo "candidate Nginx configuration rejected; previous file restored" >&2
-  exit 1
-fi
-[[ -z "$nginx_backup" ]] || rm -f "$nginx_backup"
 if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then
   echo "$STATE/www/current exists but is not a symlink; refusing unsafe frontend cutover" >&2
   exit 1
 fi
-ln -sfn "$WEB_RELEASE_DIR" "$STATE/www/current"
-systemctl reload nginx
+if [[ "$WEB_PROXY_MODE" == messenger ]]; then
+  ln -sfn "$WEB_RELEASE_DIR" "$STATE/www/current"
+  docker compose --profile shared_proxy --env-file "$ENV_FILE" -f "$COMPOSE" up -d --no-build web web_admin
+  docker exec "$(docker compose --profile shared_proxy --env-file "$ENV_FILE" -f "$COMPOSE" ps -q web)" nginx -t
+  docker exec "$(docker compose --profile shared_proxy --env-file "$ENV_FILE" -f "$COMPOSE" ps -q web_admin)" nginx -t
+else
+  nginx_backup=""
+  if [[ -f "$NGINX_SITE" ]]; then
+    nginx_backup=$(mktemp)
+    cp -a "$NGINX_SITE" "$nginx_backup"
+  fi
+  install -m 0644 "$NGINX_SOURCE" "$NGINX_SITE"
+  ln -sfn "$NGINX_SITE" "$NGINX_LINK"
+  if ! nginx -t; then
+    if [[ -n "$nginx_backup" ]]; then
+      cp -a "$nginx_backup" "$NGINX_SITE"
+    else
+      rm -f "$NGINX_SITE" "$NGINX_LINK"
+    fi
+    [[ -z "$nginx_backup" ]] || rm -f "$nginx_backup"
+    nginx -t >/dev/null 2>&1 || true
+    echo "candidate Nginx configuration rejected; previous file restored" >&2
+    exit 1
+  fi
+  [[ -z "$nginx_backup" ]] || rm -f "$nginx_backup"
+  ln -sfn "$WEB_RELEASE_DIR" "$STATE/www/current"
+  systemctl reload nginx
+fi
 
 echo "[7/8] Running loopback/local-TLS/public post-deploy health gates..."
 curl -fsS "http://127.0.0.1:${CS_MAIL_API_HOST_PORT:-18080}/api/health/ready" >/dev/null

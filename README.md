@@ -18,7 +18,7 @@ There is intentionally **no Docker Compose file at the repository root**. This p
 
 ## Production deployment
 
-Production source is expected at `/opt/sites/cs-mail`; secrets/runtime state live outside Git under `/opt/cs-mail`. The public web app is a normal shared-Nginx vhost at `https://mail.crescentsphere.com`, while IMAP/SMTP and VPS PTR/rDNS remain on the existing DNS-only `smtp.crescentsphere.com` Stalwart identity.
+Production source is expected at `/opt/sites/cs-mail`; secrets/runtime state live outside Git under `/opt/cs-mail`. The public web app runs behind Messenger's shared Docker Nginx at `https://mail.crescentsphere.com`, while IMAP/SMTP and VPS PTR/rDNS remain on the existing DNS-only `smtp.crescentsphere.com` Stalwart identity. See `deploy/production/SHARED_PROXY.md`.
 
 One-time host preparation after cloning the repository:
 
@@ -26,7 +26,7 @@ One-time host preparation after cloning the repository:
 sudo /opt/sites/cs-mail/deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/secrets/alert-webhook-url
-sudo /opt/sites/cs-mail/deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+# Follow /opt/sites/cs-mail/deploy/production/SHARED_PROXY.md for edge TLS.
 ```
 
 See `deploy/production/CREDENTIALS.md` for the small set of operator-supplied Stalwart/TLS/alert values.

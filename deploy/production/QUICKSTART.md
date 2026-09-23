@@ -37,7 +37,8 @@ sudo ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/secrets/alert-webhook-url
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+## This VPS uses Messenger's Docker Nginx on 80/443. Follow SHARED_PROXY.md
+## to add the CS Mail vhost and issue its publicly trusted web certificate.
 sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/deploy-from-git.sh main
 sudo ./deploy/production/status.sh /opt/cs-mail/.env.production

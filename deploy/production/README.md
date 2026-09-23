@@ -5,7 +5,7 @@ For the current shared VPS, start with `QUICKSTART.md`.
 
 ## Topology
 
-- Web: `https://mail.crescentsphere.com` -> shared host Nginx 443 -> frontend/API.
+- Web: `https://mail.crescentsphere.com` -> Messenger's shared Docker Nginx 443 -> CS Mail web container -> frontend/API.
 - API: `127.0.0.1:18080` only.
 - Platform Admin: `127.0.0.1:18081` only; SSH tunnel required.
 - Mail: existing shared Stalwart at DNS-only `smtp.crescentsphere.com` on 25/465/993.
@@ -13,8 +13,8 @@ For the current shared VPS, start with `QUICKSTART.md`.
 - Prometheus/Alertmanager: loopback only.
 - Runtime config: `/opt/cs-mail/.env.production`, outside Git, `root:root 0600`.
 
-The Nginx site is name-based and safely coexists with the VPS's other projects
-on ports 80/443.
+The active VPS proxy is `cs-messenger-nginx-1`. Follow `SHARED_PROXY.md` for
+the first deployment. The host-Nginx TLS script is for a different topology.
 
 ## First VPS setup
 
@@ -50,7 +50,7 @@ Then follow `CREDENTIALS.md`. In short:
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/secrets/alert-webhook-url
 sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/setup-web-tls.sh /opt/cs-mail/.env.production
+# Complete SHARED_PROXY.md first: shared edge vhost and Let's Encrypt web TLS.
 sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/deploy-from-git.sh main
 ```

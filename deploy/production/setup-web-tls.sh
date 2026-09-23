@@ -8,6 +8,10 @@ BOOTSTRAP="$ROOT/deploy/production/nginx-mail.crescentsphere.com.bootstrap.conf"
 FINAL="$ROOT/deploy/production/nginx-mail.crescentsphere.com.conf"
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
 set -a; source "$ENV_FILE"; set +a
+if [[ ${CS_MAIL_WEB_PROXY_MODE:-host} == messenger ]]; then
+  echo "Messenger's Docker Nginx owns 80/443; follow deploy/production/SHARED_PROXY.md instead" >&2
+  exit 1
+fi
 
 WEB_HOST=${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}
 EMAIL=${CS_MAIL_LETSENCRYPT_EMAIL:-}

@@ -356,13 +356,11 @@ impl StalwartService {
             self.config.admin_url.trim_end_matches('/'),
             account
         );
+        let login = self.impersonation_login(account).await?;
         let response = self
             .client
             .post(url)
-            .basic_auth(
-                &self.config.mail_jmap_username,
-                Some(&self.config.mail_jmap_secret),
-            )
+            .basic_auth(&login, Some(&self.config.mail_jmap_secret))
             .header(reqwest::header::CONTENT_TYPE, "application/sieve; charset=utf-8")
             .body(script.as_bytes().to_vec())
             .send()
@@ -400,6 +398,55 @@ impl StalwartService {
             })
     }
 
+    /// Stalwart's impersonation credential is target%service-user, not the
+    /// service user's login on its own. Resolve the target from its provider
+    /// account id so mail operations never authenticate into the wrong inbox.
+    async fn impersonation_login(&self, account: &str) -> Result<String, StalwartError> {
+        let result = self
+            .management_read("x:Account/get", json!({ "ids": [account] }))
+            .await?;
+        let item = result
+            .get("list")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .ok_or_else(|| StalwartError::Protocol {
+                operation: "mail impersonation".to_string(),
+                message: "target account was not returned by x:Account/get".to_string(),
+            })?;
+        let address = if let Some(address) = item
+            .get("emailAddress")
+            .and_then(Value::as_str)
+            .filter(|value| value.contains('@'))
+        {
+            address.to_string()
+        } else {
+            let local = item.get("name").and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| StalwartError::Protocol {
+                    operation: "mail impersonation".to_string(),
+                    message: "target account has no login name".to_string(),
+                })?;
+            let domain_id = item.get("domainId").and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| StalwartError::Protocol {
+                    operation: "mail impersonation".to_string(),
+                    message: "target account has no domain id".to_string(),
+                })?;
+            let domain = self.management_read("x:Domain/get", json!({ "ids": [domain_id] })).await?;
+            let name = domain.get("list").and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("name"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| StalwartError::Protocol {
+                    operation: "mail impersonation".to_string(),
+                    message: "target domain has no name".to_string(),
+                })?;
+            format!("{local}@{name}")
+        };
+        Ok(format!("{address}%{}", self.config.mail_jmap_username))
+    }
+
     async fn jmap_call(
         &self,
         method: &str,
@@ -412,6 +459,17 @@ impl StalwartService {
             return Err(StalwartError::Disabled);
         }
 
+        let mail_login = if matches!(auth, AuthMode::Mail) {
+            let account = args.get("accountId").and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| StalwartError::Protocol {
+                    operation: method.to_string(),
+                    message: "mail JMAP request is missing accountId".to_string(),
+                })?;
+            Some(self.impersonation_login(account).await?)
+        } else {
+            None
+        };
         let body = json!({
             "methodCalls": [[method, args, "c1"]],
             "using": using,
@@ -441,7 +499,7 @@ impl StalwartService {
                     }
                 }
                 AuthMode::Mail => request.basic_auth(
-                    &self.config.mail_jmap_username,
+                    mail_login.as_deref().expect("mail login was resolved"),
                     Some(&self.config.mail_jmap_secret),
                 ),
             };
@@ -747,10 +805,11 @@ impl StalwartService {
             self.config.admin_url.trim_end_matches('/'),
             account
         );
+        let login = self.impersonation_login(account).await?;
         let response = self
             .client
             .post(url)
-            .basic_auth(&self.config.mail_jmap_username, Some(&self.config.mail_jmap_secret))
+            .basic_auth(&login, Some(&self.config.mail_jmap_secret))
             .header(reqwest::header::CONTENT_TYPE, "message/rfc822")
             .body(message.to_vec())
             .send()
