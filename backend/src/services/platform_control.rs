@@ -20,8 +20,9 @@ pub struct PlatformControls {
 
 pub async fn load(pool: &PgPool) -> Result<PlatformControls, ApiError> {
     sqlx::query_as::<_, PlatformControls>(
-        "SELECT public_signup_enabled,business_creation_enabled,plan_ordering_enabled,\
-                domain_onboarding_enabled,mailbox_provisioning_enabled,outbound_sending_enabled,maintenance_message,updated_by,updated_at\
+        "SELECT public_signup_enabled, business_creation_enabled, plan_ordering_enabled,
+                domain_onboarding_enabled, mailbox_provisioning_enabled, outbound_sending_enabled,
+                maintenance_message, updated_by, updated_at
          FROM platform_controls WHERE singleton=TRUE",
     )
     .fetch_one(pool)

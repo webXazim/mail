@@ -1364,17 +1364,17 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
          JOIN organization_domains d ON d.id=m.domain_id AND d.status='active'
          WHERE m.deleted_at IS NULL AND m.status <> 'deleting'
            AND COALESCE(m.user_id,o.created_by) IS NOT NULL
-           AND (m.provider_synced_at IS NULL OR m.provider_synced_at < now() - interval '15 minutes')
-         ORDER BY m.provider_synced_at ASC NULLS FIRST, m.created_at ASC
+           AND (m.provider_reconciled_at IS NULL OR m.provider_reconciled_at < now() - interval '15 minutes')
+         ORDER BY m.provider_reconciled_at ASC NULLS FIRST, m.created_at ASC
          LIMIT 20",
     )
     .fetch_all(&state.db)
     .await?;
 
-    for (user_id, _mailbox_id, email, local_part, provider_marker, provider_domain_id, domain_is_system, quota_bytes, materialized_quota, stored_account) in rows {
+    for (user_id, mailbox_id, email, local_part, provider_marker, provider_domain_id, domain_is_system, quota_bytes, materialized_quota, stored_account) in rows {
         if quota_bytes != materialized_quota {
             sqlx::query("UPDATE mailboxes SET quota_bytes = $2, updated_at = now() WHERE id = $1")
-                .bind(_mailbox_id)
+                .bind(mailbox_id)
                 .bind(quota_bytes)
                 .execute(&state.db)
                 .await?;
@@ -1389,6 +1389,7 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
                         let message = truncate(&error.to_string(), MAX_ERROR_CHARS);
                         let _ = sqlx::query("UPDATE users SET mail_sync_status='retrying',mail_sync_error=$2,mail_synced_at=now() WHERE id=$1")
                             .bind(user_id).bind(message).execute(&state.db).await;
+                        mark_mailbox_reconciled(&state.db, mailbox_id).await?;
                         continue;
                     }
                 }
@@ -1406,6 +1407,7 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
                             .bind(message)
                             .execute(&state.db)
                             .await;
+                            mark_mailbox_reconciled(&state.db, mailbox_id).await?;
                             continue;
                         }
                     }
@@ -1420,6 +1422,7 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
                     .bind(message)
                     .execute(&state.db)
                     .await;
+                    mark_mailbox_reconciled(&state.db, mailbox_id).await?;
                     continue;
                 }
             } }
@@ -1453,6 +1456,7 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
             .bind(error)
             .execute(&state.db)
             .await?;
+            mark_mailbox_reconciled(&state.db, mailbox_id).await?;
             continue;
         };
 
@@ -1499,7 +1503,16 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
                 .await?;
             }
         }
+        mark_mailbox_reconciled(&state.db, mailbox_id).await?;
     }
+    Ok(())
+}
+
+async fn mark_mailbox_reconciled(pool: &PgPool, mailbox_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE mailboxes SET provider_reconciled_at = now() WHERE id = $1")
+        .bind(mailbox_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

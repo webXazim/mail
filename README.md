@@ -73,7 +73,7 @@ See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/P
 ## Platform state
 
 API contract: **v32**  
-Migration head: **0042_launch_safety_defaults.sql**
+Migration head: **0043_mailbox_reconciliation_timestamp.sql**
 
 The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. The public Nginx vhost returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI only through an SSH tunnel to `127.0.0.1:18081`.
 

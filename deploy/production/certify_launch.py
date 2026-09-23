@@ -35,7 +35,8 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0042_launch_safety_defaults.sql"
+EXPECTED_MIGRATION = "0043_mailbox_reconciliation_timestamp.sql"
+SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
 DEFAULT_PUBLIC_ORIGIN = "https://mail.crescentsphere.com"
 
 
@@ -128,6 +129,7 @@ def dig(name: str, record: str) -> list[str]:
 def check_static(root: Path) -> str:
     required = [
         root / "backend/migrations" / EXPECTED_MIGRATION,
+        root / "backend/migrations" / SAFETY_MIGRATION,
         root / "deploy/production/docker-compose.yml",
         root / "deploy/production/nginx-mail.crescentsphere.com.conf",
         root / "deploy/production/backup.sh",
@@ -362,10 +364,10 @@ def check_static(root: Path) -> str:
         raise GateError("localhost-only admin reverse proxy is missing")
     if "CS_MAIL_BILLING_INSTANT_ACTIVATION:-false" not in compose:
         raise GateError("production billing must default to payment approval")
-    safety = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    safety = (root / "backend/migrations" / SAFETY_MIGRATION).read_text()
     if "public_signup_enabled=FALSE" not in safety or "outbound_sending_enabled=FALSE" not in safety:
         raise GateError("production launch controls must default closed")
-    return "contract v32, migration 0042, independent edge option, smtp.crescentsphere.com mail/PTR identity, private control plane, deterministic Docker builds, atomic frontend publishing, pre-migration backup, and closed public launch controls are coherent"
+    return "contract v32, migration 0043, independent edge option, smtp.crescentsphere.com mail/PTR identity, private control plane, deterministic Docker builds, atomic frontend publishing, pre-migration backup, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

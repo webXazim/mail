@@ -162,7 +162,7 @@ done
 
 echo "[5/8] Starting monitoring stack..."
 "$ROOT/deploy/production/render-alertmanager.py"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --profile monitoring --force-recreate alertmanager prometheus
+docker compose --profile monitoring --env-file "$ENV_FILE" -f "$COMPOSE" up -d --force-recreate alertmanager prometheus
 
 echo "[6/8] Validating Nginx and atomically publishing frontend..."
 if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then
