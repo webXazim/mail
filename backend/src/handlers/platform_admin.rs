@@ -362,11 +362,17 @@ pub async fn domain_action(
                 Err(error)=>{
                     let detail=error.to_string();
                     tracing::error!(organization_id=%organization_id,domain_id=%domain_id,domain=%domain,%detail,"platform domain provisioning failed");
+                    let ownership_conflict=detail.contains("already exists")||detail.contains("does not belong");
+                    let failure_message=if ownership_conflict {
+                        "This domain already exists in the shared mail provider under another ownership marker. A platform operator must inspect it before this business can use it."
+                    } else {
+                        "Mail-provider provisioning failed. The operation is safe to retry."
+                    };
                     sqlx::query("UPDATE organization_domains SET status='failed',last_error=$2,updated_at=now() WHERE id=$1")
-                        .bind(domain_id).bind("Mail-provider provisioning failed. The operation is safe to retry.")
+                        .bind(domain_id).bind(failure_message)
                         .execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
-                    if detail.contains("already exists")||detail.contains("does not belong"){
-                        return Err(ApiError::conflict("This domain already exists in the shared mail provider and is not owned by this CS Mail business"));
+                    if ownership_conflict{
+                        return Err(ApiError::conflict(failure_message));
                     }
                     return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()));
                 }
