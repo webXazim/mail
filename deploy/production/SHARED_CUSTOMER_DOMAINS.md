@@ -25,3 +25,26 @@ and addresses have been removed. The Stalwart domain remains in place even if
 CS Mail created it. An operator must inspect both products before cleaning up
 such a provider entry. Never delete a provider domain merely to clear an
 ownership error.
+
+## Recovery after DNS records or a Mailer claim are removed
+
+If a Mailer sending domain is disabled and then added again, its new Mailer
+claim has a new `_mailer-verification.<domain>` TXT value. Publish the value
+currently shown in Mailer; the old value cannot verify the new claim. Mailer
+may reuse the existing Stalwart Domain object after this fresh public proof.
+The disabled historical Mailer row retains its provider ID for audit and does
+not block the new active binding.
+
+Once Mailer shows its DKIM and `bounce.<domain>` MX/SPF records, publish those
+records and verify again. They are separate from CS Mail's mailbox records.
+Use CS Mail Business admin to retry provisioning, then publish its displayed
+apex MX/SPF, DKIM, and DMARC records and run Check DNS. Mailer does not
+automatically publish its optional DMARC suggestion, so CS Mail can manage
+the single DMARC policy for the shared domain. Keep one SPF policy per DNS
+name; do not replace the apex policy with the bounce policy.
+
+Deleting DNS records does not clear either product's domain claim. CS Mail
+degrades an active mailbox domain when required records disappear; Mailer also
+rechecks verified sending domains and returns them to pending when required
+records disappear. Restore the records and recheck each product before sending
+or creating mailboxes.
