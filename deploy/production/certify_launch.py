@@ -329,8 +329,16 @@ def check_static(root: Path) -> str:
         raise GateError("business closure must not silently override an uncancelled subscription")
     if "Protected system mailboxes are not managed through the customer control plane" not in control_handler or "The protected system organization cannot be modified here" not in control_handler:
         raise GateError("customer SaaS control-plane mutations must fail closed for protected system resources")
-    if '"set_quota"' not in control_handler or "delete_customer_domain" not in control_handler:
-        raise GateError("platform operator must be able to reconcile mailbox storage and safely release customer domains")
+    customer_domain_handler = (root / "backend/src/handlers/domains.rs").read_text()
+    provider_service = (root / "backend/src/services/stalwart.rs").read_text()
+    if '"set_quota"' not in control_handler:
+        raise GateError("platform operator must be able to reconcile mailbox storage")
+    if ("provider_binding_matches" not in control_handler
+            or "provider_binding_matches" not in customer_domain_handler
+            or "delete_customer_domain" in control_handler
+            or "delete_customer_domain" in customer_domain_handler
+            or "pub async fn delete_customer_domain" in provider_service):
+        raise GateError("domain release must verify the provider binding and preserve the shared Stalwart domain")
     platform_routes = (root / "backend/src/router.rs").read_text()
     for route in ("/api/admin/platform-controls", "/api/admin/businesses", "/api/admin/hosted-domains", "/api/admin/hosted-mailboxes", "/api/admin/recovery"):
         if route not in platform_routes:

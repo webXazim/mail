@@ -75,7 +75,7 @@ grep -q 'cargo test --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "
 grep -q 'npm ci' "$ROOT/frontend/Dockerfile.production" || fail "frontend image must use npm ci"
 ok "locked backend/frontend builds are configured"
 
-python3 "$ROOT/deploy/production/certify_launch.py" --static-only --root "$ROOT" --report /tmp/cs-mail-release-static.json >/dev/null
+python3 "$ROOT/deploy/production/certify_launch.py" --static-only --root "$ROOT" --report /tmp/cs-mail-release-static.json
 ok "static production launch certification passes"
 
 echo "CS Mail release verification PASS"
