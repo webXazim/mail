@@ -715,12 +715,14 @@ export function BusinessPage() {
                         {(detail.role === 'owner' || detail.role === 'admin') && <details className="business-cloudflare">
                           <summary>Use Cloudflare to add and verify this record</summary>
                           <p>Authorize Cloudflare to publish the ownership and mail records for this domain. Existing conflicting mail records are never replaced.</p>
-                          {cloudflareOAuthConfig?.available && <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'setup')}>Connect Cloudflare</button>}
+                          {cloudflareOAuthConfig?.available
+                            ? <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'setup')}>Connect Cloudflare and add DNS automatically</button>
+                            : <p className="business-cloudflare-unavailable">Cloudflare account connection is not enabled on this installation. A scoped API token can still add DNS automatically below.</p>}
                           <p>{cloudflareOAuthConfig?.available ? 'Or create a ' : 'Create a '}<a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">scoped API token</a> with Zone Read and DNS Write. CS Mail uses it during setup and does not save it.</p>
                           <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareChallenge(domain.id) }}>
                             <label htmlFor={`cloudflare-token-${domain.id}`}>Cloudflare API token</label>
                             <input id={`cloudflare-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
-                            <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Setting up DNS…' : 'Set up with Cloudflare'}</button>
+                            <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Setting up DNS…' : 'Add DNS automatically'}</button>
                           </form>
                         </details>}
                         {domain.last_error && <p className="business-domain-error">{domain.last_error}</p>}
@@ -783,7 +785,9 @@ export function BusinessPage() {
                           <details className="business-cloudflare">
                             <summary>Publish mail DNS with Cloudflare</summary>
                             <p>Authorize Cloudflare to add the provider-generated MX, SPF, DKIM and DMARC records. Existing conflicting mail records must be resolved in Cloudflare first.</p>
-                            {cloudflareOAuthConfig?.available && <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'mail')}>Connect Cloudflare</button>}
+                            {cloudflareOAuthConfig?.available
+                              ? <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'mail')}>Connect Cloudflare and add DNS automatically</button>
+                              : <p className="business-cloudflare-unavailable">Cloudflare account connection is not enabled on this installation. A scoped API token can still add DNS automatically below.</p>}
                             <p>{cloudflareOAuthConfig?.available ? 'Or use' : 'Use'} a zone-scoped API token with Zone Read and DNS Write.</p>
                             <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareMailDns(domain.id) }}>
                               <label htmlFor={`cloudflare-mail-token-${domain.id}`}>Cloudflare API token</label>

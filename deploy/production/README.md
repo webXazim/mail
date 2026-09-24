@@ -114,7 +114,7 @@ Register the client as a browser-based Authorization Code + PKCE client with
 token authentication method `none`; CS Mail never requires its client secret.
 The API container must be recreated after setting the variable. A user may
 instead create an API token limited to that zone with **Zone Read** and
-**DNS Write**, paste it, and choose **Set up with Cloudflare**. CS Mail publishes the
+**DNS Write**, paste it, and choose **Add DNS automatically**. CS Mail publishes the
 ownership TXT record, verifies it against public DNS, provisions the domain on
 the mail server, and publishes the generated MX, SPF, DKIM and DMARC records.
 Public mail DNS readiness is then checked until the domain is active. The token
@@ -122,6 +122,13 @@ is not persisted; if verification takes too long or setup is interrupted, the
 owner can resume from **Publish mail DNS with Cloudflare** with a new token.
 Existing conflicting mail records are never replaced automatically. The manual
 DNS setup path remains available for other DNS providers.
+
+If **Connect Cloudflare** is absent, the running API has no OAuth client ID.
+After deployment, check without printing it:
+
+```sh
+sudo docker exec cs-mail-prod-api-1 sh -c 'if [ -n "$CS_MAIL_CLOUDFLARE_OAUTH_CLIENT_ID" ]; then echo Cloudflare-OAuth=configured; else echo Cloudflare-OAuth=missing; fi'
+```
 
 Resend's provider sign-in flow uses Domain Connect. Cloudflare requires CS Mail
 to publish a Domain Connect template and have Cloudflare onboard it before that
