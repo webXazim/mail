@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { bootstrapSession } from './lib/api'
 import { isDemoAllowed } from './services/auth'
 import { isLocalAdminOrigin } from './lib/admin-origin'
-import { profileApi, useRole } from './services/profile'
+import { profileApi, useProfile, useRole } from './services/profile'
 import { capabilitiesApi } from './services/capabilities'
 
 const LoginPage = lazy(() =>
@@ -171,7 +171,15 @@ function RequireMailbox({ children }: { children: ReactNode }) {
   }, [attempt])
   if (!checked) return <div className="route-loader"><div className="loading-spinner" /></div>
   if (failed) return <div className="route-loader"><p>We could not check your mailbox access.</p><button type="button" onClick={() => { setChecked(false); setFailed(false); setAttempt((value) => value + 1) }}>Try again</button></div>
-  if (hasMailbox === false) return <Navigate to="/mail/business" replace state={{ from: `${location.pathname}${location.search}` }} />
+  if (hasMailbox === false) return <Navigate to="/mail/billing" replace state={{ from: `${location.pathname}${location.search}` }} />
+  return children
+}
+
+function RequireActivePlan({ children }: { children: ReactNode }) {
+  const profile = useProfile()
+  if (profile?.subscription_status !== 'active' && profile?.subscription_status !== 'trial') {
+    return <Navigate to="/mail/billing" replace />
+  }
   return children
 }
 
@@ -283,9 +291,9 @@ export default function App() {
               </RequireLocalAdminOrigin>
             }
           />
-          <Route path="business" element={<BusinessPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="business" element={<RequireActivePlan><BusinessPage /></RequireActivePlan>} />
+          <Route path="settings" element={<RequireActivePlan><SettingsPage /></RequireActivePlan>} />
+          <Route path="notifications" element={<RequireActivePlan><NotificationsPage /></RequireActivePlan>} />
           <Route path="labels" element={<LabelsPage />} />
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="billing" element={<BillingPage />} />

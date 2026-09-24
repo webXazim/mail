@@ -103,7 +103,7 @@ export function PricingPage() {
                 <button
                   type="button"
                   className={item.code === 'team' ? 'primary-button' : 'secondary-button'}
-                  onClick={() => navigate('/mail/billing')}
+                  onClick={() => navigate(`/mail/billing?plan=${encodeURIComponent(item.code)}`)}
                 >
                   {`Choose ${item.name.replace(/^CS Mail\s+/i, '')}`}
                 </button>

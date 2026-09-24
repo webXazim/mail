@@ -17,6 +17,7 @@ export type Profile = {
   active_mailbox_id?: string | null
   primary_mailbox_id?: string | null
   active_organization?: { id: string; name: string | null; role: string | null } | null
+  subscription_status?: string | null
   onboarded: boolean
   storage: {
     used_bytes: number

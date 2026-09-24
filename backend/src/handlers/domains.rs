@@ -206,6 +206,10 @@ pub async fn create(
 ) -> Result<Json<Value>, ApiError> {
     crate::services::platform_control::require_domain_onboarding(&state.db).await?;
     tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    let subscription = crate::services::entitlements::for_organization(&state, organization_id).await?;
+    if !matches!(subscription.subscription_status.as_str(), "active" | "trial") {
+        return Err(ApiError::forbidden("Activate a business plan before adding a domain"));
+    }
     state.rate.check_burst(
         &format!("domain-op:{organization_id}:{}", auth.user_id),
         DOMAIN_OPERATION_LIMIT,

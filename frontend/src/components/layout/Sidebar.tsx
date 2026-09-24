@@ -57,6 +57,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const role = useRole()
   const signedInProfile = useProfile()
   const platformOnly = isRemoteMail() && signedInProfile?.has_mailbox !== true
+  const planActive = signedInProfile?.subscription_status === 'active' || signedInProfile?.subscription_status === 'trial'
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
   const counts = useMemo(() => {
@@ -220,18 +221,20 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         </div>
         <section className="sidebar-workspace">
           <p className="nav-heading">Business</p>
-          <button className={`folder-link ${pathname.startsWith('/mail/business') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/business')}>
-            <Building2 size={17} /><span>Businesses</span>
-          </button>
-          <button className={`folder-link ${pathname.startsWith('/mail/notifications') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/notifications')}>
-            <Bell size={17} /><span>Notifications</span>
-          </button>
-          <button className={`folder-link ${pathname.startsWith('/mail/settings') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/settings')}>
-            <Settings2 size={17} /><span>Account settings</span>
-          </button>
-          <button className={`folder-link ${pathname.startsWith('/mail/pricing') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/pricing')}>
+          <button className={`folder-link ${pathname.startsWith('/mail/billing') || pathname.startsWith('/mail/pricing') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/billing')}>
             <CreditCard size={17} /><span>Plans</span>
           </button>
+          {planActive && <>
+            <button className={`folder-link ${pathname.startsWith('/mail/business') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/business')}>
+              <Building2 size={17} /><span>Business admin · domains</span>
+            </button>
+            <button className={`folder-link ${pathname.startsWith('/mail/notifications') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/notifications')}>
+              <Bell size={17} /><span>Notifications</span>
+            </button>
+            <button className={`folder-link ${pathname.startsWith('/mail/settings') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/settings')}>
+              <Settings2 size={17} /><span>Account settings</span>
+            </button>
+          </>}
           {role === 'admin' && isLocalAdminOrigin() && (
             <button className={`folder-link ${pathname.startsWith('/mail/admin') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin')}>
               <Server size={17} /><span>Platform admin</span>
@@ -240,8 +243,8 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         </section>
         <div className="sidebar-footer">
           <div className="business-placeholder">
-            <strong>No hosted mailbox yet</strong>
-            <p>Verify a business domain before mail features are enabled.</p>
+            <strong>{planActive ? 'No hosted mailbox yet' : 'Plan setup'}</strong>
+            <p>{planActive ? 'Verify a business domain before mail features are enabled.' : 'Choose a plan and complete activation to start domain setup.'}</p>
           </div>
           <div className="profile-wrap">
             <div className="profile">

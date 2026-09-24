@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Check, FileText, Landmark, Save, Star } from 'lucide-react'
 import {
   billingApi,
@@ -13,6 +13,8 @@ import {
   type OrderRow,
   type PlanView,
 } from '../services/billing'
+import { useProfile } from '../services/profile'
+import { PlanOnboardingPage } from './PlanOnboardingPage'
 
 const statusLabel: Record<OrderRow['status'], string> = {
   pending: 'Payment due',
@@ -38,12 +40,19 @@ function instructionsFor(method: string, settings: BillingSummary['settings']): 
 }
 
 export function BillingPage() {
+  const profile = useProfile()
+  if (!profile?.active_organization?.id) return <PlanOnboardingPage />
+  return <BusinessBillingPage />
+}
+
+function BusinessBillingPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
   const [plans, setPlans] = useState<PlanView[]>([])
   const [tab, setTab] = useState<'plan' | 'invoices'>('plan')
   const [ordering, setOrdering] = useState(false)
-  const [chosenPlan, setChosenPlan] = useState('')
+  const [chosenPlan, setChosenPlan] = useState(searchParams.get('plan') || '')
   const [mailboxCount, setMailboxCount] = useState(1)
   const [method, setMethod] = useState('bank')
   const [note, setNote] = useState('')
@@ -51,27 +60,24 @@ export function BillingPage() {
   const [reference, setReference] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [billingProfile, setBillingProfile] = useState<BillingProfileRow | null>(null)
 
   const reload = async () => {
+    setLoadError('')
     const [next, active] = await Promise.all([billingApi.summary(), billingApi.plans()])
     setSummary(next)
     setBillingProfile(next.billing_profile)
     setPlans(active)
+    if (next.subscription_status !== 'active' && next.subscription_status !== 'trial' && next.orders.length === 0) setOrdering(true)
     const defaultPlan = active[1] ?? active[0]
-    setChosenPlan((current) => current || defaultPlan?.code || '')
+    setChosenPlan((current) => active.some((plan) => plan.code === current) ? current : defaultPlan?.code || '')
     setMailboxCount((current) => Math.max(current, next.mailbox_limit, defaultPlan?.mailbox_limit ?? 1))
     billingApi.refreshInvoices()
   }
 
   useEffect(() => {
-    void billingApi.summary().then((next) => { setSummary(next); setBillingProfile(next.billing_profile) })
-    void billingApi.plans().then((active) => {
-      setPlans(active)
-      const defaultPlan = active[1] ?? active[0]
-      setChosenPlan((current) => current || defaultPlan?.code || '')
-      setMailboxCount((current) => Math.max(current, defaultPlan?.mailbox_limit ?? 1))
-    })
+    void reload().catch((error) => setLoadError(friendlyError(error)))
     void billingApi.refreshInvoices()
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') navigate('/mail/inbox')
@@ -94,6 +100,9 @@ export function BillingPage() {
       .reverse()
   }, [summary])
 
+  if (loadError) {
+    return <div className="settings-page" role="alert"><h1>Plans and billing could not load</h1><p>{loadError}</p><button className="primary-button" onClick={() => void reload().catch((error) => setLoadError(friendlyError(error)))}>Try again</button></div>
+  }
   if (!summary) {
     return (
       <div className="route-loader">
@@ -103,6 +112,7 @@ export function BillingPage() {
   }
 
   const current = summary.current_plan
+  const planActive = summary.subscription_status === 'active' || summary.subscription_status === 'trial'
   const storageTotal = summary.storage_pool_bytes || current.storage_pool_bytes || summary.quota_bytes || current.mailbox_bytes
   const storageAllocated = summary.storage_allocated_bytes ?? 0
   const storagePct = storageTotal > 0 ? Math.min(100, (storageAllocated / storageTotal) * 100) : 0
@@ -229,17 +239,17 @@ export function BillingPage() {
       {tab === 'plan' && (
         <>
           <section className="settings-section">
+            {planActive && <div className="row-actions"><button type="button" className="primary-button" onClick={() => navigate('/mail/business')}>Continue to domain setup</button></div>}
+            {!planActive && summary.orders.some((order) => order.status === 'pending' || order.status === 'submitted') && <p className="settings-hint" role="status">Your invoice is awaiting payment review. Domain setup will be available when the order is approved.</p>}
             <div className="admin-section-head">
-              <h2>Current plan</h2>
-              <span className="admin-section-count">
-                {current.price} base / {current.interval} · {summary.mailbox_limit} mailbox{summary.mailbox_limit === 1 ? '' : 'es'} purchased
-              </span>
+              <h2>{planActive ? 'Current plan' : 'Choose and activate a plan'}</h2>
+              <span className="admin-section-count">{planActive ? `${current.price} base / ${current.interval} · ${summary.mailbox_limit} mailboxes purchased` : 'Activation pending'}</span>
             </div>
             <div className="billing-plan">
               <div>
-                <strong>{current.name}</strong>
+                <strong>{planActive ? current.name : 'No active plan'}</strong>
                 <small>
-                  {current.features.join(' · ') || summaryText(current.daily_send_limit)}
+                  {planActive ? current.features.join(' · ') || summaryText(current.daily_send_limit) : 'Choose a plan and complete payment approval before setting up your domain.'}
                 </small>
               </div>
               <button
@@ -247,16 +257,16 @@ export function BillingPage() {
                 className="secondary-button"
                 onClick={() => setOrdering((value) => !value)}
               >
-                {ordering ? 'Close' : 'Change plan'}
+                {ordering ? 'Close' : planActive ? 'Change plan' : 'Choose plan'}
               </button>
             </div>
-            <div className="storage">
+            {planActive && <div className="storage">
               <span>Storage allocated</span>
               <strong>{storagePct.toFixed(0)}% of {storageValue} {storageUnit}</strong>
               <div className="storage-bar">
                 <span style={{ width: `${storagePct}%` }} />
               </div>
-            </div>
+            </div>}
           </section>
 
           <section className="settings-section">

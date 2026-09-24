@@ -45,6 +45,10 @@ async fn test_app() -> Option<TestApp> {
         .await
         .expect("connect to TEST_DATABASE_URL");
     sqlx::migrate!().run(&db).await.expect("run migrations");
+    // Integration flows exercise the customer lifecycle in an isolated DB.
+    // Production keeps these controls closed until the operator opens them.
+    sqlx::query("UPDATE platform_controls SET public_signup_enabled=TRUE, business_creation_enabled=TRUE, plan_ordering_enabled=TRUE, domain_onboarding_enabled=TRUE, mailbox_provisioning_enabled=TRUE, outbound_sending_enabled=TRUE WHERE singleton=TRUE")
+        .execute(&db).await.expect("enable isolated test lifecycle");
 
     let state = AppState {
         db: db.clone(),
@@ -643,6 +647,16 @@ async fn organization_membership_isolation() {
     .await;
     assert_eq!(status, StatusCode::OK, "create business: {created}");
     let organization_id = created["id"].as_str().expect("organization id");
+    let subscription_status: String = sqlx::query_scalar(
+        "SELECT status FROM organization_subscriptions WHERE organization_id=$1",
+    )
+    .bind(Uuid::parse_str(organization_id).unwrap())
+    .fetch_one(&t.db)
+    .await
+    .expect("business subscription status");
+    assert_eq!(subscription_status, "suspended", "new businesses must not receive a plan before ordering");
+    let (status, _) = send(&t.app, req("POST", &format!("/api/organizations/{organization_id}/domains"), Some(&owner_token), Some(json!({"domain":"example-business.test"})))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "domain setup requires an active plan");
 
     let owner_membership: Option<String> = sqlx::query_scalar(
         "SELECT role FROM organization_memberships WHERE organization_id=$1 AND user_id=$2",
@@ -953,11 +967,14 @@ async fn billing_manual_payment_flow() {
         return;
     };
 
-    // Customer-side summary: current solo plan, payment instructions, no orders.
+    // A verified login creates a billing identity without receiving a plan.
     let (token, _user_id, _email) = register(&t.app).await;
+    let (status, created) = send(&t.app, req("POST", "/api/organizations", Some(&token), Some(json!({"name":"Billing Test Business"})))).await;
+    assert_eq!(status, StatusCode::OK, "create billing business: {created}");
     let (status, billing) = send(&t.app, req("GET", "/api/billing", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "billing summary: {billing}");
     assert_eq!(billing["current_plan"]["code"], "solo");
+    assert_eq!(billing["subscription_status"], "suspended");
     assert!(billing["settings"]["bank_details"].is_string());
     assert!(billing["orders"].as_array().unwrap().is_empty());
 

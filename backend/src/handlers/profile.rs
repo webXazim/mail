@@ -90,6 +90,7 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         Some(id) => Some(entitlements::for_organization(&state, id).await?),
         None => None,
     };
+    let plan_active = entitlements.as_ref().is_some_and(|value| matches!(value.subscription_status.as_str(), "active" | "trial"));
     let plan = match &entitlements {
         Some(value) => value.plan.clone(),
         None => entitlements::plan(&state, &plan_code).await?,
@@ -132,8 +133,9 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         "role": client_role,
         "platform_role": platform_role,
         "onboarded": onboarded,
-        "plan": entitlements.as_ref().map(|value| value.plan.code.as_str()),
-        "plan_name": entitlements.as_ref().map(|value| value.plan.name.as_str()),
+        "plan": if plan_active { entitlements.as_ref().map(|value| value.plan.code.as_str()) } else { None },
+        "plan_name": if plan_active { entitlements.as_ref().map(|value| value.plan.name.as_str()) } else { None },
+        "subscription_status": entitlements.as_ref().map(|value| value.subscription_status.as_str()),
         "has_mailbox": active_mailbox_id.is_some() && provider_account.is_some() && effective_sync_status == "ready",
         "mailbox_email": mailbox_email,
         "mail_sync_status": effective_sync_status,
@@ -155,15 +157,15 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
             "quota_bytes": total,
             "quota_override_bytes": mailbox_quota_override_bytes.map(|value| value.max(0) as u64).or(entitlements.as_ref().and_then(|value| value.quota_override_bytes)),
             "quota_source": if mailbox_quota_override_bytes.is_some() || entitlements.as_ref().is_some_and(|value| value.quota_is_overridden()) { "override" } else { "plan" },
-            "feature_flags": if entitlements.is_some() { plan.feature_flags.clone() } else { std::collections::BTreeMap::<String, bool>::new() }
+            "feature_flags": if plan_active { plan.feature_flags.clone() } else { std::collections::BTreeMap::<String, bool>::new() }
         },
         "limits": {
-            "max_attachment_bytes": if entitlements.is_some() { plan.max_attachment_bytes } else { 0 },
-            "max_total_attachment_bytes": if entitlements.is_some() { plan.max_total_attachment_bytes } else { 0 },
-            "mailbox_bytes": if entitlements.is_some() { plan.mailbox_bytes } else { 0 },
-            "max_recipients": if entitlements.is_some() { plan.max_recipients } else { 0 },
-            "daily_send_limit": if entitlements.is_some() { plan.daily_send_limit } else { 0 },
-            "seats": if entitlements.is_some() { plan.seats } else { 0 }
+            "max_attachment_bytes": if plan_active { plan.max_attachment_bytes } else { 0 },
+            "max_total_attachment_bytes": if plan_active { plan.max_total_attachment_bytes } else { 0 },
+            "mailbox_bytes": if plan_active { plan.mailbox_bytes } else { 0 },
+            "max_recipients": if plan_active { plan.max_recipients } else { 0 },
+            "daily_send_limit": if plan_active { plan.daily_send_limit } else { 0 },
+            "seats": if plan_active { plan.seats } else { 0 }
         }
     })))
 }

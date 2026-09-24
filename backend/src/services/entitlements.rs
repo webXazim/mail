@@ -327,6 +327,9 @@ pub async fn require_capacity(
     additional: i64,
 ) -> Result<(), ApiError> {
     let ent = for_organization(state, organization_id).await?;
+    if !matches!(ent.subscription_status.as_str(), "active" | "trial") {
+        return Err(ApiError::forbidden("Activate a business plan before adding seats, domains, or mailboxes"));
+    }
     let (used, limit, label): (i64, i64, &str) = match kind {
         CapacityKind::Seat => {
             let n: i64 = sqlx::query_scalar(
@@ -390,4 +393,3 @@ pub async fn validate_plan_change_capacity_with_mailboxes(
     if counts.4 > effective_storage { return Err(ApiError::conflict("The selected plan provides less pooled storage than the business currently allocates to its mailboxes. Rebalance mailbox storage before changing plan")); }
     Ok(())
 }
-

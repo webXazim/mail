@@ -369,7 +369,7 @@ export function BusinessPage() {
       <header className="page-head">
         <div>
           <p className="eyebrow">Business workspace</p>
-          <h1>Your businesses</h1>
+          <h1>Business admin</h1>
           <p>Organizations own domains and mailboxes. Your CS Mail login stays separate from hosted email addresses.</p>
         </div>
       </header>
@@ -379,12 +379,12 @@ export function BusinessPage() {
         <p>Your login is separate from your company mailbox. Mail becomes available after the domain and an address are ready.</p>
         <ol>
           <li className={active ? 'business-setup__done' : ''}>
-            <strong>1. Create your business</strong>
+            <strong>1. Business billing identity</strong>
             <span>{active ? active.name : 'Enter your company name below.'}</span>
           </li>
-          <li>
+          <li className="business-setup__done">
             <strong>2. Review your plan</strong>
-            {active ? <Link to="/mail/billing">View plans and billing</Link> : <span>Create your business first.</span>}
+            <Link to="/mail/billing">View active plan and billing</Link>
           </li>
           <li className={detail?.domains.some((domain) => domain.status === 'active') ? 'business-setup__done' : ''}>
             <strong>3. Verify your domain and mail DNS</strong>

@@ -199,7 +199,7 @@ pub async fn create(
 
     sqlx::query(
         "INSERT INTO organization_subscriptions(organization_id,plan_code,status)
-         VALUES ($1,'solo','active') ON CONFLICT (organization_id) DO NOTHING",
+         VALUES ($1,'solo','suspended') ON CONFLICT (organization_id) DO NOTHING",
     )
     .bind(organization_id)
     .execute(&mut *tx)
