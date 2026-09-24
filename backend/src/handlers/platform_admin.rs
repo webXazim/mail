@@ -307,10 +307,10 @@ pub struct DomainAction { action: String, #[serde(default)] confirm_domain: Stri
 pub async fn domain_action(
     State(state): State<AppState>,admin:AdminUser,Path(domain_id):Path<Uuid>,Json(body):Json<DomainAction>
 )->Result<Json<Value>,ApiError>{
-    let row:Option<(Uuid,String,String,bool,Option<String>,bool,Option<DateTime<Utc>>,String)>=sqlx::query_as(
-        "SELECT organization_id,domain::text,status,is_system,provider_domain_id,dns_ready,verified_at,provider_marker FROM organization_domains WHERE id=$1"
+    let row:Option<(Uuid,String,String,bool,Option<String>,bool,Option<DateTime<Utc>>,String,bool)>=sqlx::query_as(
+        "SELECT organization_id,domain::text,status,is_system,provider_domain_id,dns_ready,verified_at,provider_marker,shared_mailer_domain FROM organization_domains WHERE id=$1"
     ).bind(domain_id).fetch_optional(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
-    let (organization_id,domain,status,is_system,provider_domain_id,dns_ready,verified_at,provider_marker)=row.ok_or_else(||ApiError::not_found("Domain not found"))?;
+    let (organization_id,domain,status,is_system,provider_domain_id,dns_ready,verified_at,provider_marker,shared_mailer_domain)=row.ok_or_else(||ApiError::not_found("Domain not found"))?;
     if is_system{return Err(ApiError::forbidden("The protected system domain cannot be managed here"));}
     match body.action.as_str(){
         "suspend"=>{
@@ -338,13 +338,10 @@ pub async fn domain_action(
             if mailbox_count>0||address_count>0 { return Err(ApiError::conflict("Remove all mailboxes, aliases and groups on this domain before releasing it")); }
             if let Some(provider_id)=provider_domain_id.as_deref().filter(|value|!value.trim().is_empty()) {
                 if provider_marker.trim().is_empty(){ return Err(ApiError::conflict("Provider ownership metadata is missing; reconcile this domain before removal")); }
-                sqlx::query("UPDATE organization_domains SET status='removing',last_error='',updated_at=now() WHERE id=$1")
-                    .bind(domain_id).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
-                if let Err(error)=state.stalwart.delete_customer_domain(provider_id,&domain,&provider_marker).await {
-                    tracing::error!(organization_id=%organization_id,domain_id=%domain_id,domain=%domain,provider_domain_id=%provider_id,error=%error,"platform domain removal failed");
-                    sqlx::query("UPDATE organization_domains SET status='failed',last_error='Mail-provider domain removal failed. Retry before releasing this claim.',updated_at=now() WHERE id=$1")
-                        .bind(domain_id).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
-                    return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()));
+                let snapshot=state.stalwart.customer_domain_snapshot(provider_id).await
+                    .map_err(|error|ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()))?;
+                if !domain_onboarding::provider_binding_matches(&snapshot,&domain,&provider_marker,shared_mailer_domain){
+                    return Err(ApiError::conflict("Provider domain binding changed; reconcile it before release"));
                 }
             } else if matches!(status.as_str(),"provisioning"|"removing") {
                 return Err(ApiError::conflict("Domain provisioning/removal is still in progress"));
@@ -357,12 +354,12 @@ pub async fn domain_action(
             if !matches!(status.as_str(),"verified"|"failed"|"provisioning"){return Err(ApiError::conflict("Domain is not ready for provisioning"));}
             let marker=if provider_marker.trim().is_empty(){state.stalwart.ownership_marker("domain",&organization_id.to_string(),&domain_id.to_string())}else{provider_marker};
             sqlx::query("UPDATE organization_domains SET status='provisioning',provider_marker=$2,last_error='',updated_at=now() WHERE id=$1").bind(domain_id).bind(&marker).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
-            let snapshot=match state.stalwart.ensure_customer_domain(provider_domain_id.as_deref(),&domain,&marker).await {
-                Ok(snapshot)=>snapshot,
+            let (snapshot, shared_mailer_domain)=match state.stalwart.ensure_customer_or_mailer_domain(provider_domain_id.as_deref(),&domain,&marker,provider_domain_id.is_none()||shared_mailer_domain).await {
+                Ok(result)=>result,
                 Err(error)=>{
                     let detail=error.to_string();
                     tracing::error!(organization_id=%organization_id,domain_id=%domain_id,domain=%domain,%detail,"platform domain provisioning failed");
-                    let ownership_conflict=detail.contains("already exists")||detail.contains("does not belong");
+                    let ownership_conflict=detail.contains("already exists")||detail.contains("does not belong")||detail.contains("unrelated ownership marker")||detail.contains("does not match");
                     let failure_message=if ownership_conflict {
                         "This domain already exists in the shared mail provider under another ownership marker. A platform operator must inspect it before this business can use it."
                     } else {
@@ -377,19 +374,19 @@ pub async fn domain_action(
                     return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()));
                 }
             };
-            if snapshot.name!=domain||snapshot.description!=marker||!snapshot.enabled{
+            if !domain_onboarding::provider_binding_matches(&snapshot,&domain,&marker,shared_mailer_domain){
                 sqlx::query("UPDATE organization_domains SET status='failed',last_error='Mail-provider domain ownership could not be established safely',updated_at=now() WHERE id=$1")
                     .bind(domain_id).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
                 return Err(ApiError::conflict("Mail-provider domain ownership could not be established safely"));
             }
             let expected=domain_onboarding::parse_required_records(&snapshot.dns_zone_file,&domain);
             if expected.is_empty(){
-                sqlx::query("UPDATE organization_domains SET provider_domain_id=$2,provider_synced_at=now(),dns_zone_file=$3,dns_expected=$4,status='failed',last_error='Mail provider did not generate the required DNS zone records',updated_at=now() WHERE id=$1")
-                    .bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
+                sqlx::query("UPDATE organization_domains SET provider_domain_id=$2,shared_mailer_domain=$5,provider_synced_at=now(),dns_zone_file=$3,dns_expected=$4,status='failed',last_error='Mail provider did not generate the required DNS zone records',updated_at=now() WHERE id=$1")
+                    .bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).bind(shared_mailer_domain).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
                 return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider_dns","Mail provider did not generate DNS setup records"));
             }
-            sqlx::query("UPDATE organization_domains SET provider_domain_id=$2,provider_synced_at=now(),dns_zone_file=$3,dns_expected=$4,status='dns_pending',next_dns_check_at=now(),last_error='',updated_at=now() WHERE id=$1")
-                .bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
+            sqlx::query("UPDATE organization_domains SET provider_domain_id=$2,shared_mailer_domain=$5,provider_synced_at=now(),dns_zone_file=$3,dns_expected=$4,status='dns_pending',next_dns_check_at=now(),last_error='',updated_at=now() WHERE id=$1")
+                .bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).bind(shared_mailer_domain).execute(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
             let _=domain_onboarding::refresh_one(&state,domain_id).await;
         }
         _=>return Err(ApiError::bad_request("Domain action is invalid")),

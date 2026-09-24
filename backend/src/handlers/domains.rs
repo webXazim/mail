@@ -38,6 +38,7 @@ struct DomainRow {
     last_error: String,
     provider_domain_id: Option<String>,
     provider_marker: String,
+    shared_mailer_domain: bool,
     provider_synced_at: Option<DateTime<Utc>>,
     dns_zone_file: String,
     dns_expected: Value,
@@ -116,6 +117,7 @@ fn serialize_domain(row: &DomainRow, include_challenge: bool) -> Value {
         },
         "provider": {
             "provisioned": row.provider_domain_id.as_deref().is_some_and(|v| !v.is_empty()),
+            "shared_with_mailer": row.shared_mailer_domain,
             "synced_at": row.provider_synced_at,
         },
         "dns": {
@@ -138,7 +140,7 @@ async fn load_domain(state: &AppState, organization_id: Uuid, domain_id: Uuid) -
         "SELECT id, organization_id, domain::text AS domain, status, is_primary, is_system,
                 verified_at, verification_name, verification_token, verification_expires_at,
                 verification_attempts, last_checked_at, last_dns_value, last_error,
-                provider_domain_id, provider_marker, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
+                provider_domain_id, provider_marker, shared_mailer_domain, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
                 dns_mx_ready, dns_spf_ready, dns_dkim_ready, dns_dmarc_ready, dns_ready, last_dns_readiness_check
          FROM organization_domains
          WHERE id=$1 AND organization_id=$2",
@@ -188,7 +190,7 @@ pub async fn list(
         "SELECT id, organization_id, domain::text AS domain, status, is_primary, is_system,
                 verified_at, verification_name, verification_token, verification_expires_at,
                 verification_attempts, last_checked_at, last_dns_value, last_error,
-                provider_domain_id, provider_marker, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
+                provider_domain_id, provider_marker, shared_mailer_domain, provider_synced_at, dns_zone_file, dns_expected, dns_observed,
                 dns_mx_ready, dns_spf_ready, dns_dkim_ready, dns_dmarc_ready, dns_ready, last_dns_readiness_check
          FROM organization_domains WHERE organization_id=$1 ORDER BY is_primary DESC, created_at ASC",
     )
@@ -565,14 +567,16 @@ pub async fn provision(
         return Err(ApiError::conflict("Domain provisioning is already in progress. Wait a few minutes before retrying."));
     }
 
-    let snapshot = match state.stalwart.ensure_customer_domain(
+    let (snapshot, shared_mailer_domain) = match state.stalwart.ensure_customer_or_mailer_domain(
         row.provider_domain_id.as_deref(), &row.domain, &marker,
+        row.provider_domain_id.is_none() || row.shared_mailer_domain,
     ).await {
         Ok(snapshot) => snapshot,
         Err(error) => {
             let detail = error.to_string();
             tracing::error!(organization_id=%organization_id, domain_id=%domain_id, domain=%row.domain, %detail, "customer domain provisioning failed");
-            let ownership_conflict = detail.contains("already exists") || detail.contains("does not belong");
+            let ownership_conflict = detail.contains("already exists") || detail.contains("does not belong")
+                || detail.contains("unrelated ownership marker") || detail.contains("does not match");
             let failure_message = if ownership_conflict {
                 "This domain already exists in the shared mail provider under another ownership marker. A platform operator must inspect it before this business can use it."
             } else {
@@ -587,23 +591,23 @@ pub async fn provision(
             return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()));
         }
     };
-    if snapshot.name != row.domain || snapshot.description != marker || !snapshot.enabled {
+    if !domain_onboarding::provider_binding_matches(&snapshot, &row.domain, &marker, shared_mailer_domain) {
         return Err(ApiError::conflict("Mail-provider domain ownership could not be established safely"));
     }
     let expected = domain_onboarding::parse_required_records(&snapshot.dns_zone_file, &row.domain);
     if expected.is_empty() {
         sqlx::query(
-            "UPDATE organization_domains SET provider_domain_id=$2, provider_synced_at=now(), dns_zone_file=$3,
+            "UPDATE organization_domains SET provider_domain_id=$2, shared_mailer_domain=$5, provider_synced_at=now(), dns_zone_file=$3,
              dns_expected=$4, status='failed', last_error='Mail provider did not generate the required DNS zone records', updated_at=now() WHERE id=$1",
-        ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected))
+        ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).bind(shared_mailer_domain)
          .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
         return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider_dns", "Mail provider did not generate DNS setup records"));
     }
 
     sqlx::query(
-        "UPDATE organization_domains SET provider_domain_id=$2, provider_synced_at=now(), dns_zone_file=$3,
+        "UPDATE organization_domains SET provider_domain_id=$2, shared_mailer_domain=$5, provider_synced_at=now(), dns_zone_file=$3,
          dns_expected=$4, status='dns_pending', next_dns_check_at=now(), last_error='', updated_at=now() WHERE id=$1",
-    ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected))
+    ).bind(domain_id).bind(&snapshot.id).bind(&snapshot.dns_zone_file).bind(json!(expected)).bind(shared_mailer_domain)
      .execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
 
     audit::record(&state, Some(auth.user_id), "business.domain.provision", json!({
@@ -687,7 +691,7 @@ pub async fn publish_cloudflare_mail_dns(
     }
     let snapshot = state.stalwart.customer_domain_snapshot(provider_id).await
         .map_err(|error| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()))?;
-    if snapshot.name != row.domain || snapshot.description != row.provider_marker || !snapshot.enabled {
+    if !domain_onboarding::provider_binding_matches(&snapshot, &row.domain, &row.provider_marker, row.shared_mailer_domain) {
         return Err(ApiError::conflict("Mail-provider domain ownership could not be established safely"));
     }
     let records = domain_onboarding::parse_required_records(&snapshot.dns_zone_file, &row.domain);
@@ -730,14 +734,14 @@ pub async fn delete(
         if row.provider_marker.trim().is_empty() {
             return Err(ApiError::conflict("Provider ownership metadata is missing; a platform administrator must reconcile this domain before removal"));
         }
-        sqlx::query("UPDATE organization_domains SET status='removing', last_error='', updated_at=now() WHERE id=$1")
-            .bind(domain_id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
-        if let Err(error) = state.stalwart.delete_customer_domain(provider_id, &row.domain, &row.provider_marker).await {
-            tracing::error!(organization_id=%organization_id, domain_id=%domain_id, domain=%row.domain, provider_domain_id=%provider_id, error=%error, "customer domain removal failed");
-            sqlx::query("UPDATE organization_domains SET status='failed', last_error='Mail-provider domain removal failed. Retry before releasing this claim.', updated_at=now() WHERE id=$1")
-                .bind(domain_id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
-            return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()));
+        let snapshot = state.stalwart.customer_domain_snapshot(provider_id).await
+            .map_err(|error| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()))?;
+        if !domain_onboarding::provider_binding_matches(&snapshot, &row.domain, &row.provider_marker, row.shared_mailer_domain) {
+            return Err(ApiError::conflict("Provider domain binding changed; an operator must reconcile it before release"));
         }
+        // A Mailer workspace may also send through this provider domain, even
+        // after DKIM rotation. Detach the CS Mail claim; never destroy the
+        // shared Stalwart object from a customer-facing operation.
     } else if matches!(row.status.as_str(), "provisioning" | "removing") {
         return Err(ApiError::conflict("Domain provisioning/removal is still in progress"));
     }

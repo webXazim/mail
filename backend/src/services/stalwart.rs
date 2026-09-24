@@ -18,6 +18,7 @@ const MANAGEMENT_CAPABILITY: &str = "urn:stalwart:jmap";
 const MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 const BLOB_CAPABILITY: &str = "urn:ietf:params:jmap:blob";
 const SIEVE_CAPABILITY: &str = "urn:ietf:params:jmap:sieve";
+pub const MAILER_DOMAIN_MARKER: &str = "CrescentSphere Mailer managed domain";
 
 #[derive(Clone)]
 pub struct StalwartConfig {
@@ -1042,26 +1043,40 @@ impl StalwartService {
         Ok(snapshot)
     }
 
-    pub async fn delete_customer_domain(
+    /// Bind a DNS-verified CS Mail claim to an existing Mailer domain without
+    /// changing that domain's provider ownership or configuration.
+    pub async fn ensure_customer_or_mailer_domain(
         &self,
-        id: &str,
+        existing_id: Option<&str>,
         domain: &str,
         marker: &str,
-    ) -> Result<(), StalwartError> {
-        if !self.enabled() { return Err(StalwartError::Disabled); }
+        allow_mailer_binding: bool,
+    ) -> Result<(ProviderDomainSnapshot, bool), StalwartError> {
         self.require_owned_marker(marker)?;
-        let snapshot = self.customer_domain_snapshot(id).await?;
-        if snapshot.name != domain.to_ascii_lowercase() || snapshot.description != marker {
+        let id = match existing_id.filter(|value| !value.trim().is_empty()) {
+            Some(id) => Some(id.to_owned()),
+            None => self.domain_id(domain).await?,
+        };
+        if let Some(id) = id {
+            let snapshot = self.customer_domain_snapshot(&id).await?;
+            if snapshot.name != domain.to_ascii_lowercase() || !snapshot.enabled {
+                return Err(StalwartError::Protocol {
+                    operation: "shared domain reconciliation".to_string(),
+                    message: "provider domain name or enabled state does not match".to_string(),
+                });
+            }
+            if snapshot.description == marker {
+                return Ok((snapshot, false));
+            }
+            if allow_mailer_binding && snapshot.description == MAILER_DOMAIN_MARKER {
+                return Ok((snapshot, true));
+            }
             return Err(StalwartError::Protocol {
-                operation: "customer domain delete".to_string(),
-                message: "provider domain ownership marker does not match this CS Mail claim".to_string(),
+                operation: "shared domain reconciliation".to_string(),
+                message: format!("provider domain {domain} already exists and has an unrelated ownership marker"),
             });
         }
-        let result = self.management_write("x:Domain/set", json!({ "destroy": [id] })).await?;
-        if let Some(reason) = result.get("notDestroyed").and_then(|v| v.get(id)).filter(|v| !v.is_null()) {
-            return Err(provider_rejection("customer domain delete", reason));
-        }
-        Ok(())
+        self.ensure_customer_domain(None, domain, marker).await.map(|snapshot| (snapshot, false))
     }
 
     pub async fn healthcheck(&self) -> Result<(), StalwartError> {

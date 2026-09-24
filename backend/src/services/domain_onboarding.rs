@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::services::dns;
+use crate::services::stalwart::{ProviderDomainSnapshot, MAILER_DOMAIN_MARKER};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,6 +29,17 @@ pub struct DnsReadiness {
     pub ready: bool,
     pub expected: Vec<ExpectedRecord>,
     pub observed: Value,
+}
+
+pub fn provider_binding_matches(
+    snapshot: &ProviderDomainSnapshot,
+    domain: &str,
+    marker: &str,
+    shared_mailer_domain: bool,
+) -> bool {
+    snapshot.enabled
+        && snapshot.name == domain
+        && snapshot.description == if shared_mailer_domain { MAILER_DOMAIN_MARKER } else { marker }
 }
 
 #[derive(Debug, FromRow)]
@@ -224,17 +236,17 @@ pub async fn check(zone: &str, domain: &str) -> Result<DnsReadiness, dns::DnsErr
 }
 
 pub async fn refresh_one(state: &AppState, domain_id: Uuid) -> Result<DnsReadiness, String> {
-    let row: Option<(String, Option<String>, String, String, String)> = sqlx::query_as(
-        "SELECT domain::text, provider_domain_id, provider_marker, dns_zone_file, status FROM organization_domains WHERE id=$1",
+    let row: Option<(String, Option<String>, String, bool, String, String)> = sqlx::query_as(
+        "SELECT domain::text, provider_domain_id, provider_marker, shared_mailer_domain, dns_zone_file, status FROM organization_domains WHERE id=$1",
     ).bind(domain_id).fetch_optional(&state.db).await.map_err(|e| e.to_string())?;
-    let Some((domain, provider_id, marker, _zone, status)) = row else { return Err("domain not found".into()); };
+    let Some((domain, provider_id, marker, shared_mailer_domain, _zone, status)) = row else { return Err("domain not found".into()); };
     let provider_id = provider_id.filter(|value| !value.trim().is_empty()).ok_or_else(|| "domain is not provisioned".to_string())?;
     if marker.trim().is_empty() { return Err("provider ownership marker is missing".into()); }
 
     // Refresh and re-validate provider ownership before using its DNS output.
     // Never trust an id alone on the Stalwart instance shared with other apps.
     let snapshot = state.stalwart.customer_domain_snapshot(&provider_id).await.map_err(|e| e.to_string())?;
-    if snapshot.name != domain || snapshot.description != marker || !snapshot.enabled {
+    if !provider_binding_matches(&snapshot, &domain, &marker, shared_mailer_domain) {
         let next_status = if status == "active" { "degraded" } else { "failed" };
         let reason = if !snapshot.enabled {
             "Mail-provider domain is disabled"
@@ -340,7 +352,8 @@ pub fn spawn_worker(state: AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_required_records;
+    use super::{parse_required_records, provider_binding_matches};
+    use crate::services::stalwart::ProviderDomainSnapshot;
     #[test]
     fn parses_required_zone_records() {
         let zone = r#"
@@ -351,5 +364,18 @@ TXT _dmarc.example.com. "v=DMARC1; p=reject"
 "#;
         let records = parse_required_records(zone, "example.com");
         assert_eq!(records.len(), 4);
+    }
+
+    #[test]
+    fn shared_binding_requires_the_exact_mailer_marker() {
+        let mut snapshot = ProviderDomainSnapshot {
+            id: "provider-1".into(), name: "example.com".into(),
+            description: "CrescentSphere Mailer managed domain".into(),
+            dns_zone_file: String::new(), enabled: true,
+        };
+        assert!(provider_binding_matches(&snapshot, "example.com", "cs-mail:claim", true));
+        assert!(!provider_binding_matches(&snapshot, "example.com", "cs-mail:claim", false));
+        snapshot.description = "unrelated domain".into();
+        assert!(!provider_binding_matches(&snapshot, "example.com", "cs-mail:claim", true));
     }
 }
