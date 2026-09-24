@@ -11,7 +11,7 @@ use crate::middleware::auth::AuthUser;
 use crate::middleware::rate_limit::{
     DNS_CHECK_LIMIT, DNS_CHECK_WINDOW, DOMAIN_OPERATION_LIMIT, DOMAIN_OPERATION_WINDOW,
 };
-use crate::services::{dns, domain_onboarding, email, tenancy};
+use crate::services::{cloudflare_dns, dns, domain_onboarding, email, tenancy};
 use crate::state::AppState;
 
 const CHALLENGE_TTL_HOURS: i64 = 72;
@@ -300,6 +300,46 @@ pub async fn rotate(
     })).await;
     let updated = load_domain(&state, organization_id, domain_id).await?;
     Ok(Json(serialize_domain(&updated, true)))
+}
+
+#[derive(Deserialize)]
+pub struct CloudflareVerificationIn {
+    api_token: String,
+}
+
+/// Publish the exact pending ownership challenge with a one-time, zone-scoped
+/// Cloudflare token. Public DNS is still checked by the normal verify endpoint.
+pub async fn publish_cloudflare_challenge(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CloudflareVerificationIn>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let token = body.api_token.trim();
+    if token.len() < 20 || token.len() > 512 || token.chars().any(char::is_whitespace) {
+        return Err(ApiError::bad_request("Enter a valid Cloudflare API token"));
+    }
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system || row.status != "pending_verification" || row.verified_at.is_some() {
+        return Err(ApiError::conflict("Only a pending customer domain can use Cloudflare verification"));
+    }
+    if row.verification_expires_at.is_none_or(|expires| expires <= Utc::now()) {
+        return Err(ApiError::conflict("Verification challenge expired. Generate a new challenge first."));
+    }
+    let name = row.verification_name.as_deref().ok_or_else(|| ApiError::bad_request("Verification challenge is missing"))?;
+    let value = verification_value(row.verification_token.as_deref().ok_or_else(|| ApiError::bad_request("Verification challenge is missing"))?);
+    let zone = cloudflare_dns::publish_verification_txt(&row.domain, name, &value, token).await?;
+    audit::record(&state, Some(auth.user_id), "business.domain.cloudflare_txt", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain, "zone": zone
+    })).await;
+    Ok(Json(json!({"ok": true, "zone": zone, "message": "Cloudflare TXT record published. Checking public DNS for ownership proof."})))
 }
 
 pub async fn verify(

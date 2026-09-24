@@ -155,6 +155,11 @@ export const organizationsApi = {
       `/api/organizations/${organizationId}/domains/${domainId}/verify`,
       { method: 'POST' },
     ),
+  publishCloudflareChallenge: (organizationId: string, domainId: string, apiToken: string) =>
+    apiFetch<{ ok: true; zone: string; message: string }>(
+      `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-txt`,
+      { method: 'POST', body: JSON.stringify({ api_token: apiToken }) },
+    ),
   rotateDomainChallenge: (organizationId: string, domainId: string) =>
     apiFetch<OrganizationDomain>(
       `/api/organizations/${organizationId}/domains/${domainId}/challenge`,

@@ -1,4 +1,4 @@
-.business-page { min-height: 100%; }
+.business-page { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .business-page .page-head p:last-child { max-width: 720px; }
 .business-setup { margin: 0 28px 24px; padding: 20px; border: 1px solid var(--cs-mail-line); background: var(--cs-mail-panel); }
 .business-setup h2 { margin: 0 0 6px; font-size: 19px; color: var(--cs-mail-white); }
@@ -82,6 +82,13 @@
 .business-dns-proof span { color: var(--cs-mail-muted); font-size: 11px; }
 .business-dns-proof code { overflow-wrap: anywhere; font-size: 12px; }
 .business-dns-proof p { margin: 0; color: var(--cs-mail-muted); font-size: 12px; line-height: 1.55; }
+.business-cloudflare { border-top: 1px solid var(--cs-mail-line); padding-top: 12px; }
+.business-cloudflare summary { cursor: pointer; color: var(--cs-mail-copy); font-size: 12px; font-weight: 700; }
+.business-cloudflare p { margin: 10px 0; }
+.business-cloudflare form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.business-cloudflare label { grid-column: 1 / -1; font-size: 11px; color: var(--cs-mail-muted); }
+.business-cloudflare input { min-width: 0; }
+@media (max-width: 720px) { .business-cloudflare form { grid-template-columns: 1fr; } }
 .business-domain-error { color: var(--cs-mail-danger, #b64b4b) !important; }
 .business-domain-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px; }
 .business-domain-ready { display: flex; align-items: flex-start; gap: 8px; padding: 0 0 16px; color: var(--cs-mail-muted); }

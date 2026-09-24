@@ -122,6 +122,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(handlers::domains::verify),
         )
         .route(
+            "/api/organizations/:organization_id/domains/:domain_id/cloudflare-txt",
+            axum::routing::post(handlers::domains::publish_cloudflare_challenge),
+        )
+        .route(
             "/api/organizations/:organization_id/domains/:domain_id/challenge",
             axum::routing::post(handlers::domains::rotate),
         )

@@ -19,6 +19,7 @@ pub mod notifications;
 pub mod tenancy;
 
 pub mod dns;
+pub mod cloudflare_dns;
 
 pub mod domain_onboarding;
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Building2, Check, Copy, Globe2, Mail, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react'
 import { organizationsApi, type BusinessAddress, type OrganizationDetail, type OrganizationInvitation, type OrganizationMember, type OrganizationRole, type OrganizationSummary } from '../services/organizations'
@@ -30,6 +30,10 @@ export function BusinessPage() {
   const [inviteRole, setInviteRole] = useState<OrganizationRole>('member')
   const [domainName, setDomainName] = useState('')
   const [domainNotice, setDomainNotice] = useState('')
+  const [cloudflareTokens, setCloudflareTokens] = useState<Record<string, string>>({})
+  const [cloudflareChecking, setCloudflareChecking] = useState<string | null>(null)
+  const cloudflareTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cloudflareRun = useRef(0)
   const [mailboxLocal, setMailboxLocal] = useState('')
   const [mailboxDomainId, setMailboxDomainId] = useState('')
   const [mailboxMemberId, setMailboxMemberId] = useState('')
@@ -85,6 +89,18 @@ export function BusinessPage() {
     load().catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load businesses'))
   }, [])
 
+  useEffect(() => () => {
+    cloudflareRun.current += 1
+    if (cloudflareTimer.current) clearTimeout(cloudflareTimer.current)
+  }, [])
+
+  const stopCloudflareCheck = () => {
+    cloudflareRun.current += 1
+    if (cloudflareTimer.current) clearTimeout(cloudflareTimer.current)
+    cloudflareTimer.current = null
+    setCloudflareChecking(null)
+  }
+
   useEffect(() => {
     const onRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ kind?: string; payload?: { resource?: string; organization_id?: string } }>).detail
@@ -115,6 +131,7 @@ export function BusinessPage() {
   }
 
   const switchBusiness = async (id: string) => {
+    stopCloudflareCheck()
     setBusy(true)
     setError('')
     try {
@@ -179,6 +196,58 @@ export function BusinessPage() {
     }
   }
 
+  const publishCloudflareChallenge = async (domainId: string) => {
+    if (!detail || !cloudflareTokens[domainId]?.trim()) return
+    const organizationId = detail.id
+    const token = cloudflareTokens[domainId].trim()
+    const startingRun = cloudflareRun.current
+    setCloudflareTokens((current) => ({ ...current, [domainId]: '' }))
+    setBusy(true)
+    setError('')
+    setDomainNotice('')
+    try {
+      const published = await organizationsApi.publishCloudflareChallenge(organizationId, domainId, token)
+      if (startingRun !== cloudflareRun.current) return
+      setDomainNotice(`${published.message} This can take a few minutes.`)
+      stopCloudflareCheck()
+      setCloudflareChecking(domainId)
+      const run = cloudflareRun.current
+      let attempts = 0
+      const check = async () => {
+        if (run !== cloudflareRun.current) return
+        attempts += 1
+        try {
+          const result = await organizationsApi.verifyDomain(organizationId, domainId)
+          if (run !== cloudflareRun.current) return
+          if (result.verified) {
+            setCloudflareChecking(null)
+            setDomainNotice('Domain ownership verified from public DNS. You can now provision mail service.')
+            await load(organizationId)
+            return
+          }
+        } catch (cause) {
+          if (run !== cloudflareRun.current) return
+          if (!(cause instanceof Error && /recently|few seconds/i.test(cause.message))) {
+            setCloudflareChecking(null)
+            setError(cause instanceof Error ? cause.message : 'Unable to check public DNS')
+            return
+          }
+        }
+        if (attempts < 12) {
+          cloudflareTimer.current = setTimeout(() => void check(), 20_000)
+        } else {
+          setCloudflareChecking(null)
+          setDomainNotice('Cloudflare record published, but public DNS has not shown it yet. Use Verify DNS later to finish ownership proof.')
+        }
+      }
+      cloudflareTimer.current = setTimeout(() => void check(), 3_000)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to publish Cloudflare verification record')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const provisionDomain = async (domainId: string) => {
     if (!detail) return
     setBusy(true)
@@ -213,6 +282,7 @@ export function BusinessPage() {
 
   const rotateDomain = async (domainId: string) => {
     if (!detail) return
+    if (cloudflareChecking === domainId) stopCloudflareCheck()
     setBusy(true)
     setError('')
     try {
@@ -229,6 +299,7 @@ export function BusinessPage() {
   const releaseDomain = async (domainId: string) => {
     if (!detail) return
     if (!window.confirm('Release this domain claim from this business?')) return
+    if (cloudflareChecking === domainId) stopCloudflareCheck()
     setBusy(true)
     setError('')
     try {
@@ -513,6 +584,15 @@ export function BusinessPage() {
                           <button type="button" className="icon-button" aria-label="Copy DNS value" onClick={() => void copyText(domain.verification?.value)}><Copy size={14} /></button>
                         </div>
                         <p>Add this TXT record with your DNS provider. CS Mail only marks the domain verified after the public DNS record matches this challenge.</p>
+                        {(detail.role === 'owner' || detail.role === 'admin') && <details className="business-cloudflare">
+                          <summary>Use Cloudflare to add and verify this record</summary>
+                          <p>Create a <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">Cloudflare API token</a> scoped to this domain's zone with Zone Read and DNS Write. The token is used once to add this TXT record and is not saved by CS Mail. Existing DNS records are left alone.</p>
+                          <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareChallenge(domain.id) }}>
+                            <label htmlFor={`cloudflare-token-${domain.id}`}>Cloudflare API token</label>
+                            <input id={`cloudflare-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
+                            <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Checking public DNS…' : 'Add TXT and verify'}</button>
+                          </form>
+                        </details>}
                         {domain.last_error && <p className="business-domain-error">{domain.last_error}</p>}
                         <div className="business-domain-actions">
                           <button type="button" className="primary-button" disabled={busy} onClick={() => void verifyDomain(domain.id)}>
