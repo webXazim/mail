@@ -1346,9 +1346,23 @@ async fn session_cookie_csrf_and_refresh_rotation() {
         "cross-site refresh must be blocked"
     );
 
+    let mut untrusted_local = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut untrusted_local, &session2);
+    untrusted_local.headers_mut().insert(header::ORIGIN, "http://localhost:18081".parse().unwrap());
+    let (status, _) = send(&t.app, untrusted_local).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "local origin without proxy attestation must be blocked");
+
+    let mut trusted_local = req("POST", "/api/auth/refresh", None, None);
+    with_cookie(&mut trusted_local, &session2);
+    trusted_local.headers_mut().insert(header::ORIGIN, "http://localhost:18081".parse().unwrap());
+    trusted_local.headers_mut().insert("x-cs-admin-local", "1".parse().unwrap());
+    let (status, local_cookie, _) = send_headers(&t.app, trusted_local).await;
+    assert_eq!(status, StatusCode::OK, "trusted SSH admin origin must refresh the session");
+    let local_session = session_cookie(local_cookie.as_deref().expect("rotated local cookie"));
+
     // Logout clears the cookie and revokes remaining sessions.
     let mut logout_req = req("POST", "/api/auth/logout", Some(&access), None);
-    with_cookie(&mut logout_req, &session2);
+    with_cookie(&mut logout_req, &local_session);
     let (status, cleared, _) = send_headers(&t.app, logout_req).await;
     assert_eq!(status, StatusCode::OK);
     assert!(

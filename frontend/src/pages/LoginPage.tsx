@@ -5,6 +5,7 @@ import { AuthShell } from '../components/AuthShell'
 import { authApi } from '../services/auth'
 import { auditApi } from '../services/audit'
 import { profileApi } from '../services/profile'
+import { isLocalAdminOrigin } from '../lib/admin-origin'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -18,6 +19,10 @@ export function LoginPage() {
     }
     const profile = await profileApi.refresh()
     if (!profile) throw new Error('Unable to load your account. Please try again.')
+    if (isLocalAdminOrigin() && profile.platform_role === 'platform_admin') {
+      navigate('/mail/admin/control-plane', { replace: true })
+      return
+    }
     navigate(profile.has_mailbox === true ? '/mail/inbox' : '/mail/business', { replace: true })
   }
   const [passwordVisible, setPasswordVisible] = useState(false)

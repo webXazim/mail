@@ -188,7 +188,28 @@ fn origin_allowed(state: &AppState, headers: &HeaderMap) -> bool {
         // No Origin header: non-browser client (curl, servers). Allowed.
         return true;
     };
-    state.cors_origins.iter().any(|o| o == origin.trim())
+    state.cors_origins.iter().any(|o| o == origin.trim()) || trusted_admin_origin(headers, origin)
+}
+
+fn trusted_admin_origin(headers: &HeaderMap, origin: &str) -> bool {
+    crate::middleware::auth::is_local_admin_request(headers)
+        && matches!(origin.trim(), "http://localhost:18081" | "http://127.0.0.1:18081" | "http://[::1]:18081")
+}
+
+#[cfg(test)]
+mod admin_origin_tests {
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn accepts_only_the_trusted_local_admin_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static("http://localhost:18081"));
+        assert!(!super::trusted_admin_origin(&headers, "http://localhost:18081"));
+        headers.insert("x-cs-admin-local", HeaderValue::from_static("1"));
+        assert!(super::trusted_admin_origin(&headers, "http://localhost:18081"));
+        assert!(!super::trusted_admin_origin(&headers, "https://other.example"));
+        assert!(!super::trusted_admin_origin(&headers, "http://localhost:18082"));
+    }
 }
 
 /// Full login row: id, email, display_name, password_hash, role, verified-at.
