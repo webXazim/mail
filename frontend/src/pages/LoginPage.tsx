@@ -16,8 +16,9 @@ export function LoginPage() {
       navigate(requested, { replace: true })
       return
     }
-    const profile = await profileApi.refresh().catch(() => null)
-    navigate(profile?.has_mailbox === false ? '/mail/business' : '/mail/inbox', { replace: true })
+    const profile = await profileApi.refresh()
+    if (!profile) throw new Error('Unable to load your account. Please try again.')
+    navigate(profile.has_mailbox === true ? '/mail/inbox' : '/mail/business', { replace: true })
   }
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [remember, setRemember] = useState(true)

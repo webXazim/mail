@@ -128,7 +128,7 @@ async fn deliver(
     display_name: &str,
     link: &str,
 ) -> Result<(), ApiError> {
-    let from_email = format!("mailer@{}", state.stalwart.default_domain());
+    let from_email = format!("no-reply@{}", state.stalwart.default_domain());
     let outgoing = mime::Outgoing {
         from: mime::Address {
             name: Some("CS Mail".to_string()),
@@ -167,7 +167,7 @@ pub async fn send_forwarding_verification(
     target_email: &str,
     code: &str,
 ) -> Result<(), ApiError> {
-    let from_email = format!("mailer@{}", state.stalwart.default_domain());
+    let from_email = format!("no-reply@{}", state.stalwart.default_domain());
     let outgoing = mime::Outgoing {
         from: mime::Address {
             name: Some("CS Mail".to_string()),
@@ -204,7 +204,7 @@ pub async fn send_sender_identity_verification(
     target_email: &str,
     code: &str,
 ) -> Result<(), ApiError> {
-    let from_email = format!("mailer@{}", state.stalwart.default_domain());
+    let from_email = format!("no-reply@{}", state.stalwart.default_domain());
     let outgoing = mime::Outgoing {
         from: mime::Address {
             name: Some("CS Mail".to_string()),

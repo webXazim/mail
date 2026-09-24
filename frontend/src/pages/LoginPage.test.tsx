@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { LoginPage } from './LoginPage'
 import { authApi } from '../services/auth'
 import { auditApi } from '../services/audit'
+import { profileApi } from '../services/profile'
 
 const navigateMock = vi.fn()
 
@@ -21,6 +22,10 @@ vi.mock('../services/audit', () => ({
   auditApi: { add: vi.fn() },
 }))
 
+vi.mock('../services/profile', () => ({
+  profileApi: { refresh: vi.fn() },
+}))
+
 const mount = () => render(<MemoryRouter><LoginPage /></MemoryRouter>)
 
 describe('LoginPage', () => {
@@ -29,6 +34,8 @@ describe('LoginPage', () => {
     vi.mocked(authApi.login).mockReset()
     vi.mocked(authApi.verifyTwoFactor).mockReset()
     vi.mocked(auditApi.add).mockReset()
+    vi.mocked(profileApi.refresh).mockReset()
+    vi.mocked(profileApi.refresh).mockResolvedValue({ has_mailbox: true } as Awaited<ReturnType<typeof profileApi.refresh>>)
   })
 
   it('signs in, records the audit event and navigates to the mailbox', async () => {
@@ -73,6 +80,20 @@ describe('LoginPage', () => {
 
     expect(authApi.verifyTwoFactor).toHaveBeenCalledWith('challenge-1', '123456')
     await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/inbox', { replace: true }))
+  })
+
+  it('takes a new account without a mailbox to business setup', async () => {
+    const user = userEvent.setup()
+    vi.mocked(profileApi.refresh).mockResolvedValue({ has_mailbox: false } as Awaited<ReturnType<typeof profileApi.refresh>>)
+    vi.mocked(authApi.login).mockResolvedValue({
+      access: 'tok',
+      user: { id: 'u1', email: 'owner@example.com', display_name: 'Owner', role: 'member' },
+    })
+    mount()
+    await user.type(screen.getByLabelText('Email address'), 'owner@example.com')
+    await user.type(screen.getByLabelText('Password'), 'Strong-Pass!1')
+    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/mail/business', { replace: true }))
   })
 
   it('surfaces the login error instead of navigating', async () => {

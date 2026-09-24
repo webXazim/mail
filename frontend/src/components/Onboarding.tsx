@@ -22,6 +22,7 @@ export function Onboarding() {
     return localStorage.getItem(onboardedKey) === '1' ? 'hidden' : 'welcome'
   })
   const [name, setName] = useState('')
+  const [hasMailbox, setHasMailbox] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const cardRef = useRef<HTMLElement>(null)
@@ -36,6 +37,7 @@ export function Onboarding() {
       if (cancelled) return
       if (profile && !profile.onboarded) {
         setName(profile.display_name.trim() || profile.email.split('@')[0])
+        setHasMailbox(profile.has_mailbox === true)
         setStep('setup')
       } else {
         setStep('hidden')
@@ -95,8 +97,8 @@ export function Onboarding() {
       >
         <header>
           <p className="eyebrow">CS Mail</p>
-          <h2>Welcome to your inbox</h2>
-          <p>A fast, focused mail client built for getting through your day.</p>
+          <h2>{hasMailbox ? 'Welcome to your inbox' : 'Welcome to CS Mail'}</h2>
+          <p>{hasMailbox ? 'Your business mailbox is ready.' : 'Set up a business, verify its domain, and create your mailbox to begin.'}</p>
         </header>
         <ul className="onboard-points">
           {points.map(({ icon: Icon, text }) => (
@@ -121,7 +123,7 @@ export function Onboarding() {
             {error && <p className="settings-hint">{error}</p>}
             <footer>
               <button className="primary-button" type="submit" disabled={saving}>
-                {saving ? 'Setting up…' : 'Enter my inbox'}
+                {saving ? 'Setting up…' : hasMailbox ? 'Enter my inbox' : 'Continue to business setup'}
               </button>
             </footer>
           </form>

@@ -51,6 +51,7 @@ import { useMail } from '../state/mail/MailContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useMailListKeyboard } from '../hooks/useMailListKeyboard'
 import { composeToDraft, fetchMailPage, formatTime, isRemoteMail, remoteDraftApi } from '../services/remote-mail'
+import { localIdentity } from '../services/profile'
 import { NotFoundPage } from './NotFoundPage'
 import type { MailActionKind } from '../state/mail/mailboxReducer'
 import type { Draft, Mail } from '../types'
@@ -60,9 +61,9 @@ const pageSize = 25
 
 const toDraftMail = (draft: Draft): Mail => ({
   id: 'draft-local',
-  initials: 'AM',
+  initials: localIdentity().name.split(/\s+/).map((part) => part[0]?.toUpperCase() ?? '').slice(0, 2).join('') || '?',
   sender: 'You',
-  email: 'alex@crescentsphere.com',
+  email: localIdentity().email,
   subject: draft.subject || '(no subject)',
   preview:
     draft.body.slice(0, 120) ||

@@ -13,6 +13,7 @@ import { Reader } from '../components/Reader'
 import { useMail } from '../state/mail/MailContext'
 import { calendarApi } from '../services/calendar'
 import { fetchThreadFor, isRemoteMail } from '../services/remote-mail'
+import { localIdentity } from '../services/profile'
 import type { Mail, ReaderThreadItem } from '../types'
 
 const isEditableTarget = (target: EventTarget | null) =>
@@ -186,7 +187,7 @@ export function ThreadPage() {
         mail={mail}
         thread={threadItems ? (threadItems as ReaderThreadItem[]) : undefined}
         onReply={() => openCompose(buildReplyDraft(mail))}
-        onReplyAll={() => openCompose(buildReplyAllDraft(mail))}
+        onReplyAll={() => openCompose(buildReplyAllDraft(mail, localIdentity().email))}
         onForward={() => openCompose(buildForwardDraft(mail))}
         onToggleStar={() => toggleStar([mail.id])}
         onToggleRead={() => (mail.unread ? markRead(mail.id) : markUnread([mail.id]))}

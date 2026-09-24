@@ -143,7 +143,7 @@ const makePdf = (mail: Mail, name: string): Blob => {
 }
 
 const saveEmailAsFile = (mail: Mail, thread: { sender: string; email: string; copy: string }[]) => {
-  const recipients = mail.to && mail.to.length > 0 ? mail.to : ['alex@crescentsphere.com']
+  const recipients = mail.to ?? []
   const body = thread.map((item) => `${item.sender} <${item.email}>\n${item.copy}`).join('\n\n')
   const ccLine = mail.cc && mail.cc.length > 0 ? [`Cc: ${mail.cc.join(', ')}`] : []
   const parts = [
@@ -189,7 +189,7 @@ export function Reader({
   canNext,
 }: ReaderProps) {
   const [openMessage, setOpenMessage] = useState(2)
-  const recipientDisplay = mail.to && mail.to.length > 0 ? mail.to.join(', ') : 'Alex Morgan'
+  const recipientDisplay = mail.to && mail.to.length > 0 ? mail.to.join(', ') : 'Recipient unavailable'
   const [moveOpen, setMoveOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -208,18 +208,6 @@ export function Reader({
     ...moveChoices,
     ...foldersApi.list().map((customFolder) => customFolder.name),
   ].filter((folder) => folder !== currentFolder)
-  const senderDomain = mail.email.includes('@')
-    ? mail.email.split('@').pop()!.toLowerCase()
-    : 'crescentsphere.com'
-  const idKey = mail.id.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'cs-mail3'
-  const smtpServer =
-    senderDomain === 'gmail.com'
-      ? 'smtp.gmail.com'
-      : ['outlook.com', 'hotmail.com', 'live.com'].includes(senderDomain)
-        ? 'smtp-mail.outlook.com'
-        : senderDomain === 'yahoo.com'
-          ? 'smtp.mail.yahoo.com'
-          : `mx1.${senderDomain}`
 
   useEffect(() => {
     if (!onMove && !onSnooze) return
@@ -483,7 +471,7 @@ export function Reader({
               </div>
               <div>
                 <dt>To</dt>
-                <dd>{recipientDisplay} &lt;alex@crescentsphere.com&gt;</dd>
+                <dd>{recipientDisplay}</dd>
               </div>
               {mail.cc && mail.cc.length > 0 && (
                 <div>
@@ -498,26 +486,6 @@ export function Reader({
               <div>
                 <dt>Subject</dt>
                 <dd>{mail.subject}</dd>
-              </div>
-              <div>
-                <dt>MIME-Version</dt>
-                <dd>1.0</dd>
-              </div>
-              <div>
-                <dt>Return-Path</dt>
-                <dd>
-                  &lt;bounce+{idKey}@{senderDomain}&gt;
-                </dd>
-              </div>
-              <div>
-                <dt>Message-ID</dt>
-                <dd>
-                  cs-mail-{idKey}@{senderDomain}
-                </dd>
-              </div>
-              <div>
-                <dt>SMTP server</dt>
-                <dd>{smtpServer} · TLS 1.3</dd>
               </div>
             </dl>
             <div className="reader-envelope__security">

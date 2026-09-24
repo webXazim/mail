@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Building2, Check, Copy, Globe2, Mail, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react'
 import { organizationsApi, type BusinessAddress, type OrganizationDetail, type OrganizationInvitation, type OrganizationMember, type OrganizationRole, type OrganizationSummary } from '../services/organizations'
 import { profileApi, useProfile } from '../services/profile'
@@ -373,6 +374,29 @@ export function BusinessPage() {
         </div>
       </header>
 
+      <section className="business-setup" aria-label="Business mail setup">
+        <h2>Set up business mail</h2>
+        <p>Your login is separate from your company mailbox. Mail becomes available after the domain and an address are ready.</p>
+        <ol>
+          <li className={active ? 'business-setup__done' : ''}>
+            <strong>1. Create your business</strong>
+            <span>{active ? active.name : 'Enter your company name below.'}</span>
+          </li>
+          <li>
+            <strong>2. Review your plan</strong>
+            <Link to="/mail/billing">View plans and billing</Link>
+          </li>
+          <li className={detail?.domains.some((domain) => domain.status === 'active') ? 'business-setup__done' : ''}>
+            <strong>3. Verify your domain and mail DNS</strong>
+            <span>{!detail ? 'Create a business first.' : detail.domains.some((domain) => domain.status === 'active') ? 'Domain ready' : 'Add your domain below, prove ownership, then publish the mail records.'}</span>
+          </li>
+          <li className={profile?.has_mailbox ? 'business-setup__done' : ''}>
+            <strong>4. Create and use your mailbox</strong>
+            <span>{profile?.has_mailbox ? profile.mailbox_email : 'An active domain is required before you can create an address.'}</span>
+          </li>
+        </ol>
+      </section>
+
       {error && <p className="business-alert business-alert--error">{error}</p>}
 
       <div className="business-layout">
@@ -395,7 +419,7 @@ export function BusinessPage() {
           ))}
 
           <form className="business-create" onSubmit={createBusiness}>
-            <label htmlFor="business-name">Create another business</label>
+            <label htmlFor="business-name">{organizations.length ? 'Create another business' : 'Business name'}</label>
             <div>
               <input
                 id="business-name"
@@ -431,7 +455,7 @@ export function BusinessPage() {
                 )}
               </section>
 
-              <section className="business-section">
+              <section className="business-section" id="business-domains">
                 <header>
                   <div><Globe2 size={17} /><h3>Domains</h3></div>
                   <span>{detail.domains.length}</span>
@@ -572,7 +596,7 @@ export function BusinessPage() {
                 )}
               </section>
 
-              <section className="business-section">
+              <section className="business-section" id="business-mailboxes">
                 <header>
                   <div><Users size={17} /><h3>Mailboxes & storage</h3></div>
                   <span>{detail.mailboxes.length}</span>

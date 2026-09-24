@@ -261,6 +261,10 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const send = async (event: FormEvent) => {
     event.preventDefault()
     if (uploading) return
+    if (remote && (!fromIdentityId || !identityById.has(fromIdentityId))) {
+      setStatus('A verified mailbox sender is required before sending')
+      return
+    }
     if (!draft.to.trim()) {
       setStatus('Add at least one recipient')
       return

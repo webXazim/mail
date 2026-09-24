@@ -1,5 +1,4 @@
 import { apiFetch } from '../lib/api'
-import { primaryAccount } from './accounts'
 import { isRemoteMail } from './remote-mail'
 
 export type Identity = {
@@ -43,11 +42,6 @@ export const defaultIdentities: Identity[] = [
 
 let remoteCache: Identity[] = []
 
-const seededPrimary = (): Identity => {
-  const primary = primaryAccount()
-  return { id: 'primary-pending', email: primary.email, displayName: primary.name, primary: true }
-}
-
 const mapRemote = (identity: RemoteIdentity): Identity => ({
   id: identity.id,
   email: identity.email,
@@ -83,7 +77,7 @@ const localList = (): Identity[] => {
 
 export const identitiesApi = {
   list(): Identity[] {
-    if (isRemoteMail()) return remoteCache.length ? remoteCache : [seededPrimary()]
+    if (isRemoteMail()) return remoteCache
     return localList()
   },
 

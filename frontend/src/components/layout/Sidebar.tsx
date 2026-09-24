@@ -79,16 +79,19 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   }, [mailbox, remoteMailboxes])
   const profile = useMemo(() => {
     const active = accounts.find((account) => account.id === activeAccount) ?? accounts[0]
-    const displayName =
-      active.id === primaryAccountId ? settingsApi.load().displayName || active.name : active.name
+    const displayName = signedInProfile && active.id === primaryAccountId
+      ? signedInProfile.display_name || signedInProfile.email.split('@')[0]
+      : active.id === primaryAccountId && authApi.isDemo()
+        ? settingsApi.load().displayName || active.name
+        : active.name
     const clear = displayName.trim().split(/\s+/)
     const initials =
       clear
         .map((part) => part[0]?.toUpperCase() ?? '')
         .slice(0, 2)
-        .join('') || 'AM'
+        .join('') || '?'
     return { displayName, initials, email: active.email, color: active.color }
-  }, [accounts, activeAccount])
+  }, [accounts, activeAccount, signedInProfile])
   const storage = useMemo(() => {
     if (signedInProfile?.storage) {
       const used = signedInProfile.storage.used_bytes / 1024 ** 3
@@ -99,6 +102,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         percent: Math.min(100, Math.max(0, Math.round(signedInProfile.storage.pct))),
       }
     }
+    if (!authApi.isDemo()) return { used: '—', total: '—', percent: 0 }
     const attachments = mailbox.filter((mail) => mail.attachment).length
     const used = 0.4 + mailbox.filter((mail) => mail.folder !== 'Trash').length * 0.002 + attachments * 0.012
     return { used: used.toFixed(1), total: '15', percent: Math.min(100, Math.round((used / 15) * 100)) }

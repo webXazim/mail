@@ -121,7 +121,7 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         "onboarded": onboarded,
         "plan": plan_code,
         "plan_name": plan.name,
-        "has_mailbox": active_mailbox_id.is_some(),
+        "has_mailbox": active_mailbox_id.is_some() && provider_account.is_some() && effective_sync_status == "ready",
         "mailbox_email": mailbox_email,
         "mail_sync_status": effective_sync_status,
         "active_organization": active_organization_id.map(|id| json!({

@@ -55,8 +55,9 @@ function readIdentity(): { name: string; email: string } | null {
 /** The primary account is the real signed-in user; the demo fixture is only a fallback. */
 export function primaryAccount(): Account {
   const identity = readIdentity()
-  const name = identity?.name || 'Alex Morgan'
-  const email = identity?.email || 'alex@crescentsphere.com'
+  const live = isRemoteMail()
+  const name = identity?.name || (live ? 'Your account' : 'Alex Morgan')
+  const email = identity?.email || (live ? '' : 'alex@crescentsphere.com')
   return {
     id: primaryAccountId,
     name,

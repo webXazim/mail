@@ -11,7 +11,11 @@ export const isDemoAllowed = () => import.meta.env.VITE_DEMO_MODE === 'true'
 const DEMO_KEY = 'cs-mail:demo'
 const PROFILE_KEY = 'cs-mail:profile'
 
-const clearProfileCache = () => localStorage.removeItem(PROFILE_KEY)
+const clearProfileCache = () => {
+  localStorage.removeItem(PROFILE_KEY)
+  localStorage.removeItem('cs-mail:primary-identity')
+  window.dispatchEvent(new Event('cs-mail-profile-cleared'))
+}
 
 if (!isDemoAllowed()) localStorage.removeItem(DEMO_KEY)
 

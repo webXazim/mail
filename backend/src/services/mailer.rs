@@ -44,8 +44,13 @@ impl MailerClient {
             "content": STANDARD.encode(&item.bytes),
             "content_type": item.content_type,
         })).collect::<Vec<_>>();
+        let sender = message.from.name.as_deref()
+            .map(|name| name.chars().filter(|ch| !matches!(ch, '\r' | '\n' | '<' | '>')).collect::<String>())
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| format!("{} <{}>", name.trim(), message.from.email))
+            .unwrap_or_else(|| message.from.email.clone());
         let payload = json!({
-            "from": message.from.email,
+            "from": sender,
             "to": message.to.iter().map(|item| item.email.as_str()).collect::<Vec<_>>(),
             "cc": message.cc.iter().map(|item| item.email.as_str()).collect::<Vec<_>>(),
             "subject": message.subject,

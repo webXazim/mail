@@ -298,13 +298,13 @@ export const buildReplyDraft = (mail: Mail): Partial<Draft> => ({
   body: '',
 })
 
-export const buildReplyAllDraft = (mail: Mail): Partial<Draft> => ({
+export const buildReplyAllDraft = (mail: Mail, ownAddress = selfEmail): Partial<Draft> => ({
   to: [
     mail.email,
-    ...(mail.to ?? []).filter((recipient) => recipient.toLowerCase() !== selfEmail.toLowerCase()),
+    ...(mail.to ?? []).filter((recipient) => recipient.toLowerCase() !== ownAddress.toLowerCase()),
   ].join(', '),
   cc: (mail.cc ?? [])
-    .filter((recipient) => recipient.toLowerCase() !== selfEmail.toLowerCase())
+    .filter((recipient) => recipient.toLowerCase() !== ownAddress.toLowerCase())
     .join(', '),
   subject: prefixSubject(mail, 'Re:'),
   body: '',

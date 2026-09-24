@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiFetch, mailboxContextStore } from '../lib/api'
-import { primaryAccount, setPrimaryIdentity } from './accounts'
+import { clearPrimaryIdentity, primaryAccount, setPrimaryIdentity } from './accounts'
 import { isDemoAllowed } from './auth'
 import { isRemoteMail } from './remote-mail'
 import { defaultSettings, settingsApi } from './settings'
@@ -64,6 +64,13 @@ function setCurrent(profile: Profile | null) {
   listeners.forEach((listener) => listener())
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('cs-mail-profile-cleared', () => {
+    setCurrent(null)
+    clearPrimaryIdentity()
+  })
+}
+
 export function subscribeProfile(listener: () => void) {
   listeners.add(listener)
   return () => {
@@ -107,7 +114,7 @@ function applyIdentity(profile: Profile) {
 
 export const profileApi = {
   cached: readCache,
-  /** API-first hydration; returns the cache when offline or in demo mode. */
+  /** A live account must use the current server profile, never a cached tenant. */
   async refresh(): Promise<Profile | null> {
     if (!isRemoteMail()) return null
     try {
@@ -117,10 +124,9 @@ export const profileApi = {
       setCurrent(profile)
       applyIdentity(profile)
       return profile
-    } catch {
-      const cached = readCache()
-      setCurrent(cached)
-      return cached
+    } catch (error) {
+      setCurrent(null)
+      throw error
     }
   },
   async update(patch: { display_name?: string; onboarded?: boolean }): Promise<Profile | null> {

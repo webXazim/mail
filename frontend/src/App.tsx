@@ -147,21 +147,30 @@ function RequireMailbox({ children }: { children: ReactNode }) {
   const location = useLocation()
   const [checked, setChecked] = useState(false)
   const [hasMailbox, setHasMailbox] = useState<boolean | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let alive = true
+    if (isDemoAllowed() && localStorage.getItem(sessionKey) === 'true') {
+      setHasMailbox(true)
+      setChecked(true)
+      return () => { alive = false }
+    }
     profileApi.refresh()
       .then((profile) => {
         if (!alive) return
-        setHasMailbox(profile?.has_mailbox ?? true)
+        setHasMailbox(profile?.has_mailbox === true)
         setChecked(true)
       })
       .catch(() => {
         if (!alive) return
+        setFailed(true)
         setChecked(true)
       })
     return () => { alive = false }
-  }, [])
+  }, [attempt])
   if (!checked) return <div className="route-loader"><div className="loading-spinner" /></div>
+  if (failed) return <div className="route-loader"><p>We could not check your mailbox access.</p><button type="button" onClick={() => { setChecked(false); setFailed(false); setAttempt((value) => value + 1) }}>Try again</button></div>
   if (hasMailbox === false) return <Navigate to="/mail/business" replace state={{ from: `${location.pathname}${location.search}` }} />
   return children
 }

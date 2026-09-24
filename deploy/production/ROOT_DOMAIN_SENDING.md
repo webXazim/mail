@@ -7,7 +7,7 @@ Use one key per application after the initial cutover. Never commit keys.
 
 | Application | Private environment | Sender | Delivery path |
 | --- | --- | --- | --- |
-| CS Mail | `CS_MAILER_API_URL`, `CS_MAILER_API_KEY` | `mailer@crescentsphere.com` for platform messages | Mailer API; customer mailbox messages continue through Stalwart |
+| CS Mail | `CS_MAILER_API_URL`, `CS_MAILER_API_KEY` | `no-reply@crescentsphere.com` for account messages | Mailer API; customer mailbox messages continue through Stalwart |
 | Mailer | `ACCOUNT_EMAIL_API_KEY`, `ACCOUNT_EMAIL_FROM` | `mailer@crescentsphere.com` | Internal Mailer API |
 | Notes | `CS_MAILER_API_URL`, `CS_MAILER_API_KEY`, `EMAIL_BACKEND`, `DEFAULT_FROM_EMAIL` | `notes@crescentsphere.com` | Mailer API from Django and the Rust delivery worker |
 | Messenger | `CS_MAILER_API_URL`, `CS_MAILER_API_KEY`, `EMAIL_BACKEND`, `DEFAULT_FROM_EMAIL` | `messenger@crescentsphere.com` | Mailer API from Django |
