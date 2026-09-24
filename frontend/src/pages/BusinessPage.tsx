@@ -807,12 +807,11 @@ export function BusinessPage() {
 
                     {domain.status === 'failed' && !domain.provider?.provisioned && (detail.role === 'owner' || detail.role === 'admin') && (
                       <div className="business-domain-ready">
-                        {domain.last_error?.includes('already exists in the shared mail provider')
-                          ? <p><strong>Provider domain needs operator review.</strong> {domain.last_error}</p>
-                          : <>
-                            <p><strong>Provisioning needs attention.</strong> {domain.last_error || 'The provider operation is safe to retry.'}</p>
-                            <button type="button" className="secondary-button" disabled={busy} onClick={() => void provisionDomain(domain.id)}>Retry provisioning</button>
-                          </>}
+                        <p>
+                          <strong>{domain.last_error?.includes('already exists in the shared mail provider') ? 'Provider domain needs operator review.' : 'Provisioning needs attention.'}</strong>{' '}
+                          {domain.last_error || 'The provider operation is safe to retry.'}
+                        </p>
+                        <button type="button" className="secondary-button" disabled={busy} onClick={() => void provisionDomain(domain.id)}>Retry provisioning</button>
                       </div>
                     )}
                   </div>
