@@ -362,10 +362,13 @@ async fn auth_contacts_and_calendar_flow() {
     let (status, _) = send(&t.app, req("GET", "/api/contacts", None, None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // Profile exposes the plan + limits computed server-side.
+    // A new login has no business, plan, or mailbox yet. Profile remains
+    // readable so onboarding can begin without inventing entitlements.
     let (status, profile) = send(&t.app, req("GET", "/api/profile", Some(&access), None)).await;
     assert_eq!(status, StatusCode::OK, "profile: {profile}");
-    assert_eq!(profile["plan"], "solo");
+    assert!(profile["plan"].is_null());
+    assert_eq!(profile["has_mailbox"], false);
+    assert_eq!(profile["storage"]["total_bytes"], 0);
 
     // Contacts: create -> list -> update -> delete.
     let (status, created) = send(

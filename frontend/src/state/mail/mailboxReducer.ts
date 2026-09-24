@@ -66,7 +66,7 @@ export function mailboxReducer(state: MailState, action: MailboxAction): MailSta
     case 'hydrated':
       return { ...state, mailbox: action.mailbox, loading: false, loadError: false }
     case 'load-failed':
-      return { ...state, loading: false, loadError: true, notice: 'Unable to sync mailbox' }
+      return { ...state, mailbox: [], loading: false, loadError: true, notice: 'Unable to sync mailbox' }
     case 'retry':
       return { ...state, loading: true, loadError: false, notice: '' }
     case 'mark-read':

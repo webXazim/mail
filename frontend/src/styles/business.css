@@ -1,15 +1,15 @@
 .business-page { min-height: 100%; }
 .business-page .page-head p:last-child { max-width: 720px; }
-.business-setup { margin: 0 28px 24px; padding: 20px; border: 1px solid var(--cs-mail-line); background: var(--cs-mail-paper); }
-.business-setup h2 { margin: 0 0 6px; font-size: 19px; }
+.business-setup { margin: 0 28px 24px; padding: 20px; border: 1px solid var(--cs-mail-line); background: var(--cs-mail-panel); }
+.business-setup h2 { margin: 0 0 6px; font-size: 19px; color: var(--cs-mail-white); }
 .business-setup > p { margin: 0 0 18px; color: var(--cs-mail-muted); }
 .business-setup ol { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.business-setup li { display: grid; align-content: start; gap: 7px; padding: 12px; border: 1px solid var(--cs-mail-line); }
+.business-setup li { display: grid; align-content: start; gap: 7px; padding: 12px; border: 1px solid var(--cs-mail-line); color: var(--cs-mail-white); }
 .business-setup li span { color: var(--cs-mail-muted); font-size: 12px; line-height: 1.5; }
 .business-setup li.business-setup__done { border-color: var(--cs-mail-positive, #70b890); }
 .business-setup a { font-size: 12px; }
 .business-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: calc(100vh - 150px); border-top: 1px solid var(--cs-mail-line); }
-.business-list { padding: 18px 14px; border-right: 1px solid var(--cs-mail-line); background: var(--cs-mail-paper); }
+.business-list { padding: 18px 14px; border-right: 1px solid var(--cs-mail-line); background: var(--cs-mail-panel); }
 .business-list__item { width: 100%; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 0; background: transparent; color: var(--cs-mail-copy); text-align: left; cursor: pointer; }
 .business-list__item:hover, .business-list__item--active { background: var(--cs-mail-ink-2); }
 .business-list__item span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }

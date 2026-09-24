@@ -31,7 +31,7 @@ import { foldersApi } from '../../services/folders'
 import { labelsApi } from '../../services/labels'
 import { settingsApi } from '../../services/settings'
 import { authApi } from '../../services/auth'
-import { currentVirtualCounts } from '../../services/remote-mail'
+import { currentVirtualCounts, isRemoteMail } from '../../services/remote-mail'
 import { profileApi, useProfile, useRole } from '../../services/profile'
 import { primaryAccountId, unifiedViewId } from '../../services/accounts'
 import { ManageFolders } from '../ManageFolders'
@@ -56,7 +56,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const { mailbox, scheduledCount, accounts, activeAccount, setActiveAccount, remoteMailboxes } = useMail()
   const role = useRole()
   const signedInProfile = useProfile()
-  const platformOnly = signedInProfile?.has_mailbox === false
+  const platformOnly = isRemoteMail() && signedInProfile?.has_mailbox !== true
   const folder = folderFromPath(pathname)
   const query = searchParams.get('q') || ''
   const counts = useMemo(() => {

@@ -132,7 +132,12 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const remoteRef = useRef(isSessionActive() && isRemoteMail())
 
   const loadMailbox = useCallback(async () => {
-    if (remoteRef.current && isRemoteMail()) {
+    if (isRemoteMail()) {
+      if (!isSessionActive()) {
+        setRemoteMailboxes([])
+        dispatch({ type: 'hydrated', mailbox: [] })
+        return
+      }
       try {
         const profile = await profileApi.refresh()
         if (profile?.has_mailbox === false) {
@@ -148,6 +153,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
         return
       } catch {
         resetMailCache()
+        setRemoteMailboxes([])
         dispatch({ type: 'load-failed' })
         return
       }
@@ -186,10 +192,10 @@ export function MailProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncAuth = () => {
       remoteRef.current = isSessionActive() && isRemoteMail()
-      if (remoteRef.current) {
-        dispatch({ type: 'retry' })
-        void loadMailbox()
-      }
+      dispatch({ type: 'retry' })
+      void loadMailbox()
+      if (remoteRef.current) void profileApi.refresh().then(() => setAccounts(accountsApi.list())).catch(() => {})
+      else setAccounts(accountsApi.list())
     }
     window.addEventListener('cs-mail-auth-changed', syncAuth)
     return () => window.removeEventListener('cs-mail-auth-changed', syncAuth)

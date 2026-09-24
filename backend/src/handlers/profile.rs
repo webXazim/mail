@@ -1,4 +1,5 @@
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -77,16 +78,28 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         organization_name,
     ) = row.ok_or_else(|| ApiError::not_found("User not found"))?;
 
-    // Upgrade 06 entitlement authority remains user-scoped during the tenant
-    // foundation. Upgrade 24 moves subscription/seat authority to organization.
-    let entitlements = entitlements::for_user(&state, auth.user_id).await?;
-    let plan = &entitlements.plan;
+    // A verified login can exist before it owns or joins a business. Its
+    // profile must remain readable so the customer can complete onboarding.
+    let organization_id = match entitlements::active_organization_for_user(&state, auth.user_id).await {
+        Ok(id) => Some(id),
+        Err(error) if error.status == StatusCode::FORBIDDEN
+            && error.message == "Select an active business before using this feature" => None,
+        Err(error) => return Err(error),
+    };
+    let entitlements = match organization_id {
+        Some(id) => Some(entitlements::for_organization(&state, id).await?),
+        None => None,
+    };
+    let plan = match &entitlements {
+        Some(value) => value.plan.clone(),
+        None => entitlements::plan(&state, &plan_code).await?,
+    };
     // Storage is mailbox-specific in Upgrade 32. The organization entitlement
     // exposes the default allocation, while the active mailbox row is the
     // authoritative quota shown to the signed-in mailbox user.
-    let total = mailbox_quota_bytes
-        .map(|value| value.max(0) as u64)
-        .unwrap_or(entitlements.quota_bytes);
+    let total = entitlements.as_ref().map(|value| {
+        mailbox_quota_bytes.map(|bytes| bytes.max(0) as u64).unwrap_or(value.quota_bytes)
+    }).unwrap_or(0);
     let mut used = 0u64;
     let mut provider_total: Option<u64> = None;
     let provider_account = mailbox_provider_account_id
@@ -119,8 +132,8 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         "role": client_role,
         "platform_role": platform_role,
         "onboarded": onboarded,
-        "plan": plan_code,
-        "plan_name": plan.name,
+        "plan": entitlements.as_ref().map(|value| value.plan.code.as_str()),
+        "plan_name": entitlements.as_ref().map(|value| value.plan.name.as_str()),
         "has_mailbox": active_mailbox_id.is_some() && provider_account.is_some() && effective_sync_status == "ready",
         "mailbox_email": mailbox_email,
         "mail_sync_status": effective_sync_status,
@@ -140,17 +153,17 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
         },
         "entitlements": {
             "quota_bytes": total,
-            "quota_override_bytes": mailbox_quota_override_bytes.map(|value| value.max(0) as u64).or(entitlements.quota_override_bytes),
-            "quota_source": if mailbox_quota_override_bytes.is_some() || entitlements.quota_is_overridden() { "override" } else { "plan" },
-            "feature_flags": plan.feature_flags
+            "quota_override_bytes": mailbox_quota_override_bytes.map(|value| value.max(0) as u64).or(entitlements.as_ref().and_then(|value| value.quota_override_bytes)),
+            "quota_source": if mailbox_quota_override_bytes.is_some() || entitlements.as_ref().is_some_and(|value| value.quota_is_overridden()) { "override" } else { "plan" },
+            "feature_flags": if entitlements.is_some() { plan.feature_flags.clone() } else { std::collections::BTreeMap::<String, bool>::new() }
         },
         "limits": {
-            "max_attachment_bytes": plan.max_attachment_bytes,
-            "max_total_attachment_bytes": plan.max_total_attachment_bytes,
-            "mailbox_bytes": plan.mailbox_bytes,
-            "max_recipients": plan.max_recipients,
-            "daily_send_limit": plan.daily_send_limit,
-            "seats": plan.seats
+            "max_attachment_bytes": if entitlements.is_some() { plan.max_attachment_bytes } else { 0 },
+            "max_total_attachment_bytes": if entitlements.is_some() { plan.max_total_attachment_bytes } else { 0 },
+            "mailbox_bytes": if entitlements.is_some() { plan.mailbox_bytes } else { 0 },
+            "max_recipients": if entitlements.is_some() { plan.max_recipients } else { 0 },
+            "daily_send_limit": if entitlements.is_some() { plan.daily_send_limit } else { 0 },
+            "seats": if entitlements.is_some() { plan.seats } else { 0 }
         }
     })))
 }

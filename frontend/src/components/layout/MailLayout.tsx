@@ -9,6 +9,7 @@ import { Onboarding } from '../Onboarding'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { useProfile } from '../../services/profile'
+import { isRemoteMail } from '../../services/remote-mail'
 
 const Composer = lazy(() => import('../Composer').then((module) => ({ default: module.Composer })))
 
@@ -29,7 +30,7 @@ export function MailLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const signedInProfile = useProfile()
-  const hasMailbox = signedInProfile?.has_mailbox !== false
+  const hasMailbox = !isRemoteMail() || signedInProfile?.has_mailbox === true
   const {
     toasts,
     dismissToast,

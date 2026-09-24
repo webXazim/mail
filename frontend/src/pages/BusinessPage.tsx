@@ -384,7 +384,7 @@ export function BusinessPage() {
           </li>
           <li>
             <strong>2. Review your plan</strong>
-            <Link to="/mail/billing">View plans and billing</Link>
+            {active ? <Link to="/mail/billing">View plans and billing</Link> : <span>Create your business first.</span>}
           </li>
           <li className={detail?.domains.some((domain) => domain.status === 'active') ? 'business-setup__done' : ''}>
             <strong>3. Verify your domain and mail DNS</strong>
