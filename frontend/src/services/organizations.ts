@@ -239,6 +239,8 @@ export const organizationsApi = {
       method: 'PATCH',
       body: JSON.stringify(resetToDefault ? { reset_to_default: true } : { quota_bytes: quotaBytes }),
     }),
+  retryMailbox: (organizationId: string, mailboxId: string) =>
+    apiFetch<{ ok: true; status: string }>(`/api/organizations/${organizationId}/mailboxes/${mailboxId}/retry`, { method: 'POST' }),
   deleteMailbox: (organizationId: string, mailboxId: string) =>
     apiFetch<{ ok: true; status: string }>(`/api/organizations/${organizationId}/mailboxes/${mailboxId}`, { method: 'DELETE' }),
   mailboxInvitations: (id: string) => apiFetch<{ invitations: MailboxInvitation[] }>(`/api/organizations/${id}/mailbox-invitations`),

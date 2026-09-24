@@ -1283,12 +1283,14 @@ async fn fail_job(state: &AppState, job: &JobRow, failure: JobFailure) -> Result
     if let Some(mailbox_id) = job.mailbox_id {
         sqlx::query(
             "UPDATE mailboxes SET sync_status=$2, sync_error=$3,
-             status=CASE WHEN $2='error' AND status NOT IN ('suspended','deleting') THEN 'error' ELSE status END,
+            status=CASE WHEN $2='error' AND $4=$5 AND status NOT IN ('suspended','deleting') THEN 'error' ELSE status END,
              updated_at=now() WHERE id=$1",
         )
         .bind(mailbox_id)
         .bind(sync_state)
         .bind(&message)
+        .bind(&job.operation)
+        .bind(OP_ENSURE)
         .execute(&state.db)
         .await?;
     }

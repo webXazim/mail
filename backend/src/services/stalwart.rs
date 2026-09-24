@@ -1460,8 +1460,6 @@ impl StalwartService {
                             },
                             "aliases": {},
                             "memberGroupIds": {},
-                            "roles": { "@type": "User" },
-                            "permissions": { "@type": "Inherit" },
                             "quotas": { "maxDiskQuota": quota_bytes },
                             "encryptionAtRest": { "@type": "Disabled" }
                         }
@@ -1607,8 +1605,6 @@ impl StalwartService {
                         "credentials": { "0": { "@type": "Password", "secret": password } },
                         "aliases": {},
                         "memberGroupIds": {},
-                        "roles": { "@type": "User" },
-                        "permissions": { "@type": "Inherit" },
                         "quotas": { "maxDiskQuota": quota_bytes },
                         "encryptionAtRest": { "@type": "Disabled" }
                     }

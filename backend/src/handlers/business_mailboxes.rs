@@ -89,10 +89,10 @@ pub async fn list(
     let mailboxes=rows.into_iter().map(|row| {
         let visible_usage=can_manage_storage || row.user_id==Some(auth.user_id);
         let live=row.provider_account_id.as_ref().and_then(|id| live_quotas.get(id));
-        let used=if visible_usage {
-            live.map(|q| q.0.min(i64::MAX as u64) as i64).or(row.cached_used_bytes).unwrap_or(0).max(0)
-        } else { 0 };
-        if visible_usage { used_total=used_total.saturating_add(used); }
+        let used=if visible_usage && row.provider_account_id.is_some() {
+            live.map(|q| q.0.min(i64::MAX as u64) as i64).or(row.cached_used_bytes).map(|value| value.max(0))
+        } else { None };
+        if let Some(used) = used { used_total=used_total.saturating_add(used); }
         let provider_total=if visible_usage {
             live.map(|q| q.1.min(i64::MAX as u64) as i64).or(row.cached_provider_quota_bytes)
         } else { None };
@@ -102,10 +102,16 @@ pub async fn list(
             "quota_bytes":if visible_usage { Some(row.quota_bytes) } else { None::<i64> },
             "quota_override_bytes":if visible_usage { row.quota_override_bytes } else { None::<i64> },
             "quota_source":if visible_usage { Some(if row.quota_override_bytes.is_some(){"custom"}else{"default"}) } else { None::<&str> },
-            "used_bytes":if visible_usage { Some(used) } else { None },
+            "used_bytes":used,
             "provider_quota_bytes":provider_total,"quota_in_sync":provider_total.map(|value| value==row.quota_bytes),
-            "storage_pct":if visible_usage && row.quota_bytes>0 { Some(((used as f64/row.quota_bytes as f64)*100.0).clamp(0.0,100.0).round() as i64) } else { None::<i64> },
-            "sync_error":row.sync_error
+            "storage_pct":if row.quota_bytes>0 { used.map(|used| ((used as f64/row.quota_bytes as f64)*100.0).clamp(0.0,100.0).round() as i64) } else { None },
+            "sync_error":if row.sync_error.contains("not authorized to grant permissions") {
+                "Mail service permissions prevented mailbox creation. Retry setup after the service is updated."
+            } else if row.sync_error.contains("Mailbox has not been provisioned yet") {
+                "Storage will sync after mailbox setup completes."
+            } else if row.sync_error.is_empty() { "" } else {
+                "Mail service could not complete this mailbox operation. Retry setup or contact support."
+            }
         })
     }).collect::<Vec<_>>();
     let pool=ent.storage_pool_bytes.min(i64::MAX as u64) as i64;
@@ -229,6 +235,38 @@ pub async fn create(
     Ok((axum::http::StatusCode::CREATED,Json(json!({"id":mailbox_id,"address":address,"status":"pending","user_id":assigned_user}))))
 }
 
+/// Requeue a failed provider creation without deleting the customer's address
+/// or changing its reserved storage allocation. The provider credential stays
+/// internal; external mail clients use one-time app passwords after activation.
+pub async fn retry_provisioning(
+    State(state): State<AppState>, auth: AuthUser,
+    Path((organization_id, mailbox_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_mailbox_provisioning(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(&format!("mailbox-retry:{organization_id}:{mailbox_id}"), 5, 3600).await?;
+    let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let target: Option<(Option<Uuid>, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT m.user_id,m.status,m.provider_account_id,d.status
+         FROM mailboxes m JOIN organization_domains d ON d.id=m.domain_id
+         WHERE m.id=$1 AND m.organization_id=$2 AND m.deleted_at IS NULL FOR UPDATE OF m"
+    ).bind(mailbox_id).bind(organization_id).fetch_optional(&mut *tx).await
+     .map_err(|e| ApiError::internal(e.to_string()))?;
+    let (user_id, status, provider_account_id, domain_status) = target.ok_or_else(|| ApiError::not_found("Mailbox not found"))?;
+    let user_id = user_id.ok_or_else(|| ApiError::conflict("The invited member must accept the mailbox before it can be provisioned"))?;
+    if domain_status != "active" { return Err(ApiError::conflict("The domain must be active before retrying mailbox setup")); }
+    if provider_account_id.as_deref().is_some_and(|value| !value.is_empty()) || !matches!(status.as_str(), "error" | "pending") {
+        return Err(ApiError::conflict("This mailbox is already provisioned or cannot be retried"));
+    }
+    sqlx::query("UPDATE mailboxes SET status='pending',sync_status='pending',sync_error='',updated_at=now() WHERE id=$1")
+        .bind(mailbox_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let provider_secret = email::random_token();
+    state.provisioning.enqueue_mailbox_ensure_tx(&mut tx, mailbox_id, user_id, &provider_secret).await?;
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    audit::record(&state, Some(auth.user_id), "business.mailbox.retry", json!({"organization_id":organization_id,"mailbox_id":mailbox_id})).await;
+    Ok(Json(json!({"ok":true,"status":"pending"})))
+}
+
 pub async fn activate(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -297,11 +335,12 @@ pub async fn update_storage(
     if target < 1_048_576 { return Err(ApiError::bad_request("Mailbox storage allocation must be at least 1 MiB")); }
     if target as u64 > ent.storage_pool_bytes { return Err(ApiError::bad_request("A mailbox allocation cannot exceed the business storage pool")); }
 
-    let mailbox: Option<(String,Option<String>,i64)> = sqlx::query_as(
-        "SELECT address::text,provider_account_id,quota_bytes FROM mailboxes
-         WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL AND status <> 'deleting'"
+    let mailbox: Option<(String,Option<String>,i64,Option<String>,String,String)> = sqlx::query_as(
+        "SELECT m.address::text,m.provider_account_id,m.quota_bytes,d.provider_domain_id,m.local_part,m.provider_marker
+         FROM mailboxes m JOIN organization_domains d ON d.id=m.domain_id
+         WHERE m.id=$1 AND m.organization_id=$2 AND m.deleted_at IS NULL AND m.status <> 'deleting'"
     ).bind(mailbox_id).bind(organization_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let (address,provider_account_id,current_quota)=mailbox.ok_or_else(|| ApiError::not_found("Mailbox not found"))?;
+    let (address,provider_account_id,current_quota,provider_domain_id,local_part,provider_marker)=mailbox.ok_or_else(|| ApiError::not_found("Mailbox not found"))?;
 
     let cached_used: Option<i64>=sqlx::query_scalar("SELECT quota_used FROM realtime_mailbox_state WHERE mailbox_id=$1")
         .bind(mailbox_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?.flatten();
@@ -312,7 +351,19 @@ pub async fn update_storage(
             Err(_) => None,
         }
     } else { None };
-    let known_used=live_used.or(cached_used).map(|value| value.max(0));
+    let mut known_used=live_used.or(cached_used).map(|value| value.max(0));
+    if target < current_quota && known_used.is_none() && provider_account_id.is_none() {
+        // A pending mailbox may have been created by Stalwart just before a
+        // lost response. Check its ownership binding before assuming zero use.
+        let domain_id=provider_domain_id.as_deref().ok_or_else(|| ApiError::conflict("Mail provider domain is unavailable"))?;
+        let found=state.stalwart.find_customer_account(domain_id,&local_part,&provider_marker).await
+            .map_err(|error| ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()))?;
+        known_used=if let Some(account)=found {
+            state.stalwart.account_quota(&account).await
+                .map_err(|error| ApiError::new(axum::http::StatusCode::BAD_GATEWAY,"mail_provider",error.public_message()))?
+                .map(|(used,_)| used.min(i64::MAX as u64) as i64)
+        } else { Some(0) };
+    }
     if target < current_quota && known_used.is_none() {
         return Err(ApiError::conflict("Current mailbox usage could not be verified. Retry after provider usage is available before lowering this allocation"));
     }
@@ -340,7 +391,11 @@ pub async fn update_storage(
     ).bind(mailbox_id).bind(organization_id).bind(target)
      .bind(if body.reset_to_default { None::<i64> } else { Some(target) }).bind(auth.user_id)
      .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    state.provisioning.enqueue_mailbox_quota_tx(&mut tx,mailbox_id,target).await?;
+    // A mailbox awaiting provider creation has a reserved allocation, not a
+    // provider quota yet. Its ensure job reads the current allocation at run time.
+    if provider_account_id.as_deref().is_some_and(|value| !value.is_empty()) {
+        state.provisioning.enqueue_mailbox_quota_tx(&mut tx,mailbox_id,target).await?;
+    }
     tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
     audit::record(&state,Some(auth.user_id),"business.mailbox.storage",json!({
         "organization_id":organization_id,"mailbox_id":mailbox_id,"address":address,

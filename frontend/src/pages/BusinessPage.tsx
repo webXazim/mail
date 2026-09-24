@@ -170,6 +170,22 @@ export function BusinessPage() {
     return () => window.removeEventListener('cs-mail-realtime', onRealtime)
   }, [activeId])
 
+  const mailboxSetupInProgress = detail?.mailboxes.some((mailbox) =>
+    mailbox.user_id && (mailbox.sync_status === 'pending' || mailbox.sync_status === 'retrying')) ?? false
+  useEffect(() => {
+    if (!activeId || !mailboxSetupInProgress) return
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void organizationsApi.mailboxes(activeId).then((result) => {
+        if (cancelled) return
+        setDetail((current) => current?.id === activeId ? { ...current, mailboxes: result.mailboxes, storage: result.storage } : current)
+        setMailboxQuotaDrafts((current) => ({ ...current, ...Object.fromEntries(result.mailboxes.map((mailbox) => [mailbox.id, current[mailbox.id] ?? quotaDraft(mailbox.quota_bytes)])) }))
+        if (result.mailboxes.some((mailbox) => mailbox.status === 'active')) void profileApi.refresh()
+      }).catch(() => undefined)
+    }, 5000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [activeId, mailboxSetupInProgress])
+
   const createBusiness = async (event: FormEvent) => {
     event.preventDefault()
     if (!name.trim()) return
@@ -509,6 +525,16 @@ export function BusinessPage() {
     finally { setBusy(false) }
   }
 
+  const retryMailbox = async (mailboxId: string) => {
+    if (!detail) return
+    setBusy(true); setError('')
+    try {
+      await organizationsApi.retryMailbox(detail.id, mailboxId)
+      await load(detail.id)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to retry mailbox setup') }
+    finally { setBusy(false) }
+  }
+
   const setMailboxStorage = async (mailboxId: string, resetToDefault = false) => {
     if (!detail) return
     const raw = mailboxQuotaDrafts[mailboxId] ?? ''
@@ -832,14 +858,14 @@ export function BusinessPage() {
                   <div className="business-storage-pool">
                     <div>
                       <span>Business storage pool</span>
-                      <strong>{formatStorage(detail.storage.allocated_bytes)} allocated <small>/ {formatStorage(detail.storage.pool_bytes)}</small></strong>
+                      <strong>{formatStorage(detail.storage.allocated_bytes)} reserved <small>/ {formatStorage(detail.storage.pool_bytes)}</small></strong>
                     </div>
                     <div className="business-storage-pool__meta">
-                      <span>{formatStorage(detail.storage.unallocated_bytes)} available</span>
-                      {detail.storage.used_bytes != null && <span>{formatStorage(detail.storage.used_bytes)} actually used</span>}
+                      <span>{formatStorage(detail.storage.unallocated_bytes)} unreserved</span>
+                      {detail.storage.used_bytes != null && <span>{formatStorage(detail.storage.used_bytes)} used by ready mailboxes</span>}
                     </div>
                     <div className="storage-bar"><span style={{ width: `${detail.storage.pool_bytes > 0 ? Math.min(100, (detail.storage.allocated_bytes / detail.storage.pool_bytes) * 100) : 0}%` }} /></div>
-                    <p>New mailboxes receive {formatStorage(detail.storage.default_mailbox_bytes)} by default. Owners and admins can redistribute the purchased pool between individual addresses.</p>
+                    <p>Creating a mailbox reserves {formatStorage(detail.storage.default_mailbox_bytes)} by default. Storage becomes usable when mail server setup finishes. Owners and admins can redistribute reserved space.</p>
                   </div>
                 )}
                 {(detail.role === 'owner' || detail.role === 'admin') && detail.domains.some((domain) => domain.status === 'active') && (
@@ -851,6 +877,7 @@ export function BusinessPage() {
                     <button className="primary-button" type="submit" disabled={busy}><Plus size={15}/> Create mailbox</button>
                   </form>
                 )}
+                <p className="business-mailbox-help">A mailbox uses your CS Mail sign-in for webmail. You do not enter your account password when creating an address. For IMAP or SMTP, the mailbox owner creates a separate app password in <Link to="/mail/settings?tab=clients">Mail clients</Link> after setup completes.</p>
                 {detail.mailboxes.length ? detail.mailboxes.map((mailbox) => (
                   <div className="business-mailbox-row" key={mailbox.id}>
                     <div className="business-row">
@@ -862,16 +889,19 @@ export function BusinessPage() {
                             ? <span className="business-badge"><Check size={13}/> Active mailbox</span>
                             : <button type="button" className="secondary-button" disabled={busy} onClick={() => void switchMailbox(mailbox.id)}>Use mailbox</button>
                         )}
-                        {(detail.role === 'owner' || detail.role === 'admin') && mailbox.user_id && mailbox.status !== 'deleting' && <button type="button" className="text-button" disabled={busy} onClick={() => void setMailboxStatus(mailbox.id, mailbox.status === 'suspended' ? 'active' : 'suspended')}>{mailbox.status === 'suspended' ? 'Reactivate' : 'Suspend'}</button>}
+                        {(detail.role === 'owner' || detail.role === 'admin') && mailbox.user_id && (mailbox.status === 'active' || mailbox.status === 'suspended') && <button type="button" className="text-button" disabled={busy} onClick={() => void setMailboxStatus(mailbox.id, mailbox.status === 'suspended' ? 'active' : 'suspended')}>{mailbox.status === 'suspended' ? 'Reactivate' : 'Suspend'}</button>}
+                        {(detail.role === 'owner' || detail.role === 'admin') && mailbox.user_id && mailbox.status === 'error' && <button type="button" className="secondary-button" disabled={busy} onClick={() => void retryMailbox(mailbox.id)}>Retry setup</button>}
                         {(detail.role === 'owner' || detail.role === 'admin') && <button type="button" className="text-button" disabled={busy} onClick={() => void removeMailbox(mailbox.id)}>Delete</button>}
                       </div>
                     </div>
+                    {mailbox.sync_error && <p className="business-mailbox-notice" role="status">{mailbox.sync_error}</p>}
+                    {mailbox.status !== 'active' && !mailbox.sync_error && <p className="business-mailbox-notice" role="status">{mailbox.user_id ? 'Mail server setup is in progress. Storage is reserved until the mailbox is ready.' : 'Waiting for the invited member to accept before mail server setup begins.'}</p>}
                     {(detail.role === 'owner' || detail.role === 'admin' || mailbox.user_id === profile?.id) && (
                     <div className="business-mailbox-storage">
                       <div className="business-mailbox-storage__readout">
                         <span>Storage</span>
-                        <strong>{mailbox.used_bytes != null ? formatStorage(mailbox.used_bytes) : 'Usage unavailable'} <small>/ {formatStorage(mailbox.quota_bytes)}</small></strong>
-                        <span className="business-storage-source">{mailbox.quota_source === 'custom' ? 'Custom allocation' : 'Plan default'}</span>
+                        <strong>{mailbox.status === 'active' ? (mailbox.used_bytes != null ? formatStorage(mailbox.used_bytes) : 'Usage unavailable') : 'Not active'} <small>/ {formatStorage(mailbox.quota_bytes)} reserved</small></strong>
+                        <span className="business-storage-source">{mailbox.quota_source === 'custom' ? 'Custom allocation' : 'Plan default'}{mailbox.status === 'active' && mailbox.quota_in_sync === false ? ' · Provider quota syncing' : ''}</span>
                       </div>
                       <div className="storage-bar"><span style={{ width: `${mailbox.storage_pct ?? 0}%` }} /></div>
                       {(detail.role === 'owner' || detail.role === 'admin') && (

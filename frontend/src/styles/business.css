@@ -131,6 +131,9 @@
 .business-storage-pool strong small, .business-mailbox-storage strong small { color: var(--cs-mail-muted); font-weight: 500; }
 .business-storage-pool__meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--cs-mail-muted); font-size: 11px; }
 .business-storage-pool p { margin: 0; max-width: 760px; color: var(--cs-mail-muted); font-size: 11px; line-height: 1.55; }
+.business-mailbox-help { margin: 8px 0 16px; color: var(--cs-mail-muted); font-size: 12px; line-height: 1.55; }
+.business-mailbox-help a { color: var(--cs-mail-accent, #c8f85a); }
+.business-mailbox-notice { margin: 0 0 12px; color: var(--cs-mail-muted); font-size: 12px; line-height: 1.5; }
 .business-mailbox-row { border-top: 1px solid var(--cs-mail-line-soft, var(--cs-mail-line)); }
 .business-mailbox-row > .business-row { border-top: 0; padding-bottom: 8px; }
 .business-mailbox-storage { display: grid; grid-template-columns: minmax(190px,.8fr) minmax(150px,1fr) minmax(280px,1.2fr); gap: 16px; align-items: center; padding: 0 0 14px; }

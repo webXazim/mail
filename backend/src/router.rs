@@ -166,6 +166,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::patch(handlers::business_mailboxes::update_storage),
         )
         .route(
+            "/api/organizations/:organization_id/mailboxes/:mailbox_id/retry",
+            axum::routing::post(handlers::business_mailboxes::retry_provisioning),
+        )
+        .route(
             "/api/organizations/:organization_id/mailboxes/:mailbox_id/activate",
             axum::routing::post(handlers::business_mailboxes::activate),
         )
