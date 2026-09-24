@@ -266,6 +266,16 @@ export default function App() {
             element={
               <RequireLocalAdminOrigin>
                 <RequireRole roles={['admin']}>
+                  <Navigate to="/mail/admin/control-plane" replace />
+                </RequireRole>
+              </RequireLocalAdminOrigin>
+            }
+          />
+          <Route
+            path="admin/operations"
+            element={
+              <RequireLocalAdminOrigin>
+                <RequireRole roles={['admin']}>
                   <AdminPage />
                 </RequireRole>
               </RequireLocalAdminOrigin>

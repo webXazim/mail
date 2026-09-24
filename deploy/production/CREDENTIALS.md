@@ -181,4 +181,7 @@ Platform Admin stays private. From your workstation:
 ssh -L 18081:127.0.0.1:18081 <ssh-user>@<vps>
 ```
 
-Then open `http://localhost:18081/mail/admin`. Never expose TCP 18081 publicly.
+Then open `http://localhost:18081/mail/admin/control-plane`. Never expose TCP
+18081 publicly. Customer business administration (domains, users, and hosted
+addresses) is at `https://mail.crescentsphere.com/mail/business` for active
+business owners and admins; it is separate from platform operations.

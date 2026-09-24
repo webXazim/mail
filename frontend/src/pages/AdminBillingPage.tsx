@@ -307,10 +307,10 @@ export function AdminBillingPage() {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => navigate('/mail/admin')}
+            onClick={() => navigate('/mail/admin/control-plane')}
           >
             <ArrowLeft size={14} />
-            Admin center
+            Control plane
           </button>
         </div>
       </header>

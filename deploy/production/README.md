@@ -96,7 +96,12 @@ Never open 18081 in UFW/provider firewall:
 ssh -L 18081:127.0.0.1:18081 <user>@<vps>
 ```
 
-Browse to `http://localhost:18081/mail/admin`.
+Browse to `http://localhost:18081/mail/admin/control-plane`. Platform user
+operations are under `/mail/admin/operations`; platform billing is under
+`/mail/admin/billing`. These routes are available only through the SSH tunnel.
+Business owners and business admins manage their own domains, team members,
+hosted mailboxes, and addresses at `https://mail.crescentsphere.com/mail/business`
+after their plan is active. A platform role does not grant business ownership.
 
 Platform Admin has no separate password in `.env.production`. After the first
 CS Mail account has verified its email, promote that exact account once:

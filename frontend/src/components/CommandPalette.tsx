@@ -136,9 +136,9 @@ export function CommandPalette({
         ? [
             {
               id: 'admin',
-              label: 'Open admin panel',
+              label: 'Open platform control plane',
               icon: <Server size={15} />,
-              keywords: 'admin panel mailboxes aliases domain forwarders dns catch-all',
+              keywords: 'platform admin control plane operations billing hosted domains',
               section: 'Actions',
               action: onOpenAdmin,
             },

@@ -325,7 +325,7 @@ export function MailLayout() {
         onOpenSettings={() => navigate('/mail/settings')}
         onOpenNotifications={() => navigate('/mail/notifications')}
         onOpenContacts={() => navigate('/mail/contacts')}
-        onOpenAdmin={() => navigate('/mail/admin')}
+        onOpenAdmin={() => navigate('/mail/admin/control-plane')}
         onOpenCalendar={() => navigate('/mail/calendar')}
         onToggleHelp={() => setHelpOpen(true)}
       />}

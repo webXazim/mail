@@ -61,6 +61,7 @@ const clickTab = async (label: RegExp) => {
 
 describe('AdminPage (remote mode)', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     mockRemoteAdminApi.overview.mockResolvedValue({
       adminEmail: 'admin@cs-mail.test',
       domain: 'cs-mail.test',
@@ -120,9 +121,10 @@ describe('AdminPage (remote mode)', () => {
     mockRemoteAdminApi.launchCertifications.mockResolvedValue([])
   })
 
-  it('loads the live overview and shows the real domain', async () => {
+  it('loads platform health without presenting system DNS as a customer domain', async () => {
     mount()
-    expect(await screen.findByText('cs-mail.test')).toBeInTheDocument()
+    expect(await screen.findByText('Healthy')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hosted domains' })).toBeInTheDocument()
     expect(mockRemoteAdminApi.overview).toHaveBeenCalled()
   })
 
@@ -133,10 +135,15 @@ describe('AdminPage (remote mode)', () => {
     expect(mockRemoteAdminApi.usersPage).toHaveBeenCalled()
   })
 
-  it('lists aliases from the live aliases endpoint', async () => {
+  it('keeps business address and forwarding controls out of platform operations', async () => {
     mount()
-    await clickTab(/aliases/i)
-    expect(await screen.findByText('support@cs-mail.test')).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Admin sections' })
+    expect(within(nav).queryByRole('button', { name: /aliases/i })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('button', { name: /forwarders/i })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('button', { name: /^domain$/i })).not.toBeInTheDocument()
+    await vi.waitFor(() => expect(mockRemoteAdminApi.overview).toHaveBeenCalled())
+    expect(mockRemoteAdminApi.aliases).not.toHaveBeenCalled()
+    expect(mockRemoteAdminApi.forwarders).not.toHaveBeenCalled()
   })
 
   it('shows live blocked senders on the security tab', async () => {
@@ -151,11 +158,4 @@ describe('AdminPage (remote mode)', () => {
     expect(await screen.findByText('admin.user.created')).toBeInTheDocument()
   })
 
-  it('lists server-authoritative forwarders in remote mode', async () => {
-    mount()
-    await vi.waitFor(() => expect(mockRemoteAdminApi.forwarders).toHaveBeenCalled())
-    await clickTab(/forwarders/i)
-    expect(await screen.findByRole('heading', { name: 'Forwarders' })).toBeInTheDocument()
-    expect(mockRemoteAdminApi.forwarders).toHaveBeenCalled()
-  })
 })

@@ -72,6 +72,11 @@ const tabs: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'audit', label: 'Audit log', icon: HistoryIcon },
 ]
 
+// Customer domains, addresses and forwarding belong to the business owner
+// workspace. This legacy page is reachable only as platform operations in
+// production; never present a login account as a hosted mailbox here.
+const platformTabs: AdminTab[] = ['overview', 'mailboxes', 'roles', 'security', 'quarantine', 'queue', 'diagnostics', 'support', 'audit']
+
 const timeFmt = (iso: string) =>
   new Date(iso).toLocaleString([], {
     month: 'short',
@@ -159,10 +164,6 @@ export function AdminPage() {
   const reloadAdmin = () => {
     reloadUsers()
     void remoteAdminApi
-      .aliases()
-      .then(setAliases)
-      .catch((error: Error) => showNotice(error.message || 'Failed to load aliases'))
-    void remoteAdminApi
       .audit()
       .then(setAudit)
       .catch((error: Error) => showNotice(error.message || 'Failed to load audit log'))
@@ -171,17 +172,9 @@ export function AdminPage() {
       .then(setBlockedSenders)
       .catch((error: Error) => showNotice(error.message || 'Failed to load blocked senders'))
     void remoteAdminApi
-      .forwarders()
-      .then(setForwarders)
-      .catch((error: Error) => showNotice(error.message || 'Failed to load forwarders'))
-    void remoteAdminApi
       .quarantine()
       .then(setQuarantine)
       .catch((error: Error) => showNotice(error.message || 'Failed to load quarantine'))
-    void remoteAdminApi
-      .domain()
-      .then((next) => { setDomain(next.domain); setDns(next.dns) })
-      .catch((error: Error) => showNotice(error.message || 'Failed to load domain settings'))
     void remoteAdminApi
       .securityPolicy()
       .then(setSecurity)
@@ -224,12 +217,13 @@ export function AdminPage() {
   }, [remote, mailboxQuery, mailboxStatusFilter, platformRoleFilter, userPage])
 
   useEffect(() => {
+    if (remote) return
     const active = mailboxes.filter((mailbox) => mailbox.status === 'active')
     if (active.length === 0) return
     if (!active.some((mailbox) => mailbox.email.toLowerCase() === forwarderForm.from.toLowerCase())) {
       setForwarderForm((current) => ({ ...current, from: active[0].email }))
     }
-  }, [mailboxes, forwarderForm.from])
+  }, [remote, mailboxes, forwarderForm.from])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -673,11 +667,11 @@ export function AdminPage() {
   ]
 
   return (
-    <div className="admin-page" role="region" aria-label="Admin center">
+    <div className="admin-page" role="region" aria-label={remote ? 'Platform operations' : 'Admin center'}>
       <header className="calendar-head">
         <div>
-          <p className="eyebrow">Workspace / Admin</p>
-          <h1>Admin center</h1>
+          <p className="eyebrow">{remote ? 'Platform admin / Operations' : 'Workspace / Admin'}</p>
+          <h1>{remote ? 'Platform operations' : 'Admin center'}</h1>
         </div>
         <div className="calendar-head__actions">
           <button
@@ -686,7 +680,7 @@ export function AdminPage() {
             onClick={() => navigate('/mail/admin/control-plane')}
           >
             <ShieldAlert size={14} />
-            SaaS control plane
+            Control plane
           </button>
           <button
             type="button"
@@ -700,7 +694,7 @@ export function AdminPage() {
       </header>
 
       <nav className="admin-nav" aria-label="Admin sections">
-        {tabs.filter((tabItem) => remote || !['queue', 'diagnostics', 'support'].includes(tabItem.id)).map((tabItem) => {
+        {tabs.filter((tabItem) => remote ? platformTabs.includes(tabItem.id) : !['queue', 'diagnostics', 'support'].includes(tabItem.id)).map((tabItem) => {
           const Icon = tabItem.icon
           return (
             <button
@@ -796,35 +790,29 @@ export function AdminPage() {
             </div>
           </div>
 
-          <section className="settings-section">
-            <h2>Domain health</h2>
-            <div className="billing-plan">
-              <div>
-                <strong>{domain.domain || (overview?.domain ?? '—')}</strong>
-                <small>
-                  {remote
-                    ? `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} expected DNS record groups are present in the server zone.`
-                    : dnsVerified
-                      ? 'All records verified — mail is flowing.'
-                      : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}
-                </small>
+          {remote ? (
+            <section className="settings-section">
+              <h2>Hosted domains</h2>
+              <p className="settings-hint">Inspect customer domain and DNS status in the platform control plane. Business owners publish their own DNS records in their business workspace.</p>
+              <button type="button" className="secondary-button" onClick={() => navigate('/mail/admin/control-plane')}>
+                <Globe size={14} /> Open hosted domains
+              </button>
+            </section>
+          ) : (
+            <section className="settings-section">
+              <h2>Domain health</h2>
+              <div className="billing-plan">
+                <div>
+                  <strong>{domain.domain || '—'}</strong>
+                  <small>{dnsVerified ? 'All records verified — mail is flowing.' : `${Object.values(dns).filter(Boolean).length} of ${dnsRecords.length} records verified`}</small>
+                </div>
+                <div className="admin-actions">
+                  <button type="button" className="secondary-button" onClick={() => setTab('domain')}><Globe size={14} /> Open DNS records</button>
+                  <button type="button" className="secondary-button" onClick={() => setTab('security')}><ShieldCheck size={14} /> Security policy</button>
+                </div>
               </div>
-              <div className="admin-actions">
-                <button type="button" className="secondary-button" onClick={() => setTab('domain')}>
-                  <Globe size={14} />
-                  Open DNS records
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setTab('security')}
-                >
-                  <ShieldCheck size={14} />
-                  Security policy
-                </button>
-              </div>
-            </div>
-          </section>
+            </section>
+          )}
 
           <section className="settings-section">
             <h2>Recent activity</h2>

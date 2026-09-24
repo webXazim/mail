@@ -211,7 +211,7 @@ export function AdminControlPlanePage() {
       <header className="calendar-head">
         <div><p className="eyebrow">Platform admin / Operations</p><h1>SaaS control plane</h1></div>
         <div className="calendar-head__actions">
-          <button className="secondary-button" type="button" onClick={() => navigate('/mail/admin')}><ShieldAlert size={14}/>Admin center</button>
+          <button className="secondary-button" type="button" onClick={() => navigate('/mail/admin/operations')}><ShieldAlert size={14}/>Platform operations</button>
           <button className="secondary-button" type="button" onClick={() => navigate('/mail/admin/billing')}><CreditCard size={14}/>Payments &amp; plans</button>
         </div>
       </header>

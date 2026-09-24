@@ -56,6 +56,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const { mailbox, scheduledCount, accounts, activeAccount, setActiveAccount, remoteMailboxes } = useMail()
   const role = useRole()
   const signedInProfile = useProfile()
+  const platformAdmin = role === 'admin' && isLocalAdminOrigin()
   const platformOnly = isRemoteMail() && signedInProfile?.has_mailbox !== true
   const planActive = signedInProfile?.subscription_status === 'active' || signedInProfile?.subscription_status === 'trial'
   const folder = folderFromPath(pathname)
@@ -220,7 +221,19 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
           <button className="icon-button sidebar-close" onClick={onCloseMobile} aria-label="Close navigation"><X size={17} /></button>
         </div>
         <section className="sidebar-workspace">
-          <p className="nav-heading">Business</p>
+          {platformAdmin && <>
+            <p className="nav-heading">Platform</p>
+            <button className={`folder-link ${pathname === '/mail/admin/control-plane' || pathname === '/mail/admin' ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin/control-plane')}>
+              <Server size={17} /><span>Control plane</span>
+            </button>
+            <button className={`folder-link ${pathname === '/mail/admin/operations' ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin/operations')}>
+              <Settings2 size={17} /><span>Operations</span>
+            </button>
+            <button className={`folder-link ${pathname.startsWith('/mail/admin/billing') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin/billing')}>
+              <CreditCard size={17} /><span>Payments &amp; plans</span>
+            </button>
+          </>}
+          <p className="nav-heading">Your business</p>
           <button className={`folder-link ${pathname.startsWith('/mail/billing') || pathname.startsWith('/mail/pricing') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/billing')}>
             <CreditCard size={17} /><span>Plans</span>
           </button>
@@ -235,16 +248,11 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
               <Settings2 size={17} /><span>Account settings</span>
             </button>
           </>}
-          {role === 'admin' && isLocalAdminOrigin() && (
-            <button className={`folder-link ${pathname.startsWith('/mail/admin') ? 'folder-link--active' : ''}`} onClick={() => goAccount('/mail/admin')}>
-              <Server size={17} /><span>Platform admin</span>
-            </button>
-          )}
         </section>
         <div className="sidebar-footer">
           <div className="business-placeholder">
-            <strong>{planActive ? 'No hosted mailbox yet' : 'Plan setup'}</strong>
-            <p>{planActive ? 'Verify a business domain before mail features are enabled.' : 'Choose a plan and complete activation to start domain setup.'}</p>
+            <strong>{platformAdmin ? 'Platform access' : planActive ? 'No hosted mailbox yet' : 'Plan setup'}</strong>
+            <p>{platformAdmin ? 'Customer domains and mailboxes are managed inside each business workspace.' : planActive ? 'Verify a business domain before mail features are enabled.' : 'Choose a plan and complete activation to start domain setup.'}</p>
           </div>
           <div className="profile-wrap">
             <div className="profile">
@@ -539,10 +547,10 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
                   type="button"
                   role="menuitem"
                   className="profile-menu__item"
-                  onClick={() => goAccount('/mail/admin')}
+                  onClick={() => goAccount('/mail/admin/control-plane')}
                 >
                   <Server size={14} />
-                  Admin panel
+                  Platform control plane
                 </button>
               )}
               <button
