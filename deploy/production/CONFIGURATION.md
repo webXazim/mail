@@ -71,3 +71,10 @@ lengths before Compose is touched.
 `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` is the production default. Temporarily
 enable instant activation only for isolated acceptance tests; restore `false`
 before accepting real paid orders.
+
+The running API container must have `CS_MAIL_BILLING_INSTANT_ACTIVATION=true`
+for a **new** order to activate immediately. Changing the environment does not
+activate an invoice issued earlier. An unpaid open invoice must be cancelled
+from Billing before placing a fresh test order; a submitted payment needs
+review rather than a replacement order. The new order still issues an invoice
+that remains due until payment is reviewed.

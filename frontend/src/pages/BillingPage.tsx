@@ -13,7 +13,7 @@ import {
   type OrderRow,
   type PlanView,
 } from '../services/billing'
-import { useProfile } from '../services/profile'
+import { profileApi, useProfile } from '../services/profile'
 import { PlanOnboardingPage } from './PlanOnboardingPage'
 
 const statusLabel: Record<OrderRow['status'], string> = {
@@ -69,11 +69,13 @@ function BusinessBillingPage() {
     setSummary(next)
     setBillingProfile(next.billing_profile)
     setPlans(active)
-    if (next.subscription_status !== 'active' && next.subscription_status !== 'trial' && next.orders.length === 0) setOrdering(true)
+    if (next.subscription_status !== 'active' && next.subscription_status !== 'trial'
+      && !next.orders.some((order) => order.invoice_status === 'issued' && (order.status === 'pending' || order.status === 'submitted'))) setOrdering(true)
     const defaultPlan = active[1] ?? active[0]
     setChosenPlan((current) => active.some((plan) => plan.code === current) ? current : defaultPlan?.code || '')
     setMailboxCount((current) => Math.max(current, next.mailbox_limit, defaultPlan?.mailbox_limit ?? 1))
     billingApi.refreshInvoices()
+    await profileApi.refresh().catch(() => undefined)
   }
 
   useEffect(() => {
@@ -113,6 +115,7 @@ function BusinessBillingPage() {
 
   const current = summary.current_plan
   const planActive = summary.subscription_status === 'active' || summary.subscription_status === 'trial'
+  const openInvoice = summary.orders.find((order) => order.invoice_status === 'issued' && (order.status === 'pending' || order.status === 'submitted'))
   const storageTotal = summary.storage_pool_bytes || current.storage_pool_bytes || summary.quota_bytes || current.mailbox_bytes
   const storageAllocated = summary.storage_allocated_bytes ?? 0
   const storagePct = storageTotal > 0 ? Math.min(100, (storageAllocated / storageTotal) * 100) : 0
@@ -129,7 +132,7 @@ function BusinessBillingPage() {
     setBusy(true)
     try {
       const order = await billingApi.createOrder(chosenPlan, mailboxCount, method, note.trim())
-      showNotice(summary.instant_activation
+      showNotice(order.activation_mode === 'test_instant'
         ? `${order.plan_name} activated immediately for testing. Invoice ${order.invoice_number ?? ''} was issued and payment is still due.`
         : `Invoice ${order.invoice_number ?? ''} issued. Pay it and submit the reference for activation.`)
       setOrdering(false)
@@ -159,10 +162,12 @@ function BusinessBillingPage() {
   }
 
   const cancelOrder = async (order: OrderRow) => {
+    if (!window.confirm(`Cancel invoice ${order.invoice_number ?? ''}?${order.activation_mode === 'test_instant' ? ' Access granted by this test order will be suspended.' : ''}`)) return
     setBusy(true)
     try {
       await billingApi.cancelOrder(order.id)
-      showNotice(summary.instant_activation ? 'Invoice cancelled. The test plan remains active until you order another plan.' : 'Order cancelled.')
+      showNotice('Invoice cancelled. You can now place a new order.')
+      setOrdering(false)
       await reload()
     } catch (error) {
       showNotice(friendlyError(error))
@@ -238,9 +243,16 @@ function BusinessBillingPage() {
 
       {tab === 'plan' && (
         <>
+          {openInvoice && <section className="settings-section" role="status">
+            <h2>Complete or cancel your open invoice</h2>
+            <p>Invoice {openInvoice.invoice_number} for {openInvoice.plan_name} is {openInvoice.status === 'submitted' ? 'awaiting payment review' : 'unpaid'}. A second order cannot be placed while it is open.</p>
+            {summary.instant_activation && openInvoice.activation_mode === 'payment_approval' && <p>This invoice was created before test activation was enabled. It will not activate retroactively. {openInvoice.status === 'pending' ? 'Cancel the unpaid invoice and place a fresh test order for immediate access.' : 'Its submitted payment must be reviewed before another order can be placed.'}</p>}
+            {openInvoice.status === 'pending' && <button type="button" className="secondary-button" disabled={busy} onClick={() => void cancelOrder(openInvoice)}>Cancel invoice {openInvoice.invoice_number}</button>}
+            {openInvoice.status === 'submitted' && <p>Payment was submitted for review. Contact billing support before replacing this invoice.</p>}
+          </section>}
           <section className="settings-section">
             {planActive && <div className="row-actions"><button type="button" className="primary-button" onClick={() => navigate('/mail/business')}>Continue to domain setup</button></div>}
-            {!planActive && summary.orders.some((order) => order.status === 'pending' || order.status === 'submitted') && <p className="settings-hint" role="status">Your invoice is awaiting payment review. Domain setup will be available when the order is approved.</p>}
+            {!planActive && openInvoice && !summary.instant_activation && <p className="settings-hint" role="status">Your invoice is awaiting payment. Domain setup will be available when the order is approved.</p>}
             <div className="admin-section-head">
               <h2>{planActive ? 'Current plan' : 'Choose and activate a plan'}</h2>
               <span className="admin-section-count">{planActive ? `${current.price} base / ${current.interval} · ${summary.mailbox_limit} mailboxes purchased` : 'Activation pending'}</span>
@@ -249,12 +261,13 @@ function BusinessBillingPage() {
               <div>
                 <strong>{planActive ? current.name : 'No active plan'}</strong>
                 <small>
-                  {planActive ? current.features.join(' · ') || summaryText(current.daily_send_limit) : 'Choose a plan and complete payment approval before setting up your domain.'}
+                  {planActive ? current.features.join(' · ') || summaryText(current.daily_send_limit) : openInvoice ? 'Resolve the open invoice above before setting up your domain.' : summary.instant_activation ? 'Place a test order to activate a plan before setting up your domain.' : 'Choose a plan and complete payment approval before setting up your domain.'}
                 </small>
               </div>
               <button
                 type="button"
                 className="secondary-button"
+                disabled={Boolean(openInvoice)}
                 onClick={() => setOrdering((value) => !value)}
               >
                 {ordering ? 'Close' : planActive ? 'Change plan' : 'Choose plan'}
@@ -293,7 +306,7 @@ function BusinessBillingPage() {
             )}
           </section>
 
-          {ordering && (
+          {ordering && !openInvoice && (
             <form className="settings-section" onSubmit={placeOrder}>
               <h2>Order a plan</h2>
               <p className="settings-hint">
