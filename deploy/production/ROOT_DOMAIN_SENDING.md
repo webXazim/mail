@@ -17,6 +17,9 @@ For CS Mail, Notes, and Messenger, set
 private production env files. Set the key in each private file with an editor;
 do not put it on a command line or in Git. Notes and Messenger use
 `EMAIL_BACKEND=config.mailer_email_backend.MailerEmailBackend`.
+CS Mail's production preflight requires both Mailer values. Set them in
+`/opt/cs-mail/.env.production` before deploying; otherwise platform verification,
+password reset, invitation and billing mail would fall back to Stalwart.
 
 Mailer account email uses `ACCOUNT_EMAIL_FROM='CrescentSphere Mailer <mailer@crescentsphere.com>'`
 and its existing `ACCOUNT_EMAIL_API_KEY`. Keep `AUTH_EMAIL_DELIVERY_ENABLED`

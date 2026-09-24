@@ -600,10 +600,19 @@ pub async fn resend_verification(
     });
     if let Some((user_id, email, display_name, verified)) = user {
         if verified.is_none() {
-            if let Ok(link) = email::send_verification(&state, user_id, &email, &display_name).await
-            {
-                if state.return_token_links {
+            match email::send_verification(&state, user_id, &email, &display_name).await {
+                Ok(link) if state.return_token_links => {
                     value["dev"] = json!({ "verify_link": link });
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    // Keep the same public response for unknown accounts, but
+                    // never make an actual delivery failure invisible to operators.
+                    tracing::error!(
+                        status = error.status.as_u16(),
+                        error = %error.message,
+                        "verification email submission failed"
+                    );
                 }
             }
         }

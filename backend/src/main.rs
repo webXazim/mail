@@ -15,6 +15,8 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    cs_mail_api::install_tls_crypto_provider();
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("cs_mail_api=info,tower_http=info,sqlx=warn"));
 
