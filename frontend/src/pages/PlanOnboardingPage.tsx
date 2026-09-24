@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { billingApi, formatPrice, friendlyError, type PlanView } from '../services/billing'
+import { billingApi, formatPrice, friendlyError, type PlanCatalog, type PlanView } from '../services/billing'
 import { organizationsApi } from '../services/organizations'
 import { profileApi } from '../services/profile'
 
@@ -9,6 +9,7 @@ export function PlanOnboardingPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [plans, setPlans] = useState<PlanView[]>([])
+  const [onboarding, setOnboarding] = useState<PlanCatalog['onboarding'] | null>(null)
   const [selected, setSelected] = useState(params.get('plan') || '')
   const [businessName, setBusinessName] = useState('')
   const [method, setMethod] = useState('bank')
@@ -18,9 +19,10 @@ export function PlanOnboardingPage() {
 
   useEffect(() => {
     let alive = true
-    billingApi.plans()
-      .then((rows) => {
+    billingApi.catalog()
+      .then(({ plans: rows, onboarding: state }) => {
         if (!alive) return
+        setOnboarding(state)
         const active = rows.filter((row) => row.active)
         setPlans(active)
         setSelected((value) => active.some((row) => row.code === value) ? value : active[0]?.code || '')
@@ -31,9 +33,12 @@ export function PlanOnboardingPage() {
   }, [])
 
   const plan = plans.find((row) => row.code === selected)
+  const pausedStep = onboarding && (!onboarding.business_creation_enabled
+    ? 'New business creation is paused.'
+    : !onboarding.plan_ordering_enabled ? 'New plan orders are paused.' : '')
   const start = async (event: FormEvent) => {
     event.preventDefault()
-    if (!plan || !businessName.trim()) return
+    if (!plan || !businessName.trim() || pausedStep) return
     setBusy(true)
     setError('')
     try {
@@ -69,8 +74,11 @@ export function PlanOnboardingPage() {
           {plan && <>
             <label>Business name<input required maxLength={120} value={businessName} onChange={(event) => setBusinessName(event.target.value)} placeholder="Your company name" /></label>
             <label>Payment method<select value={method} onChange={(event) => setMethod(event.target.value)}><option value="bank">Bank transfer</option><option value="other">Other manual payment</option></select></label>
-            <p className="settings-hint">Placing the order issues an invoice. Your plan becomes active after payment approval. You can then verify your domain and create mailboxes.</p>
-            <button className="primary-button" disabled={busy || !businessName.trim()}>{busy ? 'Creating order…' : 'Continue to invoice'}</button>
+            <p className="settings-hint">{onboarding?.instant_activation
+              ? 'Testing mode: placing this order activates the plan immediately and still issues an unpaid invoice. Use only for isolated acceptance testing.'
+              : 'Placing the order issues an invoice. Your plan becomes active after payment approval. You can then verify your domain and create mailboxes.'}</p>
+            {pausedStep && <p className="form-error" role="status">{pausedStep} {onboarding?.maintenance_message}</p>}
+            <button className="primary-button" disabled={busy || !businessName.trim() || Boolean(pausedStep)}>{busy ? 'Creating order…' : onboarding?.instant_activation ? 'Place test order' : 'Continue to invoice'}</button>
           </>}
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>

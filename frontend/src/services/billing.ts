@@ -26,6 +26,16 @@ export type PlanView = {
   active: boolean
 }
 
+export type PlanCatalog = {
+  plans: PlanView[]
+  onboarding: {
+    business_creation_enabled: boolean
+    plan_ordering_enabled: boolean
+    instant_activation: boolean
+    maintenance_message: string
+  }
+}
+
 export type InvoiceSnapshot = Record<string, string>
 
 export type OrderRow = {
@@ -281,11 +291,15 @@ export function invoiceFromOrder(order: OrderRow): Invoice | null {
 }
 
 export const billingApi = {
+  async catalog(): Promise<PlanCatalog> {
+    if (!isRemoteMail()) return { plans: demoPlans, onboarding: { business_creation_enabled: true, plan_ordering_enabled: true, instant_activation: true, maintenance_message: '' } }
+    return apiFetch<PlanCatalog>('/api/billing/plans')
+  },
   async summary(): Promise<BillingSummary> {
     if (!isRemoteMail()) { const plan=demoPlans[1] ?? demoPlans[0]; return { organization_id:'demo-business',subscription_status:'active',current_plan:plan,quota_bytes:plan.mailbox_bytes,mailbox_quota_bytes:plan.mailbox_bytes,storage_pool_bytes:plan.mailbox_bytes*plan.mailbox_limit,storage_allocated_bytes:plan.mailbox_bytes,seat_limit:plan.mailbox_limit,mailbox_limit:plan.mailbox_limit,max_mailboxes:plan.max_mailboxes,alias_limit_per_mailbox:plan.alias_limit_per_mailbox,domain_limit:plan.domain_limit,organization_daily_send_limit:plan.organization_daily_send_limit,usage:{seats:1,mailboxes:1,domains:1},quota_override_bytes:null,quota_source:'plan',settings:demoSettings,billing_profile:demoProfile,instant_activation:true,orders:demoOrders } }
     return apiFetch<BillingSummary>('/api/billing')
   },
-  async plans(): Promise<PlanView[]> { if(!isRemoteMail()) return demoPlans; return (await apiFetch<{plans:PlanView[]}>('/api/billing/plans')).plans },
+  async plans(): Promise<PlanView[]> { return (await this.catalog()).plans },
   async createOrder(planCode:string,mailboxCount:number,paymentMethod:string,customerNote:string):Promise<OrderRow> { if(!isRemoteMail()){const plan=demoPlans.find(p=>p.code===planCode)??demoPlans[0];const order=demoOrder(plan,mailboxCount,paymentMethod,customerNote);demoOrders=[order,...demoOrders];return order} return apiFetch<OrderRow>('/api/billing/orders',{method:'POST',body:JSON.stringify({plan_code:planCode,mailbox_count:mailboxCount,payment_method:paymentMethod,customer_note:customerNote})}) },
   async submitPaid(orderId:string,paymentMethod:string,reference:string):Promise<OrderRow>{ if(!isRemoteMail()){demoOrders=demoOrders.map(o=>o.id===orderId?{...o,status:'submitted',payment_reference:reference,submitted_at:nowIso()}:o);return demoOrders.find(o=>o.id===orderId)!} return apiFetch<OrderRow>(`/api/billing/orders/${encodeURIComponent(orderId)}/paid`,{method:'POST',body:JSON.stringify({payment_method:paymentMethod,payment_reference:reference})}) },
   async cancelOrder(orderId:string):Promise<void>{ if(!isRemoteMail()){demoOrders=demoOrders.map(o=>o.id===orderId?{...o,status:'cancelled',invoice_status:'void'}:o);return} await apiFetch(`/api/billing/orders/${encodeURIComponent(orderId)}/cancel`,{method:'POST'}) },

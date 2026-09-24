@@ -88,12 +88,21 @@ pub async fn summary(
 
 /// `GET /api/billing/plans` — active plans for the pricing/upgrade view.
 pub async fn plans(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let controls = crate::services::platform_control::load(&state.db).await?;
     let plans: Vec<Value> = billing::active_plans(&state)
         .await?
         .iter()
         .map(plan_json)
         .collect();
-    Ok(Json(json!({ "plans": plans })))
+    Ok(Json(json!({
+        "plans": plans,
+        "onboarding": {
+            "business_creation_enabled": controls.business_creation_enabled,
+            "plan_ordering_enabled": controls.plan_ordering_enabled,
+            "instant_activation": state.billing_instant_activation,
+            "maintenance_message": controls.maintenance_message,
+        }
+    })))
 }
 
 #[derive(Deserialize)]

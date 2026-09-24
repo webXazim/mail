@@ -31,8 +31,22 @@ pub async fn load(pool: &PgPool) -> Result<PlatformControls, ApiError> {
 }
 
 fn disabled(default_message: &str, maintenance_message: &str) -> ApiError {
-    let message = if maintenance_message.trim().is_empty() { default_message } else { maintenance_message.trim() };
+    let message = if maintenance_message.trim().is_empty() {
+        default_message.to_string()
+    } else {
+        format!("{default_message}. {}", maintenance_message.trim())
+    };
     ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "platform_paused", message)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn paused_response_names_the_blocked_operation() {
+        let error = super::disabled("New business creation is temporarily paused", "CS Mail is completing production acceptance.");
+        assert!(error.message.starts_with("New business creation is temporarily paused"));
+        assert!(error.message.contains("production acceptance"));
+    }
 }
 
 pub async fn require_signup(pool: &PgPool) -> Result<(), ApiError> {
