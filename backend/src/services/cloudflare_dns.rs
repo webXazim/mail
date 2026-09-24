@@ -8,9 +8,9 @@ use reqwest::redirect::Policy;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::services::domain_onboarding::ExpectedRecord;
+use crate::services::domain_onboarding::{txt_equivalent, ExpectedRecord};
 
-fn cloudflare_error(message: &'static str) -> ApiError {
+fn cloudflare_error(message: impl Into<String>) -> ApiError {
     ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "cloudflare_dns", message)
 }
 
@@ -48,8 +48,13 @@ fn validate_mail_records(domain: &str, records: &[ExpectedRecord]) -> Result<(),
 fn exact_record(existing: &Value, expected: &ExpectedRecord) -> bool {
     existing["type"] == expected.kind
         && existing["name"].as_str() == Some(expected.name.as_str())
-        && existing["content"].as_str().map(|value| value.trim_end_matches('.'))
-            == Some(expected.value.trim_end_matches('.'))
+        && existing["content"].as_str().is_some_and(|value| {
+            if expected.kind == "TXT" {
+                txt_equivalent(&expected.value, value)
+            } else {
+                value.trim_end_matches('.').eq_ignore_ascii_case(expected.value.trim_end_matches('.'))
+            }
+        })
         && (expected.kind != "MX" || existing["priority"].as_u64() == expected.priority.map(u64::from))
 }
 
@@ -177,7 +182,10 @@ pub async fn publish_mail_records(domain: &str, records: &[ExpectedRecord], toke
     for record in records {
         let existing = named_records(&client, &zone_id, &record.kind, &record.name, token).await?;
         if existing.iter().any(|item| conflicting_record(item, record)) {
-            return Err(cloudflare_error("Existing mail DNS records conflict with CS Mail. Review MX, SPF, DKIM or DMARC in Cloudflare before continuing; no records were replaced."));
+            return Err(cloudflare_error(format!(
+                "Existing {} record at {} differs from the mail provider's required value. Review this record in Cloudflare; no records were replaced.",
+                record.kind, record.name
+            )));
         }
         if !existing.iter().any(|item| exact_record(item, record)) {
             missing.push(record);
@@ -216,5 +224,24 @@ mod tests {
         let spf = ExpectedRecord { kind: "TXT".into(), name: "example.com".into(), value: "v=spf1 mx -all".into(), priority: None };
         assert!(super::conflicting_record(&serde_json::json!({"type":"TXT","name":"example.com","content":"v=spf1 include:other.example -all"}), &spf));
         assert!(!super::conflicting_record(&serde_json::json!({"type":"TXT","name":"example.com","content":"google-site-verification=abc"}), &spf));
+    }
+
+    #[test]
+    fn existing_mailer_dkim_with_equivalent_format_is_reused() {
+        use crate::services::domain_onboarding::ExpectedRecord;
+        let dkim = ExpectedRecord {
+            kind: "TXT".into(), name: "cs1._domainkey.example.com".into(),
+            value: "v=DKIM1; k=rsa; h=sha256; p=AbC123".into(), priority: None,
+        };
+        let equivalent = serde_json::json!({"type":"TXT","name":"cs1._domainkey.example.com","content":"v=DKIM1;p=AbC 123; k=RSA"});
+        assert!(super::exact_record(&equivalent, &dkim));
+        assert!(!super::conflicting_record(&equivalent, &dkim));
+        let different_key = serde_json::json!({"type":"TXT","name":"cs1._domainkey.example.com","content":"v=DKIM1; k=rsa; p=AbC124"});
+        assert!(!super::exact_record(&different_key, &dkim));
+        assert!(super::conflicting_record(&different_key, &dkim));
+        let changed_case = serde_json::json!({"type":"TXT","name":"cs1._domainkey.example.com","content":"v=DKIM1; k=rsa; p=aBc123"});
+        assert!(super::conflicting_record(&changed_case, &dkim));
+        let incompatible_hash = serde_json::json!({"type":"TXT","name":"cs1._domainkey.example.com","content":"v=DKIM1; k=rsa; h=sha1; p=AbC123"});
+        assert!(super::conflicting_record(&incompatible_hash, &dkim));
     }
 }

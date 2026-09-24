@@ -81,6 +81,42 @@ fn clean_txt(value: &str) -> String {
     if out.is_empty() { value.trim_matches('"').to_string() } else { out }
 }
 
+/// DNS providers may reformat DKIM tags and fold the public key without
+/// changing the key. Keep the key's base64 case intact when comparing it.
+pub fn txt_equivalent(expected: &str, observed: &str) -> bool {
+    fn dkim_tags(value: &str) -> Option<BTreeMap<String, String>> {
+        let cleaned = clean_txt(value);
+        if !cleaned.to_ascii_lowercase().starts_with("v=dkim1") { return None; }
+        let mut tags = BTreeMap::new();
+        for part in cleaned.split(';').filter(|part| !part.trim().is_empty()) {
+            let (key, value) = part.split_once('=')?;
+            let key = key.trim().to_ascii_lowercase();
+            let value = if key == "p" {
+                value.chars().filter(|ch| !ch.is_ascii_whitespace()).collect()
+            } else if key == "v" || key == "k" {
+                value.trim().to_ascii_lowercase()
+            } else {
+                value.trim().to_string()
+            };
+            if tags.insert(key, value).is_some() { return None; }
+        }
+        // Mailer publishes this Stalwart key without `h`, while Stalwart's
+        // zone export includes `h=sha256`. Both permit rsa-sha256 signatures.
+        if tags.get("h").is_some_and(|value| value.eq_ignore_ascii_case("sha256")) {
+            tags.remove("h");
+        }
+        // RFC 6376 defines rsa as the default key type.
+        tags.entry("k".to_string()).or_insert_with(|| "rsa".to_string());
+        (tags.get("v").is_some_and(|v| v == "dkim1") && tags.get("p").is_some_and(|p| !p.is_empty()))
+            .then_some(tags)
+    }
+    match (dkim_tags(expected), dkim_tags(observed)) {
+        (Some(left), Some(right)) => left == right,
+        (Some(_), None) | (None, Some(_)) => false,
+        (None, None) => clean_txt(expected) == clean_txt(observed),
+    }
+}
+
 fn strip_zone_comment(line: &str) -> String {
     let mut out = String::new();
     let mut quoted = false;
@@ -155,8 +191,7 @@ pub fn parse_required_records(zone: &str, domain: &str) -> Vec<ExpectedRecord> {
 }
 
 fn txt_matches(expected: &str, observed: &[String]) -> bool {
-    let expected = clean_txt(expected).to_ascii_lowercase();
-    observed.iter().any(|v| clean_txt(v).to_ascii_lowercase() == expected)
+    observed.iter().any(|value| txt_equivalent(expected, value))
 }
 
 fn spf_matches(expected: &str, observed: &[String]) -> bool {
