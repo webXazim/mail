@@ -3,6 +3,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::audit;
@@ -307,6 +308,77 @@ pub struct CloudflareVerificationIn {
     api_token: String,
 }
 
+fn cloudflare_oauth_client_id() -> Option<String> {
+    std::env::var("CS_MAIL_CLOUDFLARE_OAUTH_CLIENT_ID").ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+}
+
+pub async fn cloudflare_oauth_config(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+) -> Result<Json<Value>, ApiError> {
+    let client_id = cloudflare_oauth_client_id();
+    Ok(Json(json!({
+        "available": client_id.is_some(),
+        "client_id": client_id,
+        "redirect_uri": format!("{}/mail/business", state.public_origin.trim_end_matches('/')),
+        "authorization_url": "https://dash.cloudflare.com/oauth2/auth"
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct CloudflareOAuthExchangeIn {
+    code: String,
+    code_verifier: String,
+}
+
+pub async fn cloudflare_oauth_exchange(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CloudflareOAuthExchangeIn>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system || matches!(row.status.as_str(), "removing" | "active") {
+        return Err(ApiError::conflict("This domain is not awaiting Cloudflare DNS setup"));
+    }
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let client_id = cloudflare_oauth_client_id().ok_or_else(|| ApiError::bad_request("Cloudflare connection is not configured"))?;
+    if body.code.is_empty() || body.code.len() > 2048 || body.code_verifier.len() < 43 || body.code_verifier.len() > 128
+        || !body.code_verifier.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte)) {
+        return Err(ApiError::bad_request("Cloudflare authorization response is invalid"));
+    }
+    let redirect_uri = format!("{}/mail/business", state.public_origin.trim_end_matches('/'));
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::none()).build()
+        .map_err(|_| ApiError::bad_request("Cloudflare authorization could not be prepared"))?;
+    let response = client.post("https://dash.cloudflare.com/oauth2/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id.as_str()),
+            ("code", body.code.as_str()),
+            ("code_verifier", body.code_verifier.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send().await.map_err(|_| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "cloudflare_oauth", "Cloudflare authorization is temporarily unavailable"))?;
+    if !response.status().is_success() {
+        return Err(ApiError::new(axum::http::StatusCode::UNPROCESSABLE_ENTITY, "cloudflare_oauth", "Cloudflare could not complete authorization. Please reconnect and try again."));
+    }
+    let payload: Value = response.json().await.map_err(|_| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "cloudflare_oauth", "Cloudflare returned an unreadable authorization response"))?;
+    let token = payload["access_token"].as_str().unwrap_or_default();
+    if token.is_empty() || token.len() > 4096 || payload["token_type"].as_str().is_some_and(|kind| !kind.eq_ignore_ascii_case("bearer")) {
+        return Err(ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "cloudflare_oauth", "Cloudflare did not return a usable DNS authorization"));
+    }
+    Ok(Json(json!({"access_token": token})))
+}
+
 /// Publish the exact pending ownership challenge with a one-time, zone-scoped
 /// Cloudflare token. Public DNS is still checked by the normal verify endpoint.
 pub async fn publish_cloudflare_challenge(
@@ -323,7 +395,7 @@ pub async fn publish_cloudflare_challenge(
         DOMAIN_OPERATION_WINDOW,
     ).await?;
     let token = body.api_token.trim();
-    if token.len() < 20 || token.len() > 512 || token.chars().any(char::is_whitespace) {
+    if token.len() < 20 || token.len() > 4096 || token.chars().any(char::is_whitespace) {
         return Err(ApiError::bad_request("Enter a valid Cloudflare API token"));
     }
     let row = load_domain(&state, organization_id, domain_id).await?;
@@ -595,7 +667,7 @@ pub async fn publish_cloudflare_mail_dns(
         DOMAIN_OPERATION_WINDOW,
     ).await?;
     let token = body.api_token.trim();
-    if token.len() < 20 || token.len() > 512 || token.chars().any(char::is_whitespace) {
+    if token.len() < 20 || token.len() > 4096 || token.chars().any(char::is_whitespace) {
         return Err(ApiError::bad_request("Enter a valid Cloudflare API token"));
     }
     let row = load_domain(&state, organization_id, domain_id).await?;

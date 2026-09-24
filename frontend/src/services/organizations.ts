@@ -160,6 +160,15 @@ export const organizationsApi = {
       `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-txt`,
       { method: 'POST', body: JSON.stringify({ api_token: apiToken }) },
     ),
+  cloudflareOAuthConfig: () =>
+    apiFetch<{ available: boolean; client_id: string | null; redirect_uri: string; authorization_url: string }>(
+      '/api/cloudflare/oauth/config',
+    ),
+  exchangeCloudflareCode: (organizationId: string, domainId: string, code: string, verifier: string) =>
+    apiFetch<{ access_token: string }>(
+      `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-oauth/exchange`,
+      { method: 'POST', body: JSON.stringify({ code, code_verifier: verifier }) },
+    ),
   publishCloudflareMailDns: (organizationId: string, domainId: string, apiToken: string) =>
     apiFetch<{ ok: true; zone: string; created: number; message: string }>(
       `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-mail-dns`,

@@ -86,6 +86,7 @@
 .business-cloudflare { border-top: 1px solid var(--cs-mail-line); padding-top: 12px; }
 .business-cloudflare summary { cursor: pointer; color: var(--cs-mail-copy); font-size: 12px; font-weight: 700; }
 .business-cloudflare p { margin: 10px 0; }
+.business-cloudflare-connect { margin: 3px 0 8px; }
 .business-cloudflare form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 .business-cloudflare label { grid-column: 1 / -1; font-size: 11px; color: var(--cs-mail-muted); }
 .business-cloudflare input { min-width: 0; }

@@ -105,8 +105,16 @@ after their plan is active. A platform role does not grant business ownership.
 
 For a domain hosted on Cloudflare, the business owner or admin can open the
 pending domain's **Use Cloudflare to add and verify this record** section. They
-create an API token limited to that zone with **Zone Read** and **DNS Write**,
-paste it once, and choose **Set up with Cloudflare**. CS Mail publishes the
+can choose **Connect Cloudflare** to authorize DNS changes without creating an
+API token. This button appears after the operator registers a Cloudflare public
+OAuth client for `https://mail.crescentsphere.com/mail/business`, grants the
+client **Zone Read** and **DNS Write** scopes, verifies the client URL domain in
+Cloudflare, and sets `CS_MAIL_CLOUDFLARE_OAUTH_CLIENT_ID` in `.env.production`.
+Register the client as a browser-based Authorization Code + PKCE client with
+token authentication method `none`; CS Mail never requires its client secret.
+The API container must be recreated after setting the variable. A user may
+instead create an API token limited to that zone with **Zone Read** and
+**DNS Write**, paste it, and choose **Set up with Cloudflare**. CS Mail publishes the
 ownership TXT record, verifies it against public DNS, provisions the domain on
 the mail server, and publishes the generated MX, SPF, DKIM and DMARC records.
 Public mail DNS readiness is then checked until the domain is active. The token
@@ -114,6 +122,11 @@ is not persisted; if verification takes too long or setup is interrupted, the
 owner can resume from **Publish mail DNS with Cloudflare** with a new token.
 Existing conflicting mail records are never replaced automatically. The manual
 DNS setup path remains available for other DNS providers.
+
+Resend's provider sign-in flow uses Domain Connect. Cloudflare requires CS Mail
+to publish a Domain Connect template and have Cloudflare onboard it before that
+specific standard can be offered. The Cloudflare OAuth option above gives a
+consent-based connection while that provider onboarding is pending.
 
 Platform Admin has no separate password in `.env.production`. After the first
 CS Mail account has verified its email, promote that exact account once:

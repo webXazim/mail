@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Building2, Check, Copy, Globe2, Mail, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react'
 import { organizationsApi, type BusinessAddress, type OrganizationDetail, type OrganizationInvitation, type OrganizationMember, type OrganizationRole, type OrganizationSummary } from '../services/organizations'
 import { profileApi, useProfile } from '../services/profile'
+import { beginCloudflareOAuth, clearPendingCloudflareOAuth, readPendingCloudflareOAuth } from '../lib/cloudflare-oauth'
 
 const GIB = 1024 ** 3
 const formatStorage = (bytes: number | null | undefined) => {
@@ -34,6 +35,8 @@ export function BusinessPage() {
   const [cloudflareChecking, setCloudflareChecking] = useState<string | null>(null)
   const cloudflareTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cloudflareRun = useRef(0)
+  const cloudflareOAuthHandling = useRef(false)
+  const [cloudflareOAuthConfig, setCloudflareOAuthConfig] = useState<Awaited<ReturnType<typeof organizationsApi.cloudflareOAuthConfig>> | null>(null)
   const [mailboxLocal, setMailboxLocal] = useState('')
   const [mailboxDomainId, setMailboxDomainId] = useState('')
   const [mailboxMemberId, setMailboxMemberId] = useState('')
@@ -86,8 +89,63 @@ export function BusinessPage() {
   }
 
   useEffect(() => {
-    load().catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load businesses'))
+    load(readPendingCloudflareOAuth()?.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load businesses'))
+    organizationsApi.cloudflareOAuthConfig().then(setCloudflareOAuthConfig).catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has('code') && !params.has('error')) return
+    const pending = readPendingCloudflareOAuth()
+    if (cloudflareOAuthHandling.current) return
+    if (!pending) {
+      cloudflareOAuthHandling.current = true
+      const nextUrl = new URL(window.location.href)
+      for (const key of ['code', 'state', 'error', 'error_description']) nextUrl.searchParams.delete(key)
+      window.history.replaceState(window.history.state, '', nextUrl.toString())
+      setError('Cloudflare setup expired. Connect Cloudflare again to continue.')
+      return
+    }
+    if (!detail) return
+    if (detail.id !== pending.organizationId) {
+      load(pending.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to restore business setup'))
+      return
+    }
+    cloudflareOAuthHandling.current = true
+    const code = params.get('code')
+    const state = params.get('state')
+    const nextUrl = new URL(window.location.href)
+    for (const key of ['code', 'state', 'error', 'error_description']) nextUrl.searchParams.delete(key)
+    window.history.replaceState(window.history.state, '', nextUrl.toString())
+    clearPendingCloudflareOAuth()
+    if (!code || state !== pending.state || params.has('error')) {
+      setError('Cloudflare connection was cancelled or did not match this setup attempt. Please try again.')
+      return
+    }
+    void (async () => {
+      try {
+        const result = await organizationsApi.exchangeCloudflareCode(pending.organizationId, pending.domainId, code, pending.verifier)
+        if (pending.mode === 'setup') await publishCloudflareChallenge(pending.domainId, result.access_token)
+        else await publishCloudflareMailDns(pending.domainId, result.access_token)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Cloudflare connection failed')
+      }
+    })()
+  }, [detail?.id])
+
+  const startCloudflareConnection = async (domainId: string, mode: 'setup' | 'mail') => {
+    if (!detail || !cloudflareOAuthConfig?.available || !cloudflareOAuthConfig.client_id) return
+    setError('')
+    try {
+      await beginCloudflareOAuth({
+        client_id: cloudflareOAuthConfig.client_id,
+        redirect_uri: cloudflareOAuthConfig.redirect_uri,
+        authorization_url: cloudflareOAuthConfig.authorization_url,
+      }, detail.id, domainId, mode)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to connect Cloudflare')
+    }
+  }
 
   useEffect(() => () => {
     cloudflareRun.current += 1
@@ -228,10 +286,10 @@ export function BusinessPage() {
     cloudflareTimer.current = setTimeout(() => void check(), 20_000)
   }
 
-  const publishCloudflareMailDns = async (domainId: string) => {
-    if (!detail || !cloudflareTokens[domainId]?.trim()) return
+  const publishCloudflareMailDns = async (domainId: string, suppliedToken?: string) => {
+    if (!detail || !(suppliedToken || cloudflareTokens[domainId]?.trim())) return
     const organizationId = detail.id
-    const token = cloudflareTokens[domainId].trim()
+    const token = suppliedToken || cloudflareTokens[domainId].trim()
     const startingRun = cloudflareRun.current
     setCloudflareTokens((current) => ({ ...current, [domainId]: '' }))
     setBusy(true)
@@ -251,10 +309,10 @@ export function BusinessPage() {
     }
   }
 
-  const publishCloudflareChallenge = async (domainId: string) => {
-    if (!detail || !cloudflareTokens[domainId]?.trim()) return
+  const publishCloudflareChallenge = async (domainId: string, suppliedToken?: string) => {
+    if (!detail || !(suppliedToken || cloudflareTokens[domainId]?.trim())) return
     const organizationId = detail.id
-    const token = cloudflareTokens[domainId].trim()
+    const token = suppliedToken || cloudflareTokens[domainId].trim()
     const startingRun = cloudflareRun.current
     setCloudflareTokens((current) => ({ ...current, [domainId]: '' }))
     setBusy(true)
@@ -656,7 +714,9 @@ export function BusinessPage() {
                         <p>Add this TXT record with your DNS provider. CS Mail only marks the domain verified after the public DNS record matches this challenge.</p>
                         {(detail.role === 'owner' || detail.role === 'admin') && <details className="business-cloudflare">
                           <summary>Use Cloudflare to add and verify this record</summary>
-          <p>Create a <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">Cloudflare API token</a> scoped to this domain's zone with Zone Read and DNS Write. CS Mail uses it during this setup to publish ownership and mail DNS records, then discards it. Conflicting existing mail records are never replaced.</p>
+                          <p>Authorize Cloudflare to publish the ownership and mail records for this domain. Existing conflicting mail records are never replaced.</p>
+                          {cloudflareOAuthConfig?.available && <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'setup')}>Connect Cloudflare</button>}
+                          <p>{cloudflareOAuthConfig?.available ? 'Or create a ' : 'Create a '}<a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">scoped API token</a> with Zone Read and DNS Write. CS Mail uses it during setup and does not save it.</p>
                           <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareChallenge(domain.id) }}>
                             <label htmlFor={`cloudflare-token-${domain.id}`}>Cloudflare API token</label>
                             <input id={`cloudflare-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
@@ -722,7 +782,9 @@ export function BusinessPage() {
                         {(detail.role === 'owner' || detail.role === 'admin') && !domain.dns.ready && (
                           <details className="business-cloudflare">
                             <summary>Publish mail DNS with Cloudflare</summary>
-                            <p>Use a token scoped to this zone with Zone Read and DNS Write. CS Mail adds the provider-generated MX, SPF, DKIM and DMARC records, then checks public DNS. Existing conflicting mail records must be resolved in Cloudflare first.</p>
+                            <p>Authorize Cloudflare to add the provider-generated MX, SPF, DKIM and DMARC records. Existing conflicting mail records must be resolved in Cloudflare first.</p>
+                            {cloudflareOAuthConfig?.available && <button type="button" className="primary-button business-cloudflare-connect" disabled={busy || cloudflareChecking === domain.id} onClick={() => void startCloudflareConnection(domain.id, 'mail')}>Connect Cloudflare</button>}
+                            <p>{cloudflareOAuthConfig?.available ? 'Or use' : 'Use'} a zone-scoped API token with Zone Read and DNS Write.</p>
                             <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareMailDns(domain.id) }}>
                               <label htmlFor={`cloudflare-mail-token-${domain.id}`}>Cloudflare API token</label>
                               <input id={`cloudflare-mail-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
