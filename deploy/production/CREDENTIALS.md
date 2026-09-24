@@ -53,6 +53,25 @@ Create/use a dedicated service token in the existing Stalwart administration
 rather than reusing a human/master password. `CS_MAIL_MAIL_ADMIN_SECRET` should
 remain blank when token authentication is available.
 
+The token must be issued to a principal allowed to grant the full **User**
+role to new mailboxes. Stalwart checks the effective permissions of the API
+key, not just the account that owns it. A key in **Replace** mode containing
+only `sysAccountCreate` and other management operations cannot create a normal
+mailbox: Stalwart rejects the User role's mail permissions with
+`You are not authorized to grant permissions: jmapPrincipalCreate, ...`.
+Use a dedicated Stalwart service principal whose role includes the standard
+User permissions and the management operations CS Mail needs, and issue its
+API key in **Inherit** mode. The key still cannot log in to mail protocols.
+The account creation payload must retain `roles: User` and
+`permissions: Inherit`; removing them does not correct a restricted token.
+
+If an existing CS Mail mailbox shows this error, correct or replace the
+Stalwart key, set `CS_MAIL_MAIL_ADMIN_TOKEN` in the private production env,
+redeploy CS Mail so the API container receives it, then click **Retry setup**
+once for that mailbox. Do not delete the mailbox, provider domain, or DNS
+records to work around this authorization error. Never paste the token in a
+support message or terminal log.
+
 The defaults assume the provider is resolvable as `stalwart` on the shared
 Docker network:
 

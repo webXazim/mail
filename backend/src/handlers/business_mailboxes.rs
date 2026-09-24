@@ -106,7 +106,7 @@ pub async fn list(
             "provider_quota_bytes":provider_total,"quota_in_sync":provider_total.map(|value| value==row.quota_bytes),
             "storage_pct":if row.quota_bytes>0 { used.map(|used| ((used as f64/row.quota_bytes as f64)*100.0).clamp(0.0,100.0).round() as i64) } else { None },
             "sync_error":if row.sync_error.contains("not authorized to grant permissions") {
-                "Mail service permissions prevented mailbox creation. Retry setup after the service is updated."
+                "Mail service authorization needs operator attention. Please contact support; retry setup after the provider credential is corrected."
             } else if row.sync_error.contains("Mailbox has not been provisioned yet") {
                 "Storage will sync after mailbox setup completes."
             } else if row.sync_error.is_empty() { "" } else {
