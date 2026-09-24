@@ -196,6 +196,61 @@ export function BusinessPage() {
     }
   }
 
+  const startMailDnsChecks = (organizationId: string, domainId: string, run: number) => {
+    let attempts = 0
+    const check = async () => {
+      if (run !== cloudflareRun.current) return
+      attempts += 1
+      try {
+        const result = await organizationsApi.checkDomainDns(organizationId, domainId)
+        if (run !== cloudflareRun.current) return
+        await load(organizationId)
+        if (result.ready) {
+          setCloudflareChecking(null)
+          setDomainNotice('Cloudflare mail DNS is verified. The domain is active for business mail.')
+          return
+        }
+      } catch (cause) {
+        if (run !== cloudflareRun.current) return
+        if (!(cause instanceof Error && /recently|few seconds/i.test(cause.message))) {
+          setCloudflareChecking(null)
+          setError(cause instanceof Error ? cause.message : 'Unable to check mail DNS')
+          return
+        }
+      }
+      if (attempts < 12) {
+        cloudflareTimer.current = setTimeout(() => void check(), 20_000)
+      } else {
+        setCloudflareChecking(null)
+        setDomainNotice('Mail records were published in Cloudflare. Public DNS is still propagating; use Check DNS later if the domain does not become active automatically.')
+      }
+    }
+    cloudflareTimer.current = setTimeout(() => void check(), 20_000)
+  }
+
+  const publishCloudflareMailDns = async (domainId: string) => {
+    if (!detail || !cloudflareTokens[domainId]?.trim()) return
+    const organizationId = detail.id
+    const token = cloudflareTokens[domainId].trim()
+    const startingRun = cloudflareRun.current
+    setCloudflareTokens((current) => ({ ...current, [domainId]: '' }))
+    setBusy(true)
+    setError('')
+    try {
+      const result = await organizationsApi.publishCloudflareMailDns(organizationId, domainId, token)
+      if (startingRun !== cloudflareRun.current) return
+      stopCloudflareCheck()
+      setCloudflareChecking(domainId)
+      setDomainNotice(result.message)
+      await load(organizationId)
+      startMailDnsChecks(organizationId, domainId, cloudflareRun.current)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to publish Cloudflare mail DNS')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const publishCloudflareChallenge = async (domainId: string) => {
     if (!detail || !cloudflareTokens[domainId]?.trim()) return
     const organizationId = detail.id
@@ -220,9 +275,17 @@ export function BusinessPage() {
           const result = await organizationsApi.verifyDomain(organizationId, domainId)
           if (run !== cloudflareRun.current) return
           if (result.verified) {
-            setCloudflareChecking(null)
-            setDomainNotice('Domain ownership verified from public DNS. You can now provision mail service.')
+            setDomainNotice('Ownership verified. Provisioning the mail domain and publishing its Cloudflare DNS records…')
+            const provisioned = await organizationsApi.provisionDomain(organizationId, domainId)
+            if (run !== cloudflareRun.current) return
+            if (!provisioned.domain.provider?.provisioned) {
+              throw new Error('Mail domain provisioning did not complete. Use Provision mail domain to retry.')
+            }
+            await organizationsApi.publishCloudflareMailDns(organizationId, domainId, token)
+            if (run !== cloudflareRun.current) return
+            setDomainNotice('Ownership verified and mail DNS published in Cloudflare. Checking public DNS…')
             await load(organizationId)
+            startMailDnsChecks(organizationId, domainId, run)
             return
           }
         } catch (cause) {
@@ -230,6 +293,7 @@ export function BusinessPage() {
           if (!(cause instanceof Error && /recently|few seconds/i.test(cause.message))) {
             setCloudflareChecking(null)
             setError(cause instanceof Error ? cause.message : 'Unable to check public DNS')
+            await load(organizationId).catch(() => undefined)
             return
           }
         }
@@ -298,13 +362,14 @@ export function BusinessPage() {
 
   const releaseDomain = async (domainId: string) => {
     if (!detail) return
-    if (!window.confirm('Release this domain claim from this business?')) return
+    const domain = detail.domains.find((item) => item.id === domainId)
+    if (!window.confirm(`Delete ${domain?.domain ?? 'this domain'} from this business? Its hosted mailboxes and addresses must be removed first. DNS records at your provider will remain until you remove them there.`)) return
     if (cloudflareChecking === domainId) stopCloudflareCheck()
     setBusy(true)
     setError('')
     try {
       await organizationsApi.releaseDomain(detail.id, domainId)
-      setDomainNotice('Domain claim released.')
+      setDomainNotice('Domain deleted from this business. Remove any old DNS records at your DNS provider if you no longer need them.')
       await load(detail.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to release domain')
@@ -565,6 +630,11 @@ export function BusinessPage() {
                       <span className={`status-dot ${['verified', 'active'].includes(domain.status) ? 'status-dot--active' : ''}`}>
                         {domain.status.replaceAll('_', ' ')}
                       </span>
+                      {(detail.role === 'owner' || detail.role === 'admin') && !domain.is_system && (
+                        <button type="button" className="secondary-button business-delete-domain" disabled={busy} onClick={() => void releaseDomain(domain.id)}>
+                          <Trash2 size={14} /> Delete domain
+                        </button>
+                      )}
                     </div>
 
                     {domain.status === 'pending_verification' && domain.verification && (
@@ -586,11 +656,11 @@ export function BusinessPage() {
                         <p>Add this TXT record with your DNS provider. CS Mail only marks the domain verified after the public DNS record matches this challenge.</p>
                         {(detail.role === 'owner' || detail.role === 'admin') && <details className="business-cloudflare">
                           <summary>Use Cloudflare to add and verify this record</summary>
-                          <p>Create a <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">Cloudflare API token</a> scoped to this domain's zone with Zone Read and DNS Write. The token is used once to add this TXT record and is not saved by CS Mail. Existing DNS records are left alone.</p>
+          <p>Create a <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">Cloudflare API token</a> scoped to this domain's zone with Zone Read and DNS Write. CS Mail uses it during this setup to publish ownership and mail DNS records, then discards it. Conflicting existing mail records are never replaced.</p>
                           <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareChallenge(domain.id) }}>
                             <label htmlFor={`cloudflare-token-${domain.id}`}>Cloudflare API token</label>
                             <input id={`cloudflare-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
-                            <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Checking public DNS…' : 'Add TXT and verify'}</button>
+                            <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Setting up DNS…' : 'Set up with Cloudflare'}</button>
                           </form>
                         </details>}
                         {domain.last_error && <p className="business-domain-error">{domain.last_error}</p>}
@@ -600,9 +670,6 @@ export function BusinessPage() {
                           </button>
                           <button type="button" className="secondary-button" disabled={busy} onClick={() => void rotateDomain(domain.id)}>
                             <RefreshCw size={15} /> New token
-                          </button>
-                          <button type="button" className="text-button" disabled={busy} onClick={() => void releaseDomain(domain.id)}>
-                            <Trash2 size={14} /> Release claim
                           </button>
                         </div>
                       </div>
@@ -652,6 +719,17 @@ export function BusinessPage() {
                             </div>
                           ))}
                         </div>
+                        {(detail.role === 'owner' || detail.role === 'admin') && !domain.dns.ready && (
+                          <details className="business-cloudflare">
+                            <summary>Publish mail DNS with Cloudflare</summary>
+                            <p>Use a token scoped to this zone with Zone Read and DNS Write. CS Mail adds the provider-generated MX, SPF, DKIM and DMARC records, then checks public DNS. Existing conflicting mail records must be resolved in Cloudflare first.</p>
+                            <form onSubmit={(event) => { event.preventDefault(); void publishCloudflareMailDns(domain.id) }}>
+                              <label htmlFor={`cloudflare-mail-token-${domain.id}`}>Cloudflare API token</label>
+                              <input id={`cloudflare-mail-token-${domain.id}`} type="password" autoComplete="off" spellCheck={false} value={cloudflareTokens[domain.id] ?? ''} onChange={(event) => setCloudflareTokens((current) => ({ ...current, [domain.id]: event.target.value }))} placeholder="Scoped API token" required />
+                              <button type="submit" className="secondary-button" disabled={busy || cloudflareChecking === domain.id || !cloudflareTokens[domain.id]?.trim()}>{cloudflareChecking === domain.id ? 'Checking public DNS…' : 'Publish mail DNS'}</button>
+                            </form>
+                          </details>
+                        )}
                         <details className="business-zone-file">
                           <summary>Provider DNS zone file</summary>
                           <pre>{domain.dns.zone_file}</pre>
@@ -678,10 +756,10 @@ export function BusinessPage() {
 
               <section className="business-section" id="business-mailboxes">
                 <header>
-                  <div><Users size={17} /><h3>Mailboxes & storage</h3></div>
+                  <div><Users size={17} /><h3>{detail.mailboxes.length ? 'Mailboxes & storage' : 'Mailboxes'}</h3></div>
                   <span>{detail.mailboxes.length}</span>
                 </header>
-                {detail.storage && (
+                {detail.storage && detail.mailboxes.length > 0 && (
                   <div className="business-storage-pool">
                     <div>
                       <span>Business storage pool</span>

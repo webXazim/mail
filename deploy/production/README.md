@@ -106,12 +106,14 @@ after their plan is active. A platform role does not grant business ownership.
 For a domain hosted on Cloudflare, the business owner or admin can open the
 pending domain's **Use Cloudflare to add and verify this record** section. They
 create an API token limited to that zone with **Zone Read** and **DNS Write**,
-paste it once, and choose **Add TXT and verify**. CS Mail writes only the
-ownership TXT record, discards the token after the request, and checks public
-DNS before accepting the domain. If propagation takes longer, **Verify DNS**
-can be used later. The subsequent MX, SPF, DKIM, and DMARC records still need
-to be configured in the domain's DNS before the mailbox is active. The manual
-TXT verification flow remains available for other DNS providers.
+paste it once, and choose **Set up with Cloudflare**. CS Mail publishes the
+ownership TXT record, verifies it against public DNS, provisions the domain on
+the mail server, and publishes the generated MX, SPF, DKIM and DMARC records.
+Public mail DNS readiness is then checked until the domain is active. The token
+is not persisted; if verification takes too long or setup is interrupted, the
+owner can resume from **Publish mail DNS with Cloudflare** with a new token.
+Existing conflicting mail records are never replaced automatically. The manual
+DNS setup path remains available for other DNS providers.
 
 Platform Admin has no separate password in `.env.production`. After the first
 CS Mail account has verified its email, promote that exact account once:

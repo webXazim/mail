@@ -160,6 +160,11 @@ export const organizationsApi = {
       `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-txt`,
       { method: 'POST', body: JSON.stringify({ api_token: apiToken }) },
     ),
+  publishCloudflareMailDns: (organizationId: string, domainId: string, apiToken: string) =>
+    apiFetch<{ ok: true; zone: string; created: number; message: string }>(
+      `/api/organizations/${organizationId}/domains/${domainId}/cloudflare-mail-dns`,
+      { method: 'POST', body: JSON.stringify({ api_token: apiToken }) },
+    ),
   rotateDomainChallenge: (organizationId: string, domainId: string) =>
     apiFetch<OrganizationDomain>(
       `/api/organizations/${organizationId}/domains/${domainId}/challenge`,

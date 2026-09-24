@@ -579,6 +579,51 @@ pub async fn check_dns(
     })))
 }
 
+/// Publish the provider's mail DNS after public ownership proof and provider
+/// provisioning. A zone-scoped Cloudflare token is used for this request only.
+pub async fn publish_cloudflare_mail_dns(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((organization_id, domain_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CloudflareVerificationIn>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::platform_control::require_domain_onboarding(&state.db).await?;
+    tenancy::require_admin(&state.db, auth.user_id, organization_id).await?;
+    state.rate.check_burst(
+        &format!("domain-op:{organization_id}:{}", auth.user_id),
+        DOMAIN_OPERATION_LIMIT,
+        DOMAIN_OPERATION_WINDOW,
+    ).await?;
+    let token = body.api_token.trim();
+    if token.len() < 20 || token.len() > 512 || token.chars().any(char::is_whitespace) {
+        return Err(ApiError::bad_request("Enter a valid Cloudflare API token"));
+    }
+    let row = load_domain(&state, organization_id, domain_id).await?;
+    if row.is_system || row.verified_at.is_none() {
+        return Err(ApiError::conflict("Verify ownership of a customer domain first"));
+    }
+    let provider_id = row.provider_domain_id.as_deref().filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| ApiError::conflict("Provision this domain on the mail server first"))?;
+    if row.provider_marker.trim().is_empty() {
+        return Err(ApiError::conflict("Mail-provider ownership metadata is missing"));
+    }
+    let snapshot = state.stalwart.customer_domain_snapshot(provider_id).await
+        .map_err(|error| ApiError::new(axum::http::StatusCode::BAD_GATEWAY, "mail_provider", error.public_message()))?;
+    if snapshot.name != row.domain || snapshot.description != row.provider_marker || !snapshot.enabled {
+        return Err(ApiError::conflict("Mail-provider domain ownership could not be established safely"));
+    }
+    let records = domain_onboarding::parse_required_records(&snapshot.dns_zone_file, &row.domain);
+    let (zone, created) = cloudflare_dns::publish_mail_records(&row.domain, &records, token).await?;
+    audit::record(&state, Some(auth.user_id), "business.domain.cloudflare_mail_dns", json!({
+        "organization_id": organization_id, "domain_id": domain_id, "domain": row.domain,
+        "zone": zone, "created": created
+    })).await;
+    Ok(Json(json!({
+        "ok": true, "zone": zone, "created": created,
+        "message": "Mail DNS records are published in Cloudflare. Public DNS checks will activate the domain when MX, SPF, DKIM and DMARC are visible."
+    })))
+}
+
 pub async fn delete(
     State(state): State<AppState>,
     auth: AuthUser,
