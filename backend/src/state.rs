@@ -15,6 +15,8 @@ use crate::ws::EventHub;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub environment: String,
+    pub release_sha256: String,
     pub jwt_secret: String,
     pub jwt_access_ttl_secs: u64,
     pub jwt_refresh_ttl_secs: u64,

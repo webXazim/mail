@@ -2,9 +2,14 @@
 set -euo pipefail
 ENV_FILE=${1:-/opt/cs-mail/.env.production}
 ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
 set -a; source "$ENV_FILE"; set +a
+if [[ -f "$STATE/runtime/current.env" ]]; then
+  # shellcheck disable=SC1090
+  source "$STATE/runtime/current.env"
+fi
 BACKUP_DIR=${CS_MAIL_BACKUP_DIR:-/opt/backups/cs-mail}
 PGUSER=${POSTGRES_USER:-csmail}
 PGDB=${POSTGRES_DB:-csmail}
@@ -82,4 +87,19 @@ echo "domain race drill PASS"
 
 trap - EXIT
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db dropdb -U "$PGUSER" "$DB"
+
+if docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+  psql -U "$PGUSER" -d "$PGDB" -tAc "SELECT to_regclass('public.operational_evidence') IS NOT NULL" 2>/dev/null | grep -qx t; then
+  manifest_sha=$(sha256sum "$MANIFEST" | awk '{print $1}')
+  # Bind restore evidence to the release that actually produced the restored
+  # backup, not merely the release that happens to be running now.
+  release_sha=$(grep '^release_sha256=' "$MANIFEST" | head -1 | cut -d= -f2- || true)
+  [[ "$release_sha" =~ ^[0-9a-f]{64}$ ]] || release_sha=
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+    psql -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 \
+      -v release_sha="$release_sha" -v artifact_ref="$MANIFEST" -v artifact_sha="$manifest_sha" <<'SQL' >/dev/null
+INSERT INTO operational_evidence(kind,status,release_sha256,artifact_ref,artifact_sha256,detail)
+VALUES ('restore_drill','passed',:'release_sha',:'artifact_ref',:'artifact_sha',jsonb_build_object('database_restore',true,'attachment_archive_verified',true,'domain_race_guard_verified',true));
+SQL
+fi
 echo "restore drill PASS"

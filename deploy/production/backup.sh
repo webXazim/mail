@@ -43,5 +43,25 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE" run --rm --no-deps -T \
 } > "$manifest"
 chmod 600 "$dump" "$attachments" "$manifest"
 
+# Migration 0048 makes backup health visible to the launch-readiness endpoint
+# and Prometheus. Pre-deploy backups can run before that migration exists, so
+# evidence recording deliberately degrades to a warning instead of making a
+# valid pre-migration backup fail.
+if docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+  psql -U "${POSTGRES_USER:-csmail}" -d "${POSTGRES_DB:-csmail}" -tAc \
+  "SELECT to_regclass('public.operational_evidence') IS NOT NULL" 2>/dev/null | grep -qx t; then
+  manifest_sha=$(sha256sum "$manifest" | awk '{print $1}')
+  release_sha=${CS_MAIL_RELEASE_SHA256:-}
+  [[ "$release_sha" =~ ^[0-9a-f]{64}$ ]] || release_sha=
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+    psql -U "${POSTGRES_USER:-csmail}" -d "${POSTGRES_DB:-csmail}" -v ON_ERROR_STOP=1 \
+      -v release_sha="$release_sha" -v artifact_ref="$manifest" -v artifact_sha="$manifest_sha" -v reason="$REASON" <<'SQL' >/dev/null
+INSERT INTO operational_evidence(kind,status,release_sha256,artifact_ref,artifact_sha256,detail)
+VALUES ('local_backup','passed',:'release_sha',:'artifact_ref',:'artifact_sha',jsonb_build_object('reason',:'reason'));
+SQL
+else
+  echo "backup evidence ledger not available yet; backup itself succeeded" >&2
+fi
+
 find "$BACKUP_DIR" -type f -name 'cs-mail-*' -mtime "+$RETENTION_DAYS" -delete
 printf 'backup PASS: %s\n' "$dump"

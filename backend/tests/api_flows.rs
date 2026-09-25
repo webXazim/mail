@@ -52,6 +52,8 @@ async fn test_app() -> Option<TestApp> {
 
     let state = AppState {
         db: db.clone(),
+        environment: "test".into(),
+        release_sha256: "test".into(),
         jwt_secret: "integration-test-secret".into(),
         jwt_access_ttl_secs: 900,
         jwt_refresh_ttl_secs: 2_592_000,
@@ -971,6 +973,7 @@ async fn billing_manual_payment_flow() {
     let (token, _user_id, _email) = register(&t.app).await;
     let (status, created) = send(&t.app, req("POST", "/api/organizations", Some(&token), Some(json!({"name":"Billing Test Business"})))).await;
     assert_eq!(status, StatusCode::OK, "create billing business: {created}");
+    let organization_id = Uuid::parse_str(created["id"].as_str().expect("billing organization id")).unwrap();
     let (status, billing) = send(&t.app, req("GET", "/api/billing", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "billing summary: {billing}");
     assert_eq!(billing["current_plan"]["code"], "solo");
@@ -996,7 +999,7 @@ async fn billing_manual_payment_flow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "create order: {order}");
     assert_eq!(order["status"], "pending");
-    assert_eq!(order["amount_cents"], 7900);
+    assert_eq!(order["amount_cents"], 15900);
     assert_eq!(order["invoice_status"], "issued");
     assert_eq!(order["activation_mode"], "test_instant");
     assert!(order["invoice_number"].as_str().is_some_and(|v| v.starts_with("INV-")));
@@ -1005,7 +1008,7 @@ async fn billing_manual_payment_flow() {
     let (status, immediate_profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(immediate_profile["plan"], "team");
-    assert_eq!(immediate_profile["storage"]["total_bytes"], 25i64 * 1024 * 1024 * 1024);
+    assert_eq!(immediate_profile["storage"]["total_bytes"], 10i64 * 1024 * 1024 * 1024);
 
     let order_id = order["id"].as_str().unwrap().to_string();
 
@@ -1079,7 +1082,7 @@ async fn billing_manual_payment_flow() {
     let (status, profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["plan"], "team");
-    assert_eq!(profile["storage"]["total_bytes"], 25i64 * 1024 * 1024 * 1024);
+    assert_eq!(profile["storage"]["total_bytes"], 10i64 * 1024 * 1024 * 1024);
     assert_eq!(profile["entitlements"]["quota_source"], "plan");
 
     let (status, invoices) = send(
@@ -1090,7 +1093,8 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(invoices["invoices"].as_array().unwrap().len(), 1);
 
-    // A reject path: create a second order and turn its invoice down. The plan was already activated for acceptance testing and is not rolled back by payment review.
+    // An upgrade invoice must not displace a paid plan before review, even
+    // while initial-order test activation is enabled.
     let (status, order2) = send(
         &t.app,
         req(
@@ -1104,7 +1108,11 @@ async fn billing_manual_payment_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(order2["activation_mode"], "payment_approval");
     let order2_id = order2["id"].as_str().unwrap().to_string();
+    let (status, before_reject_profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(before_reject_profile["plan"], "team");
     let (status, rejected) = send(
         &t.app,
         req(
@@ -1120,7 +1128,11 @@ async fn billing_manual_payment_flow() {
     assert_eq!(rejected["invoice_status"], "void");
     let (status, after_reject_profile) = send(&t.app, req("GET", "/api/profile", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(after_reject_profile["plan"], "business", "test activation is independent from later payment rejection");
+    assert_eq!(after_reject_profile["plan"], "team", "rejected upgrade must leave the paid plan active");
+
+    let (status, downgrade) = send(&t.app, req("POST", "/api/billing/orders", Some(&token),
+        Some(json!({ "plan_code": "solo", "mailbox_count": 1, "payment_method": "bank", "customer_note": "" })))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "active-term downgrade: {downgrade}");
 
     // Customer withdraws an open invoice: a fresh Team order
     // is opened, then cancelled before the admin acts. The approved plan is NOT
@@ -1137,6 +1149,7 @@ async fn billing_manual_payment_flow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "open order3: {order3}");
     assert_eq!(order3["status"], "pending");
+    assert_eq!(order3["activation_mode"], "payment_approval");
     let order3_id = order3["id"].as_str().unwrap().to_string();
 
     let (status, cancelled) = send(
@@ -1158,6 +1171,39 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["plan"], "team", "cancelling an unpaid test invoice must not roll back the test plan");
 
+    // Production lifecycle regression: period expiry must enter grace first,
+    // then suspend after the grace deadline. Test-only instant activation must
+    // never resurrect an expired/suspended paid estate.
+    sqlx::query("UPDATE organization_subscriptions SET status='active',current_period_end=now()-interval '1 minute',renewal_grace_end=NULL WHERE organization_id=$1")
+        .bind(organization_id).execute(&t.db).await.expect("expire subscription for lifecycle test");
+    let (status, diag) = send(&t.app, req("GET", "/api/admin/diagnostics", Some(&admin_token), None)).await;
+    assert_eq!(status, StatusCode::OK, "diagnostics lifecycle tick: {diag}");
+    let lifecycle_status: String = sqlx::query_scalar("SELECT status FROM organization_subscriptions WHERE organization_id=$1")
+        .bind(organization_id).fetch_one(&t.db).await.expect("past due status");
+    assert_eq!(lifecycle_status, "past_due", "expiry must enter grace before suspension");
+    let grace_end: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("SELECT renewal_grace_end FROM organization_subscriptions WHERE organization_id=$1")
+        .bind(organization_id).fetch_one(&t.db).await.expect("grace deadline");
+    assert!(grace_end.is_some(), "past-due lifecycle must have an explicit grace deadline");
+
+    sqlx::query("UPDATE organization_subscriptions SET status='past_due',renewal_grace_end=now()-interval '1 minute' WHERE organization_id=$1")
+        .bind(organization_id).execute(&t.db).await.expect("expire grace period");
+    let (status, diag) = send(&t.app, req("GET", "/api/admin/diagnostics", Some(&admin_token), None)).await;
+    assert_eq!(status, StatusCode::OK, "suspension lifecycle tick: {diag}");
+    let lifecycle_status: String = sqlx::query_scalar("SELECT status FROM organization_subscriptions WHERE organization_id=$1")
+        .bind(organization_id).fetch_one(&t.db).await.expect("suspended status");
+    assert_eq!(lifecycle_status, "suspended", "expired grace must suspend the subscription");
+
+    let (status, recovery_order) = send(&t.app, req("POST", "/api/billing/orders", Some(&token),
+        Some(json!({ "plan_code": "team", "payment_method": "bank", "customer_note": "Recovery" })))).await;
+    assert_eq!(status, StatusCode::CREATED, "suspended recovery order: {recovery_order}");
+    assert_eq!(recovery_order["activation_mode"], "payment_approval", "test instant activation is bootstrap-only");
+    let still_suspended: String = sqlx::query_scalar("SELECT status FROM organization_subscriptions WHERE organization_id=$1")
+        .bind(organization_id).fetch_one(&t.db).await.expect("recovery pending status");
+    assert_eq!(still_suspended, "suspended", "placing a recovery invoice must not reactivate service before payment approval");
+    let recovery_order_id = recovery_order["id"].as_str().unwrap();
+    let (status, _) = send(&t.app, req("POST", &format!("/api/billing/orders/{recovery_order_id}/cancel"), Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK);
+
     // Issued invoices remain part of the audit trail even when rejected/cancelled; their invoice status becomes void.
     let (status, invoices) = send(
         &t.app,
@@ -1167,7 +1213,7 @@ async fn billing_manual_payment_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         invoices["invoices"].as_array().unwrap().len(),
-        3,
+        4,
         "paid and void issued invoices remain visible"
     );
 

@@ -678,9 +678,57 @@ export type AdminDiagnostics = {
   queueTotal: number
   automationErrors: number
   addressSyncErrors: number
+  billingOperations?: {
+    purgeEligible: number
+    purgeRunning: number
+    purgeFailed: number
+    provisioningDead: number
+    lifecycleEmailFailed: number
+    providerStaleMailboxes: number
+  }
   provisioning: { status: string; count: number }[]
 }
 
+
+export type LaunchReadiness = {
+  status: 'ready' | 'attention' | 'blocked'
+  evaluatedAt: string
+  blockers: { code: string; message: string }[]
+  warnings: { code: string; message: string }[]
+  checks: {
+    runtimeProfile: string
+    releaseSha256: string
+    mailProviderHealthy: boolean
+    billingInstantActivation: boolean
+    migrationHead: number | null
+    platformControls: {
+      publicSignup: boolean
+      businessCreation: boolean
+      planOrdering: boolean
+      domainOnboarding: boolean
+      mailboxProvisioning: boolean
+      outboundSending: boolean
+    }
+    operational: {
+      provisioningDead: number
+      lifecycleEmailFailed: number
+      invoiceEmailFailed: number
+      purgeFailed: number
+      purgeRunning: number
+      providerStaleMailboxes: number
+      subscriptionsMissingPlanVersion: number
+      storageOverallocated: number
+      agingPaymentReviews: number
+    }
+    latestCertification: { status: string; at: string; mandatoryPassed: number; mandatoryFailed: number; releaseSha256: string } | null
+    operationalEvidence: {
+      localBackup: { at: string; releaseSha256: string } | null
+      restoreDrill: { at: string; releaseSha256: string } | null
+      csMailOffsiteBackup: { at: string; releaseSha256: string } | null
+      stalwartOffsiteBackup: { at: string; releaseSha256: string } | null
+    }
+  }
+}
 export type LaunchCertification = {
   id: string
   release_label: string
@@ -991,6 +1039,10 @@ export const remoteAdminApi = {
 
   async diagnostics(): Promise<AdminDiagnostics> {
     return await apiFetch<AdminDiagnostics>('/api/admin/diagnostics')
+  },
+
+  async launchReadiness(): Promise<LaunchReadiness> {
+    return await apiFetch<LaunchReadiness>('/api/admin/launch-readiness')
   },
 
   async launchCertifications(): Promise<LaunchCertification[]> {

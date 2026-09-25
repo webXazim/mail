@@ -26,3 +26,18 @@ printf 'Public API readiness: '
 if curl -fsS "${CS_MAIL_PUBLIC_ORIGIN}/api/health/ready" >/dev/null; then echo PASS; else echo FAIL; fi
 printf 'Local admin listener: '
 if curl -fsS -H 'Host: localhost' "http://127.0.0.1:${CS_MAIL_ADMIN_HOST_PORT:-18081}/login" >/dev/null; then echo PASS; else echo FAIL; fi
+
+
+printf 'Backup timer: '
+if systemctl is-active --quiet cs-mail-backup.timer 2>/dev/null; then echo PASS; else echo FAIL; fi
+
+printf '\nRecoverability evidence:\n'
+if docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+    psql -U "${POSTGRES_USER:-csmail}" -d "${POSTGRES_DB:-csmail}" -tAc \
+    "SELECT to_regclass('public.operational_evidence') IS NOT NULL" 2>/dev/null | grep -qx t; then
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+    psql -U "${POSTGRES_USER:-csmail}" -d "${POSTGRES_DB:-csmail}" -P pager=off -c \
+    "SELECT DISTINCT ON (kind) kind,status,recorded_at,round(extract(epoch FROM (now()-recorded_at))/3600.0,1) AS age_hours,left(release_sha256,12) AS release FROM operational_evidence ORDER BY kind,recorded_at DESC" || true
+else
+  echo 'operational_evidence table unavailable (migration 0048 not applied or database unreachable)'
+fi

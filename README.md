@@ -66,6 +66,9 @@ sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/backup.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
 sudo ./deploy/production/certify-launch.sh /opt/cs-mail/.env.production /opt/cs-mail/.env.certification
+sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
+sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
+sh manage launch-freeze
 ```
 
 Rollback is intentionally explicit because database migrations are forward-only:
@@ -79,14 +82,26 @@ See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/P
 ## Platform state
 
 API contract: **v32**  
-Migration head: **0043_mailbox_reconciliation_timestamp.sql**
+Migration head: **0048_launch_freeze_operational_evidence.sql**
 
 The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. The public Nginx vhost returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI only through an SSH tunnel to `127.0.0.1:18081`.
 
-Acceptance testing currently keeps:
+Production always keeps:
 
 ```env
-CS_MAIL_BILLING_INSTANT_ACTIVATION=true
+CS_MAIL_ENVIRONMENT=production
+CS_MAIL_BILLING_INSTANT_ACTIVATION=false
 ```
 
-Switch it to `false` before real payment-gated public activation.
+The API refuses to start in the production profile if instant billing activation
+is enabled. Bootstrap/instant-activation tests belong only in an isolated
+non-production environment.
+
+### Billing recovery operations
+
+Upgrade 03 adds an operator-visible billing lifecycle health surface, durable retained-data purge runs, explicit exact-name purge confirmation, retry/reconciliation controls, and launch diagnostics for provider/billing drift. Retention expiry is deliberately non-destructive: mailbox/provider data is only purged after the configured retention deadline and a platform administrator explicitly confirms the operation. See `UPGRADE_03_RECOVERY_OPERATIONS.md`.
+
+
+## Latest production hardening
+
+See `UPGRADE_05_PUBLIC_LAUNCH_FREEZE.md` for the final public-launch freeze: exact-release runtime identity, strict production configuration, append-only backup/restore/offsite evidence, blocking quality gates and the closed-controls opening sequence. `UPGRADE_04_PRODUCTION_LAUNCH_VERIFICATION.md` documents the preceding readiness/monitoring layer.

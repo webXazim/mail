@@ -155,6 +155,15 @@ systemctl status cs-mail-backup.timer
 sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
 ```
 
+After the independent encrypted offsite jobs succeed, record their root-owned proof manifests:
+
+```bash
+sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
+sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
+```
+
+The proof command does not copy data. It writes append-only evidence used by launch readiness and alerts. Before first public opening, keep all public controls closed and run `sh manage launch-freeze`.
+
 Database migrations are forward-only. Review compatibility before:
 
 ```bash
@@ -172,5 +181,4 @@ sudo ./deploy/production/certify-launch.sh \
   /opt/cs-mail/.env.certification
 ```
 
-Keep `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` for production. Enable it only
-temporarily for isolated acceptance testing.
+Keep `CS_MAIL_ENVIRONMENT=production` and `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` on the public VPS. The API rejects production startup with the billing bypass enabled; run bypass/bootstrap tests only in an isolated non-production environment.

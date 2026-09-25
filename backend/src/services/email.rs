@@ -383,3 +383,38 @@ pub async fn send_billing_document(
     };
     submit_system_mail(state, &outgoing).await
 }
+
+
+/// Deliver a subscription lifecycle notice. The database lifecycle state is
+/// authoritative; this message is informational and safe to retry.
+pub async fn send_subscription_notice(
+    state: &AppState,
+    target_email: &str,
+    organization_name: &str,
+    kind: &str,
+    current_period_end: Option<chrono::DateTime<chrono::Utc>>,
+    renewal_grace_end: Option<chrono::DateTime<chrono::Utc>>,
+    data_retention_until: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<(), ApiError> {
+    let billing_url=format!("{}/mail/billing",state.public_origin);
+    let date=|value:Option<chrono::DateTime<chrono::Utc>>| value.map(|v|v.format("%Y-%m-%d").to_string()).unwrap_or_else(||"—".into());
+    let (subject,body)=match kind {
+        "renewal_reminder" => ("CS Mail renewal reminder".to_string(),format!("Your CS Mail subscription for {organization_name} is due to renew on {}. Open Billing to review the plan and create the renewal invoice.\n\n{billing_url}",date(current_period_end))),
+        "past_due" => ("CS Mail renewal is now due".to_string(),format!("The paid term for {organization_name} has ended. Existing mail access remains available during the renewal grace period. Renew before {} to avoid suspension.\n\n{billing_url}",date(renewal_grace_end))),
+        "suspension_warning" => ("CS Mail suspension warning".to_string(),format!("The renewal grace period for {organization_name} ends on {}. Mail access will be suspended if renewal is not completed.\n\n{billing_url}",date(renewal_grace_end))),
+        "suspended" => ("CS Mail subscription suspended".to_string(),format!("Mail access for {organization_name} is suspended because renewal was not completed. Your mailbox data is retained until {} and can be restored by renewing before that date.\n\n{billing_url}",date(data_retention_until))),
+        "retention_warning" => ("CS Mail data-retention deadline approaching".to_string(),format!("Mailbox data for {organization_name} is retained until {}. Renew before the retention deadline to restore access and prevent the account from becoming purge-eligible.\n\n{billing_url}",date(data_retention_until))),
+        "cancelled" => ("CS Mail subscription ended".to_string(),format!("The scheduled cancellation for {organization_name} is now effective. Mail access is disabled and mailbox data is retained until {}.\n\n{billing_url}",date(data_retention_until))),
+        "reactivated" => ("CS Mail subscription reactivated".to_string(),format!("Your CS Mail subscription for {organization_name} is active again. Mailbox access is being restored.\n\n{billing_url}")),
+        _ => ("CS Mail billing update".to_string(),format!("There is an update to the CS Mail subscription for {organization_name}.\n\n{billing_url}")),
+    };
+    let from_email=format!("mailer@{}",state.stalwart.default_domain());
+    let outgoing=mime::Outgoing{
+        from:mime::Address{name:Some("CS Mail Billing".to_string()),email:from_email.clone()},
+        to:vec![mime::Address{name:None,email:target_email.to_string()}],cc:vec![],
+        reply_to:Some(mime::Address{name:Some("CS Mail Billing".to_string()),email:from_email.clone()}),
+        subject,body_text:body,body_html:None,attachments:vec![],in_reply_to:None,references:vec![],list_unsubscribe:None,
+        message_id_local:Uuid::new_v4().as_simple().to_string(),domain:state.stalwart.default_domain().to_string(),
+    };
+    submit_system_mail(state,&outgoing).await
+}

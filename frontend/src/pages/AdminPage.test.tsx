@@ -35,6 +35,7 @@ const mockRemoteAdminApi = vi.hoisted(() => ({
   cancelQueuedMessage: vi.fn(),
   diagnostics: vi.fn(),
   auditExport: vi.fn(),
+  launchReadiness: vi.fn(),
   launchCertifications: vi.fn(),
 }))
 
@@ -117,6 +118,24 @@ describe('AdminPage (remote mode)', () => {
     mockRemoteAdminApi.queue.mockResolvedValue({ messages: [], total: 0 })
     mockRemoteAdminApi.diagnostics.mockResolvedValue({
       database: true, mailProvider: true, queueTotal: 0, automationErrors: 0, addressSyncErrors: 0, provisioning: [],
+    })
+    mockRemoteAdminApi.launchReadiness.mockResolvedValue({
+      status: 'ready',
+      evaluatedAt: '2026-09-25T00:00:00Z',
+      blockers: [],
+      warnings: [],
+      checks: {
+        runtimeProfile: 'production', releaseSha256: 'a'.repeat(64), mailProviderHealthy: true, billingInstantActivation: false, migrationHead: 48,
+        platformControls: { publicSignup: false, businessCreation: false, planOrdering: false, domainOnboarding: false, mailboxProvisioning: false, outboundSending: false },
+        operational: { provisioningDead: 0, lifecycleEmailFailed: 0, invoiceEmailFailed: 0, purgeFailed: 0, purgeRunning: 0, providerStaleMailboxes: 0, subscriptionsMissingPlanVersion: 0, storageOverallocated: 0, agingPaymentReviews: 0 },
+        latestCertification: { status: 'passed', at: '2026-09-25T00:00:00Z', mandatoryPassed: 14, mandatoryFailed: 0, releaseSha256: 'a'.repeat(64) },
+        operationalEvidence: {
+          localBackup: { at: '2026-09-25T00:00:00Z', releaseSha256: 'a'.repeat(64) },
+          restoreDrill: { at: '2026-09-25T00:00:00Z', releaseSha256: 'a'.repeat(64) },
+          csMailOffsiteBackup: { at: '2026-09-25T00:00:00Z', releaseSha256: 'a'.repeat(64) },
+          stalwartOffsiteBackup: { at: '2026-09-25T00:00:00Z', releaseSha256: 'a'.repeat(64) },
+        },
+      },
     })
     mockRemoteAdminApi.launchCertifications.mockResolvedValue([])
   })

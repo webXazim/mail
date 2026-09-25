@@ -1,0 +1,2 @@
+import{n as e}from"./rolldown-runtime-CbXtAM7H.js";import{$t as t}from"./vendor-C9IL5T60.js";var n=e(t(),1),r=`(max-width: 700px)`;function i(){return typeof window<`u`&&typeof window.matchMedia==`function`}var a=e=>{if(!i())return()=>{};let t=window.matchMedia(r);return t.addEventListener(`change`,e),()=>t.removeEventListener(`change`,e)},o=()=>i()?window.matchMedia(r).matches:!1,s=()=>!1;function c(){return(0,n.useSyncExternalStore)(a,o,s)}export{c as t};
+//# sourceMappingURL=useIsMobile-CM7q5vcm.js.map

@@ -668,6 +668,7 @@ struct JobMailbox {
     mailbox_id: Uuid,
     organization_id: Uuid,
     organization_status: String,
+    subscription_status: String,
     address: String,
     local_part: String,
     provider_marker: String,
@@ -687,12 +688,18 @@ async fn resolve_job_mailbox(state: &AppState, job: &JobRow) -> Result<JobMailbo
         .mailbox_id
         .ok_or_else(|| JobFailure::permanent("Provisioning job is not bound to a hosted mailbox"))?;
     let mailbox = sqlx::query_as::<_, JobMailbox>(
-        "SELECT m.id AS mailbox_id, m.organization_id, o.status AS organization_status, m.address::text AS address,
-                m.local_part, m.provider_marker, d.provider_domain_id, d.status AS domain_status, d.is_system AS domain_is_system,
+        "SELECT m.id AS mailbox_id, m.organization_id, o.status AS organization_status,
+                CASE
+                  WHEN s.status IN ('active','trial') AND s.current_period_end IS NOT NULL AND s.current_period_end <= now() THEN 'past_due'
+                  WHEN s.status='past_due' AND s.renewal_grace_end IS NOT NULL AND s.renewal_grace_end <= now() THEN 'suspended'
+                  ELSE s.status
+                END AS subscription_status,
+                m.address::text AS address, m.local_part, m.provider_marker, d.provider_domain_id, d.status AS domain_status, d.is_system AS domain_is_system,
                 m.quota_bytes, m.status AS mailbox_status, m.provider_account_id,
                 m.user_id, u.status AS user_status, om.status AS membership_status
          FROM mailboxes m
          JOIN organizations o ON o.id=m.organization_id
+         JOIN organization_subscriptions s ON s.organization_id=m.organization_id
          JOIN organization_domains d ON d.id=m.domain_id AND d.organization_id=m.organization_id
          LEFT JOIN users u ON u.id=m.user_id
          LEFT JOIN organization_memberships om ON om.organization_id=m.organization_id AND om.user_id=m.user_id
@@ -1011,6 +1018,9 @@ async fn process_ensure(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     if mailbox.organization_status != "active" {
         return Err(JobFailure::transient("Hosted business is not active"));
     }
+    if !matches!(mailbox.subscription_status.as_str(), "active" | "trial" | "past_due") {
+        return Err(JobFailure::transient("Hosted business subscription does not allow mailbox provisioning"));
+    }
     if mailbox.domain_status != "active" {
         return Err(JobFailure::transient("Hosted domain is not active"));
     }
@@ -1033,6 +1043,7 @@ async fn process_ensure(state: &AppState, job: &JobRow) -> Result<(), JobFailure
         ).await.map_err(JobFailure::provider)?
     }.ok_or_else(|| JobFailure::transient("Mail provider did not return an account id"))?;
     let suspended = mailbox.organization_status != "active"
+        || !matches!(mailbox.subscription_status.as_str(), "active" | "trial" | "past_due")
         || mailbox.domain_status != "active"
         || mailbox.mailbox_status == "suspended"
         || mailbox.user_status.as_deref() == Some("suspended")
@@ -1125,6 +1136,7 @@ async fn process_access(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     }
     let account = resolve_owned_provider_account(state, &mailbox, job).await?;
     let suspended = mailbox.organization_status != "active"
+        || !matches!(mailbox.subscription_status.as_str(), "active" | "trial" | "past_due")
         || mailbox.domain_status != "active"
         || mailbox.mailbox_status == "suspended"
         || mailbox.user_status.as_deref() == Some("suspended")
@@ -1147,11 +1159,27 @@ async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure
             "Automatic deletion of protected system-domain provider accounts is disabled on the shared mail server",
         ));
     }
-    let account = resolve_owned_provider_account(state, &mailbox, job).await?;
-    {
-        let provider_domain_id = mailbox.provider_domain_id.as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| JobFailure::permanent("Hosted mailbox provider domain binding is missing"))?;
+    let provider_domain_id = mailbox.provider_domain_id.as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| JobFailure::permanent("Hosted mailbox provider domain binding is missing"))?;
+
+    // Deletion must be idempotent. If Stalwart already has no account for the
+    // exact tenant/domain/local-part ownership marker, the provider side is
+    // already in the desired state and we may safely finish the local tombstone.
+    // When an account does exist, still compare the stored id before deleting
+    // so a stale job can never destroy a different provider account.
+    let found = state.stalwart
+        .find_customer_account(provider_domain_id, &mailbox.local_part, &mailbox.provider_marker)
+        .await
+        .map_err(JobFailure::provider)?;
+    if let Some(account) = found {
+        let expected = mailbox.provider_account_id.clone().filter(|value| !value.is_empty())
+            .or_else(|| job.account_id.clone().filter(|value| !value.is_empty()));
+        if expected.is_some_and(|candidate| candidate != account) {
+            return Err(JobFailure::permanent(
+                "Stored provider account id no longer matches the mailbox ownership binding",
+            ));
+        }
         state
             .stalwart
             .destroy_customer_account(&account, provider_domain_id, &mailbox.local_part, &mailbox.provider_marker)
@@ -1354,15 +1382,16 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
     if !state.stalwart.enabled() {
         return Ok(());
     }
-    let rows: Vec<(Uuid, Uuid, String, String, String, Option<String>, bool, i64, i64, Option<String>)> = sqlx::query_as(
-        "SELECT COALESCE(m.user_id,o.created_by), m.id, m.address::text, m.local_part, m.provider_marker, d.provider_domain_id, d.is_system,
-                COALESCE(m.quota_override_bytes, s.mailbox_quota_override_bytes, p.mailbox_bytes)::bigint AS effective_quota,
+    let rows: Vec<(Uuid, Uuid, Uuid, String, String, String, Option<String>, bool, i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT COALESCE(m.user_id,o.created_by), m.organization_id, m.id, m.address::text, m.local_part, m.provider_marker, d.provider_domain_id, d.is_system,
+                COALESCE(m.quota_override_bytes, s.mailbox_quota_override_bytes, pv.mailbox_bytes, p.mailbox_bytes)::bigint AS effective_quota,
                 m.quota_bytes AS materialized_quota,
                 m.provider_account_id
          FROM mailboxes m
          JOIN organizations o ON o.id=m.organization_id AND o.status='active'
-         JOIN organization_subscriptions s ON s.organization_id=m.organization_id AND s.status IN ('active','trial')
+         JOIN organization_subscriptions s ON s.organization_id=m.organization_id
          JOIN plans p ON p.code=s.plan_code
+         LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
          JOIN organization_domains d ON d.id=m.domain_id AND d.status='active'
          WHERE m.deleted_at IS NULL AND m.status <> 'deleting'
            AND COALESCE(m.user_id,o.created_by) IS NOT NULL
@@ -1373,7 +1402,7 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
     .fetch_all(&state.db)
     .await?;
 
-    for (user_id, mailbox_id, email, local_part, provider_marker, provider_domain_id, domain_is_system, quota_bytes, materialized_quota, stored_account) in rows {
+    for (user_id, organization_id, mailbox_id, email, local_part, provider_marker, provider_domain_id, domain_is_system, quota_bytes, materialized_quota, stored_account) in rows {
         if quota_bytes != materialized_quota {
             sqlx::query("UPDATE mailboxes SET quota_bytes = $2, updated_at = now() WHERE id = $1")
                 .bind(mailbox_id)
@@ -1505,6 +1534,25 @@ async fn reconcile_users(state: &AppState) -> Result<(), sqlx::Error> {
                 .await?;
             }
         }
+
+        // Provider reconciliation also reasserts access authority. This closes
+        // drift caused by manual provider edits or a missed lifecycle job.
+        sqlx::query(
+            "INSERT INTO provisioning_jobs
+              (user_id,organization_id,mailbox_id,operation,target_email,account_id,status,max_attempts,dedupe_key)
+             VALUES($1,$2,$3,'set_access',$4,$5,'pending',8,'mailbox.access:'||$3::text)
+             ON CONFLICT(dedupe_key) WHERE status IN('pending','retry') DO UPDATE SET
+               user_id=EXCLUDED.user_id,organization_id=EXCLUDED.organization_id,target_email=EXCLUDED.target_email,
+               account_id=COALESCE(EXCLUDED.account_id,provisioning_jobs.account_id),status='pending',attempts=0,
+               next_attempt_at=now(),last_error='',last_failure_transient=FALSE,completed_at=NULL,updated_at=now()",
+        )
+        .bind(user_id)
+        .bind(organization_id)
+        .bind(mailbox_id)
+        .bind(&email)
+        .bind(&account)
+        .execute(&state.db)
+        .await?;
         mark_mailbox_reconciled(&state.db, mailbox_id).await?;
     }
     Ok(())

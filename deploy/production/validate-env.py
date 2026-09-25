@@ -62,6 +62,11 @@ def main() -> int:
     if not mailer_key.startswith("cs_live_"):
         print("CS_MAILER_API_KEY must be a production sending key", file=sys.stderr); return 1
 
+    if values.get("CS_MAIL_ENVIRONMENT", "") != "production":
+        print("CS_MAIL_ENVIRONMENT must be production", file=sys.stderr); return 1
+    if values.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false").strip().lower() != "false":
+        print("CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production", file=sys.stderr); return 1
+
     if values.get("CS_MAIL_WEB_HOST", "mail.crescentsphere.com") != "mail.crescentsphere.com":
         print("CS_MAIL_WEB_HOST must be mail.crescentsphere.com", file=sys.stderr); return 1
     if values.get("CS_MAIL_CLIENT_HOST", "smtp.crescentsphere.com") != "smtp.crescentsphere.com":

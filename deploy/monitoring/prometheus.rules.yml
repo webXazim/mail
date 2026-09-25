@@ -121,3 +121,79 @@ groups:
         annotations:
           summary: "Mail suppressed (bounce/FBL)"
           description: "suppressed address drops at {{ $value | humanize }} /min — check suppression list + DSN ingests."
+
+  - name: cs_mail_billing_lifecycle
+    rules:
+      - alert: CSMailBillingRecoveryFailure
+        expr: cs_mail_billing_operational_issues{kind=~"provisioning_dead|lifecycle_email_failed|invoice_email_failed|purge_failed"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          gate: launch
+        annotations:
+          summary: "Billing/provider recovery failure: {{ $labels.kind }}"
+          description: "{{ $value }} durable {{ $labels.kind }} issue(s) require operator recovery before public launch or continued normal operation."
+          runbook: "deploy/monitoring/RUNBOOK.md#billing-lifecycle"
+
+      - alert: CSMailProviderReconciliationStale
+        expr: cs_mail_billing_operational_issues{kind="provider_stale_mailboxes"} > 0
+        for: 15m
+        labels:
+          severity: warning
+          gate: launch
+        annotations:
+          summary: "Mailbox provider reconciliation is stale"
+          description: "{{ $value }} mailbox(es) have not reconciled provider state within the expected 30-minute window."
+          runbook: "deploy/monitoring/RUNBOOK.md#billing-lifecycle"
+
+      - alert: CSMailPaymentReviewAging
+        expr: cs_mail_billing_operational_issues{kind="payment_review_aging"} > 0
+        for: 30m
+        labels:
+          severity: warning
+          gate: launch
+        annotations:
+          summary: "Manual payment reviews are aging"
+          description: "{{ $value }} submitted invoice(s) have waited more than 48 hours for operator review."
+          runbook: "deploy/monitoring/RUNBOOK.md#billing-lifecycle"
+
+  - name: cs_mail_recoverability
+    rules:
+      - alert: CSMailLocalBackupStale
+        expr: |
+          cs_mail_operational_evidence_age_seconds{kind="local_backup"} < 0
+          or cs_mail_operational_evidence_age_seconds{kind="local_backup"} > 93600
+        for: 5m
+        labels:
+          severity: critical
+          gate: launch
+        annotations:
+          summary: "CS Mail local backup evidence is missing or stale"
+          description: "Latest successful local database + attachment backup evidence is missing or older than 26 hours."
+          runbook: "deploy/monitoring/RUNBOOK.md#recoverability"
+
+      - alert: CSMailRestoreDrillStale
+        expr: |
+          cs_mail_operational_evidence_age_seconds{kind="restore_drill"} < 0
+          or cs_mail_operational_evidence_age_seconds{kind="restore_drill"} > 604800
+        for: 5m
+        labels:
+          severity: warning
+          gate: launch
+        annotations:
+          summary: "CS Mail restore drill evidence is missing or stale"
+          description: "No successful isolated restore drill has been recorded within seven days."
+          runbook: "deploy/monitoring/RUNBOOK.md#recoverability"
+
+      - alert: CSMailOffsiteBackupStale
+        expr: |
+          cs_mail_operational_evidence_age_seconds{kind=~"cs_mail_offsite_backup|stalwart_offsite_backup"} < 0
+          or cs_mail_operational_evidence_age_seconds{kind=~"cs_mail_offsite_backup|stalwart_offsite_backup"} > 93600
+        for: 5m
+        labels:
+          severity: critical
+          gate: launch
+        annotations:
+          summary: "Offsite backup proof is missing or stale: {{ $labels.kind }}"
+          description: "Offsite recoverability evidence for {{ $labels.kind }} is missing or older than 26 hours."
+          runbook: "deploy/monitoring/RUNBOOK.md#recoverability"

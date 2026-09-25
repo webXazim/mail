@@ -1,0 +1,2 @@
+import{zt as e}from"./vendor-C9IL5T60.js";var t=e();function n({className:e=``,logoClassName:n=`brand-logo`,showName:r=!0}){return(0,t.jsxs)(`span`,{className:`brand-identity ${e}`.trim(),children:[(0,t.jsx)(`img`,{className:n,src:`/cs-mail-logo.png`,alt:``,"aria-hidden":`true`}),r&&(0,t.jsx)(`span`,{className:`brand-name`,children:`CS Mail`})]})}export{n as t};
+//# sourceMappingURL=BrandIdentity-CZVxOc6h.js.map

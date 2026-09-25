@@ -29,6 +29,7 @@ import {
   ssoProviders,
   type AdminDiagnostics,
   type LaunchCertification,
+  type LaunchReadiness,
   type AdminQueueMessage,
   type Alias,
   type AuditEntry,
@@ -123,6 +124,7 @@ export function AdminPage() {
   const [queue, setQueue] = useState<AdminQueueMessage[]>([])
   const [queueTotal, setQueueTotal] = useState(0)
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null)
+  const [launchReadiness, setLaunchReadiness] = useState<LaunchReadiness | null>(null)
   const [launchCertifications, setLaunchCertifications] = useState<LaunchCertification[]>([])
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([])
   const [selectedSupport, setSelectedSupport] = useState<{ ticket: SupportTicket; messages: SupportMessage[] } | null>(null)
@@ -187,6 +189,10 @@ export function AdminPage() {
       .diagnostics()
       .then(setDiagnostics)
       .catch((error: Error) => showNotice(error.message || 'Failed to load diagnostics'))
+    void remoteAdminApi
+      .launchReadiness()
+      .then(setLaunchReadiness)
+      .catch((error: Error) => showNotice(error.message || 'Failed to load launch readiness'))
     void remoteAdminApi
       .launchCertifications()
       .then(setLaunchCertifications)
@@ -1833,6 +1839,22 @@ export function AdminPage() {
             </div>
           </section>
           <section className="settings-section">
+            <div className="admin-page-head">
+              <div>
+                <h2>Billing lifecycle health</h2>
+                <p className="settings-hint">Recovery, retained-data and provider reconciliation signals that should be clear before public launch.</p>
+              </div>
+            </div>
+            <div className="admin-stats">
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.purgeEligible ?? 0}</strong><small>Awaiting purge decision</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.purgeRunning ?? 0}</strong><small>Purge operations running</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.purgeFailed ?? 0}</strong><small>Purge operations failed</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.provisioningDead ?? 0}</strong><small>Dead provider jobs</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.lifecycleEmailFailed ?? 0}</strong><small>Failed lifecycle notices</small></div>
+              <div className="admin-stat"><strong>{diagnostics?.billingOperations?.providerStaleMailboxes ?? 0}</strong><small>Stale provider reconciliation</small></div>
+            </div>
+          </section>
+          <section className="settings-section">
             <h2>Provisioning jobs</h2>
             {(diagnostics?.provisioning ?? []).map((item) => (
               <div className="billing-row" key={item.status}>
@@ -1841,6 +1863,57 @@ export function AdminPage() {
               </div>
             ))}
             {(diagnostics?.provisioning ?? []).length === 0 && <p className="settings-hint">No provisioning jobs are currently recorded.</p>}
+          </section>
+          <section className="settings-section">
+            <div className="admin-page-head">
+              <div>
+                <h2>Public launch readiness</h2>
+                <p className="settings-hint">Live release blockers from billing, storage, provider reconciliation, exact-release certification, and recoverability evidence.</p>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => void remoteAdminApi.launchReadiness().then(setLaunchReadiness).catch((error: Error) => showNotice(error.message || 'Failed to refresh launch readiness'))}>
+                <RefreshCw size={14} />
+                Re-check
+              </button>
+            </div>
+            <div className="admin-stats">
+              <div className="admin-stat"><strong>{launchReadiness?.status?.toUpperCase() ?? 'CHECK'}</strong><small>Launch state</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.blockers.length ?? 0}</strong><small>Blocking issues</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.warnings.length ?? 0}</strong><small>Warnings</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.checks.migrationHead ?? '—'}</strong><small>Migration head</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.checks.mailProviderHealthy ? 'Healthy' : 'Check'}</strong><small>Provider</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.checks.billingInstantActivation ? 'ON' : 'Off'}</strong><small>Test activation</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.checks.runtimeProfile ?? '—'}</strong><small>Runtime profile</small></div>
+              <div className="admin-stat"><strong>{launchReadiness?.checks.releaseSha256 ? `${launchReadiness.checks.releaseSha256.slice(0, 12)}…` : '—'}</strong><small>Running release</small></div>
+            </div>
+            <div className="billing-list">
+              {[
+                ['Local backup', launchReadiness?.checks.operationalEvidence?.localBackup],
+                ['Restore drill', launchReadiness?.checks.operationalEvidence?.restoreDrill],
+                ['CS Mail offsite backup', launchReadiness?.checks.operationalEvidence?.csMailOffsiteBackup],
+                ['Shared Stalwart offsite backup', launchReadiness?.checks.operationalEvidence?.stalwartOffsiteBackup],
+              ].map(([label, evidence]) => {
+                const item = evidence as { at: string; releaseSha256: string } | null | undefined
+                return (
+                  <div className="billing-row" key={String(label)}>
+                    <div><strong>{String(label)}</strong><small>{item ? `Recorded ${timeFmt(item.at)}${item.releaseSha256 ? ` · release ${item.releaseSha256.slice(0, 12)}…` : ''}` : 'No successful evidence recorded'}</small></div>
+                    <span>{item ? 'Recorded' : 'Missing'}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {(launchReadiness?.blockers ?? []).map((item) => (
+              <div className="billing-row" key={`blocker-${item.code}`}>
+                <div><strong>BLOCKER · {item.code.replaceAll('_', ' ')}</strong><small>{item.message}</small></div>
+                <span>Fix</span>
+              </div>
+            ))}
+            {(launchReadiness?.warnings ?? []).map((item) => (
+              <div className="billing-row" key={`warning-${item.code}`}>
+                <div><strong>WARNING · {item.code.replaceAll('_', ' ')}</strong><small>{item.message}</small></div>
+                <span>Review</span>
+              </div>
+            ))}
+            {launchReadiness?.status === 'ready' && <p className="settings-hint">The running release, recoverability evidence, billing/provider state and launch certification are current. Public controls can now be opened deliberately from the control plane.</p>}
           </section>
           <section className="settings-section">
             <div className="admin-page-head">

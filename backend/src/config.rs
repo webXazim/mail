@@ -11,6 +11,10 @@ use crate::services::smtp::SmtpConfig;
 #[derive(Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
+    /// Runtime profile. Production enables additional fail-closed startup checks.
+    pub environment: String,
+    /// Immutable source digest injected by the guarded deploy pipeline.
+    pub release_sha256: String,
     pub public_origin: String,
     pub cors_origins: Vec<String>,
     pub database_url: String,
@@ -108,8 +112,8 @@ pub struct Config {
     pub attachment_consumed_grace_secs: u64,
     /// Cleanup worker cadence.
     pub attachment_cleanup_secs: u64,
-    /// Testing switch: when true, placing an order activates the selected plan immediately
-    /// while the invoice remains due for manual payment. Disable before real paid launch.
+    /// Non-production testing switch: when true, placing an order activates the selected
+    /// plan immediately while the invoice remains due. Production startup rejects this.
     pub billing_instant_activation: bool,
     /// SMTP endpoint used for outgoing mail (internal relay `mail:25` in dev).
     pub smtp: SmtpConfig,
@@ -130,10 +134,29 @@ fn env_non_empty_or(key: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+fn env_bool(key: &str, default: bool) -> anyhow::Result<bool> {
+    match std::env::var(key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok(true),
+            "false" | "0" | "no" | "off" => Ok(false),
+            _ => Err(anyhow::anyhow!(
+                "{key} must be a boolean (true/false, 1/0, yes/no, on/off)"
+            )),
+        },
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(error) => Err(anyhow::anyhow!("Unable to read {key}: {error}")),
+    }
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         dotenv().ok();
 
+        let environment = env_non_empty_or("CS_MAIL_ENVIRONMENT", "development").to_ascii_lowercase();
+        if !matches!(environment.as_str(), "development" | "test" | "production") {
+            return Err(anyhow::anyhow!("CS_MAIL_ENVIRONMENT must be development, test, or production"));
+        }
+        let release_sha256 = env_non_empty_or("CS_MAIL_RELEASE_SHA256", "unknown").to_ascii_lowercase();
         let public_origin = env_or("CS_MAIL_PUBLIC_ORIGIN", "http://localhost:5174");
         let cors_origins: Vec<String> = env_or("CS_MAIL_CORS_ORIGINS", "")
             .split(',')
@@ -223,6 +246,8 @@ impl Config {
 
         Ok(Config {
             listen_addr: env_or("CS_MAIL_LISTEN_ADDR", "0.0.0.0:8080").parse()?,
+            environment,
+            release_sha256,
             public_origin,
             cors_origins,
             database_url,
@@ -235,15 +260,9 @@ impl Config {
             realtime_lease_secs: env_or("CS_MAIL_REALTIME_LEASE_SECS", "60").parse().unwrap_or(60),
             realtime_batch_size: env_or("CS_MAIL_REALTIME_BATCH_SIZE", "20").parse().unwrap_or(20),
             realtime_event_retention_secs: env_or("CS_MAIL_REALTIME_EVENT_RETENTION_SECS", "604800").parse().unwrap_or(604800),
-            require_verification: env_or("CS_MAIL_REQUIRE_VERIFICATION", "true")
-                .parse()
-                .unwrap_or(true),
-            return_token_links: env_or("CS_MAIL_DEV_RETURN_TOKEN_LINKS", "false")
-                .parse()
-                .unwrap_or(false),
-            cookie_secure: env_or("CS_MAIL_COOKIE_SECURE", "false")
-                .parse()
-                .unwrap_or(false),
+            require_verification: env_bool("CS_MAIL_REQUIRE_VERIFICATION", true)?,
+            return_token_links: env_bool("CS_MAIL_DEV_RETURN_TOKEN_LINKS", false)?,
+            cookie_secure: env_bool("CS_MAIL_COOKIE_SECURE", false)?,
             trusted_proxy_ips,
             mail_admin_url: env_or("CS_MAIL_MAIL_ADMIN_URL", "").trim().to_string(),
             mail_admin_username: env_or("CS_MAIL_MAIL_ADMIN_USERNAME", "admin"),
@@ -351,11 +370,61 @@ impl Config {
             attachment_cleanup_secs: env_or("CS_MAIL_ATTACHMENT_CLEANUP_SECS", "900")
                 .parse()
                 .unwrap_or(900),
-            billing_instant_activation: env_or("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false")
-                .parse()
-                .unwrap_or(true),
+            // Billing bypasses must fail closed. A typo in production must
+            // never turn an unpaid order into an active subscription.
+            billing_instant_activation: env_bool("CS_MAIL_BILLING_INSTANT_ACTIVATION", false)?,
             smtp: SmtpConfig::from_env(),
             log_format: env_or("CS_MAIL_LOG_FORMAT", "text").trim().to_string(),
-        })
+        };
+
+        config.validate_runtime_profile()?;
+        Ok(config)
+    }
+
+    fn validate_runtime_profile(&self) -> anyhow::Result<()> {
+        if self.environment != "production" {
+            return Ok(());
+        }
+
+        if self.release_sha256.len() != 64 || !self.release_sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(anyhow::anyhow!(
+                "CS_MAIL_RELEASE_SHA256 must be the 64-character deployed source digest in production; use deploy/production/deploy.sh"
+            ));
+        }
+        if !self.public_origin.starts_with("https://") {
+            return Err(anyhow::anyhow!("CS_MAIL_PUBLIC_ORIGIN must use HTTPS in production"));
+        }
+        if !self.cookie_secure {
+            return Err(anyhow::anyhow!("CS_MAIL_COOKIE_SECURE must be true in production"));
+        }
+        if !self.require_verification {
+            return Err(anyhow::anyhow!("CS_MAIL_REQUIRE_VERIFICATION must be true in production"));
+        }
+        if self.return_token_links {
+            return Err(anyhow::anyhow!("CS_MAIL_DEV_RETURN_TOKEN_LINKS must be false in production"));
+        }
+        if self.billing_instant_activation {
+            return Err(anyhow::anyhow!(
+                "CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production; unpaid orders cannot activate a public subscription"
+            ));
+        }
+        if self.provider_namespace != "cs-mail" {
+            return Err(anyhow::anyhow!("CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail in production"));
+        }
+        if self.mail_admin_url.trim().is_empty() || self.mail_admin_token.as_deref().unwrap_or("").trim().is_empty() {
+            return Err(anyhow::anyhow!("Stalwart management URL and least-privilege token are required in production"));
+        }
+        if self.mail_jmap_username.trim().is_empty() || self.mail_jmap_secret.trim().is_empty() {
+            return Err(anyhow::anyhow!("Stalwart JMAP service credentials are required in production"));
+        }
+        if self.smtp.port != 465 || self.smtp.username.trim().is_empty() || self.smtp.password.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "production SMTP relay requires authenticated verified implicit TLS on port 465"
+            ));
+        }
+        if self.cors_origins.iter().any(|origin| origin == "*" || !origin.starts_with("https://")) {
+            return Err(anyhow::anyhow!("production CORS origins must be explicit HTTPS origins"));
+        }
+        Ok(())
     }
 }

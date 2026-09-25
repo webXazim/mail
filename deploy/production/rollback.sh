@@ -28,6 +28,7 @@ source "$TARGET_META"
 
 set -a; source "$ENV_FILE"; set +a
 export CS_MAIL_API_IMAGE
+export CS_MAIL_RELEASE_SHA256
 if [[ -e "$STATE/www/current" && ! -L "$STATE/www/current" ]]; then
   echo "$STATE/www/current exists but is not a symlink; refusing unsafe rollback" >&2
   exit 1

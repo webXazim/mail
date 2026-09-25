@@ -229,6 +229,7 @@ export function AdminControlPlanePage() {
 
       {tab === 'controls' && <section className="settings-section">
         <div className="admin-section-head"><div><h2>Emergency service controls</h2><small>Database-backed switches enforced by every API replica. Transactional account/billing email remains available when customer outbound mail is paused.</small></div></div>
+        <p className="settings-hint">For first public launch, keep every switch closed until <strong>Launch freeze</strong> passes. Then open in order: public signup → business creation → plan ordering → domain onboarding → mailbox provisioning → customer outbound sending, verifying alerts and one real customer flow between stages.</p>
         <div className="admin-toggle-grid">
           {([
             ['public_signup_enabled', 'Public signup', 'Allow new CS Mail platform accounts.'],

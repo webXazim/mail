@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Check, CreditCard, History, Landmark, Plus, Save, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, CreditCard, History, Landmark, Plus, RefreshCw, Save, Trash2, Wrench } from 'lucide-react'
 import {
   adminBillingApi,
   billingApi,
@@ -8,6 +8,7 @@ import {
   friendlyError,
   paymentMethodLabel,
   splitBytes,
+  type BillingOperations,
   type BillingSettingsRow,
   type BusinessSubscriptionRow,
   type OrderRow,
@@ -15,7 +16,7 @@ import {
   type SubscriptionHistoryRow,
 } from '../services/billing'
 
-type AdminTab = 'orders' | 'subscriptions' | 'plans' | 'settings'
+type AdminTab = 'orders' | 'subscriptions' | 'operations' | 'plans' | 'settings'
 
 const entitlementFeatures = [
   ['mail', 'Mailbox access'],
@@ -79,6 +80,7 @@ export function AdminBillingPage() {
     seller_legal_name: 'CrescentSphere', seller_email: 'billing@crescentsphere.com',
     seller_cr_number: '', seller_vat_number: '', seller_address: '',
     tax_rate_bps: 1500, invoice_due_days: 7, grace_days: 7,
+    retention_days: 30, renewal_reminder_days: 14, suspension_warning_days: 2,
   })
   const [filter, setFilter] = useState('queue')
   const [reviewId, setReviewId] = useState<string | null>(null)
@@ -87,6 +89,9 @@ export function AdminBillingPage() {
   const [planForm, setPlanForm] = useState<PlanView>(emptyPlan())
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [operations, setOperations] = useState<BillingOperations | null>(null)
+  const [purgeConfirm, setPurgeConfirm] = useState<Record<string, string>>({})
+  const [purgeReason, setPurgeReason] = useState<Record<string, string>>({})
 
   const reloadOrders = async () => {
     const next = await adminBillingApi.orders(filter)
@@ -94,6 +99,9 @@ export function AdminBillingPage() {
   }
   const reloadPlans = async () => {
     setPlans(await adminBillingApi.plans())
+  }
+  const reloadOperations = async () => {
+    setOperations(await adminBillingApi.operations())
   }
   const reloadSubscriptions = async (page = subscriptionPage) => {
     const result = await adminBillingApi.subscriptionsPage({
@@ -126,6 +134,11 @@ export function AdminBillingPage() {
       setSubscriptionPage(0)
     }
   }, [focusedBusinessId])
+
+  useEffect(() => {
+    if (tab === 'operations') void reloadOperations().catch((error) => showNotice(friendlyError(error)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -211,6 +224,45 @@ export function AdminBillingPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const reconcileSubscription = async (subscription: BusinessSubscriptionRow) => {
+    setBusy(true)
+    try {
+      const result = await adminBillingApi.reconcileSubscription(subscription.organization_id)
+      showNotice(`Provider reconciliation queued for ${result.mailboxes_queued} mailbox${result.mailboxes_queued === 1 ? '' : 'es'}.`)
+      await Promise.all([reloadSubscriptions(), reloadOperations().catch(() => undefined)])
+    } catch (error) { showNotice(friendlyError(error)) } finally { setBusy(false) }
+  }
+
+  const retrySubscriptionFailures = async (subscription: BusinessSubscriptionRow) => {
+    setBusy(true)
+    try {
+      const result = await adminBillingApi.retrySubscriptionFailures(subscription.organization_id)
+      showNotice(`Retries queued: ${result.provisioning} provider job(s), ${result.lifecycle_notices + result.invoice_emails} email job(s), ${result.business_addresses} address sync(s), ${result.purge_runs} purge run(s).`)
+      await Promise.all([reloadSubscriptions(), reloadOperations().catch(() => undefined)])
+    } catch (error) { showNotice(friendlyError(error)) } finally { setBusy(false) }
+  }
+
+  const purgeSubscriptionData = async (subscription: BusinessSubscriptionRow) => {
+    const confirmName = purgeConfirm[subscription.organization_id] ?? ''
+    const reason = purgeReason[subscription.organization_id] ?? ''
+    if (confirmName.trim() !== subscription.organization_name) {
+      showNotice('Enter the exact business name before purging retained data.')
+      return
+    }
+    if (reason.trim().length < 5) {
+      showNotice('Enter an operator reason for the retained-data purge.')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await adminBillingApi.purgeSubscriptionData(subscription.organization_id, confirmName, reason)
+      showNotice(`Purge ${result.purge_run_id} started for ${result.mailbox_count} mailbox${result.mailbox_count === 1 ? '' : 'es'}.`)
+      setPurgeConfirm((current) => ({ ...current, [subscription.organization_id]: '' }))
+      setPurgeReason((current) => ({ ...current, [subscription.organization_id]: '' }))
+      await Promise.all([reloadSubscriptions(), reloadOperations().catch(() => undefined)])
+    } catch (error) { showNotice(friendlyError(error)) } finally { setBusy(false) }
   }
 
   const startEdit = (plan: PlanView) => {
@@ -333,6 +385,15 @@ export function AdminBillingPage() {
         >
           <Landmark size={14} />
           Businesses
+        </button>
+        <button
+          type="button"
+          className={tab === 'operations' ? 'admin-nav--active' : ''}
+          aria-current={tab === 'operations' ? 'page' : undefined}
+          onClick={() => setTab('operations')}
+        >
+          <Wrench size={14} />
+          Operations
         </button>
         <button
           type="button"
@@ -517,6 +578,15 @@ export function AdminBillingPage() {
                     <small>
                       Storage {(subscription.usage.storage_bytes / 1073741824).toFixed(1)} GB used · {(subscription.storage_allocated_bytes / 1073741824).toFixed(1)} GB allocated / {(subscription.storage_pool_bytes / 1073741824).toFixed(1)} GB pool
                     </small>
+                    {(subscription.data_retention_until || subscription.data_purged_at) && <small>
+                      {subscription.data_purged_at
+                        ? `Previous retained mailbox data purged ${new Date(subscription.data_purged_at).toLocaleString()}`
+                        : `Retained until ${subscription.data_retention_until ? new Date(subscription.data_retention_until).toLocaleString() : '—'}${subscription.retention_expired_at ? ' · deadline reached' : ''}${subscription.purge_started_at ? ' · purge started' : ''}`}
+                    </small>}
+                    <small>
+                      Operations: {subscription.operations.pending_provisioning_jobs} queued · {subscription.operations.failed_provisioning_jobs} failed · {subscription.operations.provider_stale_mailboxes} stale provider check · {subscription.operations.failed_lifecycle_emails} failed lifecycle email
+                      {subscription.operations.purge_run_status ? ` · purge ${subscription.operations.purge_run_status}` : ''}
+                    </small>
                   </div>
                   <div className="admin-actions">
                     <span className={`business-badge business-badge--${subscription.status}`}>{subscription.status.replace('_', ' ')}</span>
@@ -596,7 +666,35 @@ export function AdminBillingPage() {
                   >
                     Extend {plan?.interval === 'month' ? '1 month' : '1 year'}
                   </button>
+                  <button type="button" className="secondary-button" disabled={busy || subscription.is_system} onClick={() => void reconcileSubscription(subscription)}>
+                    <RefreshCw size={13} /> Reconcile provider
+                  </button>
+                  <button type="button" className="secondary-button" disabled={busy || subscription.is_system || (subscription.operations.failed_provisioning_jobs + subscription.operations.failed_lifecycle_emails === 0 && subscription.operations.purge_run_status !== 'failed')} onClick={() => void retrySubscriptionFailures(subscription)}>
+                    Retry failures
+                  </button>
                 </div>
+                {!subscription.is_system && subscription.purge_eligible_at && new Date(subscription.purge_eligible_at) <= new Date() && !subscription.data_purged_at && (
+                  <div className="admin-purge-panel">
+                    <div>
+                      <strong><AlertTriangle size={14} /> Retained-data purge eligible</strong>
+                      <small>This is destructive. Billing, invoices and audit history remain, but hosted mailbox data and aliases/groups are removed from the mail provider.</small>
+                      {subscription.operations.purge_run_last_error && <small className="admin-error-text">{subscription.operations.purge_run_last_error}</small>}
+                    </div>
+                    {!subscription.operations.purge_run_status || subscription.operations.purge_run_status === 'completed' ? <>
+                      <label>
+                        Confirm business name
+                        <input value={purgeConfirm[subscription.organization_id] ?? ''} onChange={(event) => setPurgeConfirm((current) => ({ ...current, [subscription.organization_id]: event.target.value }))} placeholder={subscription.organization_name} />
+                      </label>
+                      <label>
+                        Operator reason
+                        <input value={purgeReason[subscription.organization_id] ?? ''} onChange={(event) => setPurgeReason((current) => ({ ...current, [subscription.organization_id]: event.target.value }))} placeholder="Retention period ended; purge approved" />
+                      </label>
+                      <button type="button" className="secondary-button admin-danger" disabled={busy || (purgeConfirm[subscription.organization_id] ?? '').trim() !== subscription.organization_name} onClick={() => void purgeSubscriptionData(subscription)}>
+                        Purge retained mail data
+                      </button>
+                    </> : <small>Purge run is {subscription.operations.purge_run_status}. Use Retry failures after correcting any provider error.</small>}
+                  </div>
+                )}
                 {openHistoryOrg === subscription.organization_id && (
                   <div className="admin-subscription-history">
                     <strong>Subscription history</strong>
@@ -624,6 +722,60 @@ export function AdminBillingPage() {
             </div>
           )}
           {subscriptions.length === 0 && <p className="settings-hint">No business subscriptions match these filters.</p>}
+        </section>
+      )}
+
+      {tab === 'operations' && (
+        <section className="settings-section">
+          <div className="admin-section-head">
+            <div>
+              <h2>Billing &amp; provider operations</h2>
+              <p className="settings-hint">Recovery authority for subscription lifecycle, provider reconciliation, failed billing notices and explicit retained-data purge. Retention expiry alone never deletes customer data.</p>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => void reloadOperations().catch((error) => showNotice(friendlyError(error)))}><RefreshCw size={13} /> Refresh</button>
+          </div>
+          {!operations && <p className="settings-hint">Loading operational state…</p>}
+          {operations && <>
+            <div className="billing-ops-grid">
+              <div><strong>{operations.counts.purge_eligible}</strong><small>Purge eligible</small></div>
+              <div><strong>{operations.counts.purge_running}</strong><small>Purge running</small></div>
+              <div><strong>{operations.counts.purge_failed}</strong><small>Purge failed</small></div>
+              <div><strong>{operations.counts.provisioning_dead}</strong><small>Dead provider jobs</small></div>
+              <div><strong>{operations.counts.lifecycle_email_failed + operations.counts.invoice_email_failed}</strong><small>Failed billing emails</small></div>
+              <div><strong>{operations.counts.provider_stale_mailboxes}</strong><small>Stale provider checks</small></div>
+            </div>
+
+            <div className="admin-ops-section">
+              <h3>Retention queue</h3>
+              {operations.purge_eligible.length === 0 ? <p className="settings-hint">No business is currently awaiting an explicit retained-data purge decision.</p> : operations.purge_eligible.map((item) => (
+                <div className="billing-row" key={item.organization_id}>
+                  <div><strong>{item.organization_name}</strong><small>{item.subscription_status.replace('_', ' ')} · {item.mailbox_count} mailboxes · {(item.storage_bytes / 1073741824).toFixed(1)} GB recorded usage · eligible {item.purge_eligible_at ? new Date(item.purge_eligible_at).toLocaleString() : '—'}</small></div>
+                  <button type="button" className="secondary-button" onClick={() => navigate(`/mail/admin/billing?business=${encodeURIComponent(item.organization_id)}`)}>Open business</button>
+                </div>
+              ))}
+            </div>
+
+            <div className="admin-ops-section">
+              <h3>Failed provider jobs</h3>
+              {operations.failed_provisioning_jobs.length === 0 ? <p className="settings-hint">No dead provider jobs.</p> : operations.failed_provisioning_jobs.map((job) => (
+                <div className="billing-row" key={job.id}><div><strong>{job.organization_name} · {job.operation}</strong><small>{job.target} · {job.attempts} attempts · {job.last_error || 'No error detail'}</small></div><button type="button" className="secondary-button" onClick={() => navigate(`/mail/admin/billing?business=${encodeURIComponent(job.organization_id)}`)}>Inspect</button></div>
+              ))}
+            </div>
+
+            <div className="admin-ops-section">
+              <h3>Failed lifecycle notices</h3>
+              {operations.failed_lifecycle_notices.length === 0 ? <p className="settings-hint">No failed lifecycle notices.</p> : operations.failed_lifecycle_notices.map((job) => (
+                <div className="billing-row" key={job.id}><div><strong>{job.organization_name} · {job.kind.replaceAll('_', ' ')}</strong><small>{job.recipient} · {job.attempts} attempts · {job.last_error || 'No error detail'}</small></div><button type="button" className="secondary-button" onClick={() => navigate(`/mail/admin/billing?business=${encodeURIComponent(job.organization_id)}`)}>Inspect</button></div>
+              ))}
+            </div>
+
+            <div className="admin-ops-section">
+              <h3>Recent purge runs</h3>
+              {operations.purge_runs.length === 0 ? <p className="settings-hint">No retained-data purge has been requested.</p> : operations.purge_runs.map((run) => (
+                <div className="billing-row" key={run.id}><div><strong>{run.organization_name} · {run.status}</strong><small>Mailboxes {run.completed_mailbox_count}/{run.mailbox_count} · addresses {run.completed_address_count}/{run.address_count}{run.last_error ? ` · ${run.last_error}` : ''}</small></div><button type="button" className="secondary-button" onClick={() => navigate(`/mail/admin/billing?business=${encodeURIComponent(run.organization_id)}`)}>Open</button></div>
+              ))}
+            </div>
+          </>}
         </section>
       )}
 
@@ -993,6 +1145,9 @@ export function AdminBillingPage() {
             <label>Tax rate (%)<input type="number" min="0" max="100" step="0.01" value={settings.tax_rate_bps / 100} onChange={(event) => setSettings((current) => ({ ...current, tax_rate_bps: Math.round(Number(event.target.value || 0) * 100) }))} /></label>
             <label>Invoice due days<input type="number" min="0" max="90" value={settings.invoice_due_days} onChange={(event) => setSettings((current) => ({ ...current, invoice_due_days: Number(event.target.value || 0) }))} /></label>
             <label>Grace days<input type="number" min="0" max="90" value={settings.grace_days} onChange={(event) => setSettings((current) => ({ ...current, grace_days: Number(event.target.value || 0) }))} /></label>
+            <label>Data retention days<input type="number" min="1" max="365" value={settings.retention_days} onChange={(event) => setSettings((current) => ({ ...current, retention_days: Number(event.target.value || 1) }))} /></label>
+            <label>Renewal reminder days<input type="number" min="1" max="90" value={settings.renewal_reminder_days} onChange={(event) => setSettings((current) => ({ ...current, renewal_reminder_days: Number(event.target.value || 1) }))} /></label>
+            <label>Suspension warning days<input type="number" min="0" max="30" value={settings.suspension_warning_days} onChange={(event) => setSettings((current) => ({ ...current, suspension_warning_days: Number(event.target.value || 0) }))} /></label>
           </div>
           <div className="row-actions">
             <button className="primary-button" disabled={busy}>

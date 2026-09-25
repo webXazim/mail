@@ -166,6 +166,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::patch(handlers::business_mailboxes::update_storage),
         )
         .route(
+            "/api/organizations/:organization_id/mailboxes/storage/distribute",
+            axum::routing::post(handlers::business_mailboxes::distribute_available_storage),
+        )
+        .route(
             "/api/organizations/:organization_id/mailboxes/:mailbox_id/retry",
             axum::routing::post(handlers::business_mailboxes::retry_provisioning),
         )
@@ -304,6 +308,7 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::delete(handlers::admin::cancel_queued_message),
         )
         .route("/api/admin/diagnostics", get(handlers::admin::diagnostics))
+        .route("/api/admin/launch-readiness", get(handlers::admin::launch_readiness))
         .route("/api/admin/launch-certifications", get(handlers::admin::launch_certifications))
         .route("/api/admin/support/tickets", get(handlers::support::admin_list))
         .route("/api/admin/support/tickets/:id", get(handlers::support::admin_get).patch(handlers::support::admin_update))
@@ -578,6 +583,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/billing/orders/:id/cancel",
             axum::routing::post(handlers::billing::cancel_order),
         )
+        .route("/api/billing/subscription/change", axum::routing::post(handlers::billing::schedule_subscription_change).delete(handlers::billing::cancel_subscription_change))
         .route("/api/billing/invoices", get(handlers::billing::invoices))
         .route("/api/billing/profile", get(handlers::billing::billing_profile).put(handlers::billing::update_billing_profile))
         // WS4 admin payment controls.
@@ -591,9 +597,13 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::patch(handlers::billing::admin_update_plan)
                 .delete(handlers::billing::admin_deactivate_plan),
         )
-                .route("/api/admin/subscriptions", get(handlers::billing::admin_subscriptions))
+        .route("/api/admin/subscriptions", get(handlers::billing::admin_subscriptions))
         .route("/api/admin/subscriptions/:organization_id", axum::routing::patch(handlers::billing::admin_update_subscription))
         .route("/api/admin/subscriptions/:organization_id/history", get(handlers::billing::admin_subscription_history))
+        .route("/api/admin/subscriptions/:organization_id/reconcile", axum::routing::post(handlers::billing::admin_reconcile_subscription))
+        .route("/api/admin/subscriptions/:organization_id/retry-failures", axum::routing::post(handlers::billing::admin_retry_subscription_failures))
+        .route("/api/admin/subscriptions/:organization_id/purge", axum::routing::post(handlers::billing::admin_purge_subscription_data))
+        .route("/api/admin/billing-operations", get(handlers::billing::admin_billing_operations))
         .route("/api/admin/orders", get(handlers::billing::admin_orders))
         .route(
             "/api/admin/orders/:id/approve",

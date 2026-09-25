@@ -82,6 +82,10 @@ pub const PLAN_COLUMNS: &str = "code, name, price_cents, extra_mailbox_price_cen
      storage_pool_bytes, mailbox_limit, max_mailboxes, alias_limit_per_mailbox, domain_limit, organization_daily_send_limit, \
      max_attachment_bytes, max_recipients, daily_send_limit, seats, features, feature_flags, active";
 
+const PLAN_VERSION_COLUMNS: &str = "plan_code AS code, name, price_cents, extra_mailbox_price_cents, currency, interval, mailbox_bytes, \
+     storage_pool_bytes, mailbox_limit, max_mailboxes, alias_limit_per_mailbox, domain_limit, organization_daily_send_limit, \
+     max_attachment_bytes, max_recipients, daily_send_limit, seats, features, feature_flags, TRUE AS active";
+
 #[derive(Clone, Debug)]
 pub struct UserEntitlements {
     pub organization_id: Uuid,
@@ -100,7 +104,10 @@ pub struct UserEntitlements {
 impl UserEntitlements {
     pub fn quota_is_overridden(&self) -> bool { self.quota_override_bytes.is_some() }
     pub fn allows(&self, feature: &str) -> bool {
-        matches!(self.subscription_status.as_str(), "active" | "trial")
+        // Past-due is the paid-renewal grace window: existing mail features
+        // remain available, while capacity-increasing operations stay blocked
+        // by `require_capacity` and their dedicated mutation guards.
+        matches!(self.subscription_status.as_str(), "active" | "trial" | "past_due")
             && self.plan.allows(feature)
     }
 }
@@ -141,6 +148,13 @@ pub async fn plan(state: &AppState, code: &str) -> Result<PlanLimits, ApiError> 
     row.map(PlanRow::into_limits).ok_or_else(|| ApiError::bad_request(format!("Unknown plan '{code}'")))
 }
 
+
+pub async fn plan_version(state: &AppState, version_id: Uuid) -> Result<PlanLimits, ApiError> {
+    let row: Option<PlanRow> = sqlx::query_as(&format!("SELECT {PLAN_VERSION_COLUMNS} FROM plan_versions WHERE id = $1"))
+        .bind(version_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    row.map(PlanRow::into_limits).ok_or_else(|| ApiError::bad_request("Subscription plan version is unavailable"))
+}
+
 pub async fn active_plan(state: &AppState, code: &str) -> Result<PlanLimits, ApiError> {
     let plan = plan(state, code).await?;
     if !plan.active { return Err(ApiError::bad_request("This plan is not available for new orders")); }
@@ -175,8 +189,8 @@ pub async fn active_organization_for_user(state: &AppState, user_id: Uuid) -> Re
 }
 
 pub async fn for_organization(state: &AppState, organization_id: Uuid) -> Result<UserEntitlements, ApiError> {
-    let row: Option<(String,String,Option<i64>,Option<i64>,Option<i32>,Option<i32>,Option<i32>,Option<i32>,i32)> = sqlx::query_as(
-        "SELECT s.plan_code,
+    let row: Option<(String,Option<Uuid>,String,Option<i64>,Option<i64>,Option<i32>,Option<i32>,Option<i32>,Option<i32>,i32)> = sqlx::query_as(
+        "SELECT s.plan_code,s.plan_version_id,
                 CASE
                   WHEN s.status IN ('active','trial') AND s.current_period_end IS NOT NULL AND s.current_period_end <= now() THEN 'past_due'
                   WHEN s.status='past_due' AND s.renewal_grace_end IS NOT NULL AND s.renewal_grace_end <= now() THEN 'suspended'
@@ -188,9 +202,9 @@ pub async fn for_organization(state: &AppState, organization_id: Uuid) -> Result
          FROM organization_subscriptions s JOIN organizations o ON o.id=s.organization_id
          WHERE s.organization_id=$1 AND o.status='active'"
     ).bind(organization_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let (code,status,mailbox_override,storage_override,seat_override,mailbox_limit_override,domain_override,org_send_override,purchased_mailboxes) =
+    let (code,version_id,status,mailbox_override,storage_override,seat_override,mailbox_limit_override,domain_override,org_send_override,purchased_mailboxes) =
         row.ok_or_else(|| ApiError::forbidden("Business subscription is not available"))?;
-    let plan = plan(state, &code).await?;
+    let plan = match version_id { Some(id) => plan_version(state, id).await?, None => plan(state, &code).await? };
     let purchased = purchased_mailboxes.max(plan.mailbox_limit);
     let scaled_storage = scaled_storage_pool(&plan, purchased);
     let scaled_send = plan.daily_send_limit.saturating_mul(purchased as i64);
@@ -215,8 +229,8 @@ pub async fn for_user(state: &AppState, user_id: Uuid) -> Result<UserEntitlement
 
 pub async fn require_feature(state: &AppState, user_id: Uuid, feature: &str) -> Result<UserEntitlements, ApiError> {
     let entitlements = for_user(state, user_id).await?;
-    if !matches!(entitlements.subscription_status.as_str(), "active" | "trial") {
-        return Err(ApiError::forbidden("This business subscription is not active"));
+    if !matches!(entitlements.subscription_status.as_str(), "active" | "trial" | "past_due") {
+        return Err(ApiError::forbidden("This business subscription is suspended. Renew the plan to restore mail access"));
     }
     if !entitlements.plan.allows(feature) {
         return Err(ApiError::forbidden(format!("The {feature} feature is not included in this business plan")));
@@ -245,8 +259,9 @@ pub async fn materialize_organization_quota_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, organization_id: Uuid,
 ) -> Result<i64, ApiError> {
     let effective: Option<i64> = sqlx::query_scalar(
-        "SELECT COALESCE(s.mailbox_quota_override_bytes,p.mailbox_bytes)::bigint
+        "SELECT COALESCE(s.mailbox_quota_override_bytes,pv.mailbox_bytes,p.mailbox_bytes)::bigint
          FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code
+         LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
          WHERE s.organization_id=$1"
     ).bind(organization_id).fetch_optional(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let effective = effective.ok_or_else(|| ApiError::not_found("Business subscription not found"))?;
@@ -255,32 +270,69 @@ pub async fn materialize_organization_quota_tx(
     Ok(effective)
 }
 
-/// Reserve the default storage allocation for a newly created mailbox. The
-/// subscription row lock serializes this with business-admin quota edits and
-/// the database trigger remains the final concurrency-safe pool guard.
-pub async fn default_mailbox_allocation_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, organization_id: Uuid,
+/// Reserve storage for a newly created mailbox. The subscription row lock
+/// serializes mailbox creation and storage edits, while the database trigger
+/// remains the final concurrency-safe pool guard. A caller may request a
+/// smaller/larger allocation instead of being forced to reserve the plan
+/// default when there is enough pooled storage for another mailbox.
+pub async fn mailbox_allocation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, organization_id: Uuid, requested_quota: Option<i64>,
 ) -> Result<i64, ApiError> {
-    let row: Option<(i64,i64)> = sqlx::query_as(
-        "SELECT COALESCE(s.mailbox_quota_override_bytes,p.mailbox_bytes)::bigint,
+    let row: Option<(i64,i64,i32,String)> = sqlx::query_as(
+        "SELECT COALESCE(s.mailbox_quota_override_bytes,pv.mailbox_bytes,p.mailbox_bytes)::bigint,
                 COALESCE(s.storage_pool_override_bytes,
-                         p.storage_pool_bytes::bigint +
-                         p.mailbox_bytes::bigint * GREATEST(s.purchased_mailbox_count-p.mailbox_limit,0)::bigint)::bigint
+                         COALESCE(pv.storage_pool_bytes,p.storage_pool_bytes)::bigint +
+                         COALESCE(pv.mailbox_bytes,p.mailbox_bytes)::bigint * GREATEST(s.purchased_mailbox_count-COALESCE(pv.mailbox_limit,p.mailbox_limit),0)::bigint)::bigint,
+                COALESCE(s.mailbox_limit_override,GREATEST(s.purchased_mailbox_count,COALESCE(pv.mailbox_limit,p.mailbox_limit)))::int,
+                CASE
+                  WHEN s.status IN ('active','trial') AND s.current_period_end IS NOT NULL AND s.current_period_end <= now() THEN 'past_due'
+                  WHEN s.status='past_due' AND s.renewal_grace_end IS NOT NULL AND s.renewal_grace_end <= now() THEN 'suspended'
+                  ELSE s.status
+                END
          FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code
+         LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
          WHERE s.organization_id=$1 FOR UPDATE OF s"
     ).bind(organization_id).fetch_optional(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let (default_quota,pool_bytes)=row.ok_or_else(|| ApiError::forbidden("Business subscription is not available"))?;
+    let (default_quota,pool_bytes,mailbox_limit,status)=row.ok_or_else(|| ApiError::forbidden("Business subscription is not available"))?;
+    if !matches!(status.as_str(), "active" | "trial") {
+        return Err(ApiError::forbidden("Renew the business plan before creating another mailbox"));
+    }
+    let mailbox_count: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND status <> 'deleted'"
+    ).bind(organization_id).fetch_one(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if mailbox_count >= mailbox_limit as i64 {
+        return Err(ApiError::forbidden(format!("This business has reached its mailbox limit ({mailbox_limit})")));
+    }
     let allocated: i64 = sqlx::query_scalar(
         "SELECT COALESCE(SUM(quota_bytes),0)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL"
     ).bind(organization_id).fetch_one(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let default_quota=default_quota.max(1_048_576);
+    let target=requested_quota.unwrap_or(default_quota);
+    if target < 1_048_576 {
+        return Err(ApiError::bad_request("Mailbox storage allocation must be at least 1 MiB"));
+    }
+    if target > pool_bytes {
+        return Err(ApiError::bad_request("A mailbox allocation cannot exceed the business storage pool"));
+    }
     let remaining=pool_bytes.saturating_sub(allocated);
-    if remaining < default_quota {
+    if remaining < target {
+        if requested_quota.is_some() {
+            return Err(ApiError::conflict(format!(
+                "The requested mailbox allocation is {target} bytes, but only {remaining} bytes remain in the business storage pool. Choose a smaller allocation or rebalance mailbox storage first"
+            )));
+        }
         return Err(ApiError::conflict(format!(
             "A new mailbox requires the default allocation of {default_quota} bytes, but only {remaining} bytes remain in the business storage pool. Rebalance mailbox storage first"
         )));
     }
-    Ok(default_quota)
+    Ok(target)
+}
+
+/// Compatibility wrapper used by older callers and deployment certification.
+pub async fn default_mailbox_allocation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, organization_id: Uuid,
+) -> Result<i64, ApiError> {
+    mailbox_allocation_tx(tx, organization_id, None).await
 }
 
 /// Legacy helper retained for old admin code. It now materializes the selected
@@ -328,7 +380,11 @@ pub async fn require_capacity(
 ) -> Result<(), ApiError> {
     let ent = for_organization(state, organization_id).await?;
     if !matches!(ent.subscription_status.as_str(), "active" | "trial") {
-        return Err(ApiError::forbidden("Activate a business plan before adding seats, domains, or mailboxes"));
+        return Err(ApiError::forbidden(if ent.subscription_status == "past_due" {
+            "Renew the business plan before adding seats, domains, or mailboxes"
+        } else {
+            "Activate a business plan before adding seats, domains, or mailboxes"
+        }));
     }
     let (used, limit, label): (i64, i64, &str) = match kind {
         CapacityKind::Seat => {
@@ -371,19 +427,30 @@ pub async fn validate_plan_change_capacity_with_mailboxes(
     mailbox_count: i32,
 ) -> Result<(), ApiError> {
     let p = plan(state, plan_code).await?;
+    validate_plan_change_capacity_with_limits(state, organization_id, &p, mailbox_count).await
+}
+
+pub async fn validate_plan_change_capacity_with_limits(
+    state: &AppState,
+    organization_id: Uuid,
+    p: &PlanLimits,
+    mailbox_count: i32,
+) -> Result<(), ApiError> {
     if mailbox_count < p.mailbox_limit || mailbox_count > p.max_mailboxes {
         return Err(ApiError::bad_request(format!(
             "Mailbox quantity must be between {} and {} for {}", p.mailbox_limit, p.max_mailboxes, p.name
         )));
     }
-    let counts: (i64,i64,i64,i64,i64) = sqlx::query_as(
+    let counts: (i64,i64,i64,i64,i64,i64,i64) = sqlx::query_as(
         "SELECT
           ((SELECT count(*) FROM organization_memberships WHERE organization_id=$1 AND status IN ('active','invited')) +
            (SELECT count(*) FROM organization_invitations WHERE organization_id=$1 AND status='pending'))::bigint,
           (SELECT count(*)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND status <> 'deleted'),
           (SELECT count(*)::bigint FROM organization_domains WHERE organization_id=$1 AND status <> 'removing'),
           COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$1),0)::bigint,
-          COALESCE((SELECT SUM(quota_bytes) FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL),0)::bigint"
+          COALESCE((SELECT SUM(quota_bytes) FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL),0)::bigint,
+          COALESCE((SELECT SUM(quota_bytes) FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND quota_override_bytes IS NOT NULL),0)::bigint,
+          (SELECT count(*)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND quota_override_bytes IS NULL)"
     ).bind(organization_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let effective_storage = scaled_storage_pool(&p, mailbox_count);
     if counts.0 > mailbox_count as i64 { return Err(ApiError::conflict("Choose enough mailboxes for the business members and pending invitations currently in use")); }
@@ -391,5 +458,11 @@ pub async fn validate_plan_change_capacity_with_mailboxes(
     if counts.2 > p.domain_limit as i64 { return Err(ApiError::conflict("The target plan has fewer domains than this business currently uses")); }
     if counts.3 > effective_storage { return Err(ApiError::conflict("The selected mailbox quantity provides less storage than this business currently uses")); }
     if counts.4 > effective_storage { return Err(ApiError::conflict("The selected plan provides less pooled storage than the business currently allocates to its mailboxes. Rebalance mailbox storage before changing plan")); }
+    let projected_allocation = counts.5.saturating_add(counts.6.saturating_mul(p.mailbox_bytes.min(i64::MAX as u64) as i64));
+    if projected_allocation > effective_storage {
+        return Err(ApiError::conflict(
+            "The target plan's default mailbox allocations plus custom allocations exceed its storage pool. Rebalance mailbox storage before changing plan"
+        ));
+    }
     Ok(())
 }

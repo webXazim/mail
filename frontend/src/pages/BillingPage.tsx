@@ -39,6 +39,23 @@ function instructionsFor(method: string, settings: BillingSummary['settings']): 
   }
 }
 
+const poolFor = (plan: PlanView, count: number) =>
+  plan.storage_pool_bytes + Math.max(0, count - plan.mailbox_limit) * plan.mailbox_bytes
+
+const formatBillingDate = (value: string | null) => value
+  ? new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+  : '—'
+
+const isReduction = (plan: PlanView, current: PlanView, currentCount: number, targetCount = Math.max(currentCount, plan.mailbox_limit)) => {
+  const count = Math.max(plan.mailbox_limit, targetCount)
+  return count < currentCount || count > plan.max_mailboxes || plan.price_cents < current.price_cents || plan.mailbox_bytes < current.mailbox_bytes
+    || poolFor(plan, count) < poolFor(current, currentCount)
+    || plan.domain_limit < current.domain_limit || plan.max_attachment_bytes < current.max_attachment_bytes
+    || plan.max_recipients < current.max_recipients || plan.organization_daily_send_limit < current.organization_daily_send_limit
+    || (current.alias_limit_per_mailbox == null ? plan.alias_limit_per_mailbox != null
+      : plan.alias_limit_per_mailbox != null && plan.alias_limit_per_mailbox < current.alias_limit_per_mailbox)
+}
+
 export function BillingPage() {
   const profile = useProfile()
   if (!profile?.active_organization?.id) return <PlanOnboardingPage />
@@ -69,11 +86,24 @@ function BusinessBillingPage() {
     setSummary(next)
     setBillingProfile(next.billing_profile)
     setPlans(active)
+    const purgeInProgress = Boolean(next.purge_started_at && !next.data_purged_at)
     if (next.subscription_status !== 'active' && next.subscription_status !== 'trial'
+      && !purgeInProgress
       && !next.orders.some((order) => order.invoice_status === 'issued' && (order.status === 'pending' || order.status === 'submitted'))) setOrdering(true)
     const defaultPlan = active[1] ?? active[0]
-    setChosenPlan((current) => active.some((plan) => plan.code === current) ? current : defaultPlan?.code || '')
-    setMailboxCount((current) => Math.max(current, next.mailbox_limit, defaultPlan?.mailbox_limit ?? 1))
+    const hasCurrentPlan = ['active', 'trial', 'past_due'].includes(next.subscription_status)
+      || (next.subscription_status === 'suspended' && next.assignment_source !== 'bootstrap')
+    const scheduledRenewal = next.scheduled_change?.status === 'ready_for_renewal'
+      ? active.find((plan) => plan.code === next.scheduled_change?.target_plan_code)
+      : undefined
+    const initialPlan = scheduledRenewal ?? (hasCurrentPlan ? next.current_plan : defaultPlan)
+    setChosenPlan((selected) => scheduledRenewal?.code
+      ?? (active.some((plan) => plan.code === selected) ? selected : (hasCurrentPlan ? next.current_plan.code : defaultPlan?.code || '')))
+    if (scheduledRenewal && next.scheduled_change?.target_mailbox_count) {
+      setMailboxCount(next.scheduled_change.target_mailbox_count)
+    } else {
+      setMailboxCount((current) => Math.max(current, next.mailbox_limit, next.usage.mailboxes, next.usage.seats, initialPlan?.mailbox_limit ?? 1))
+    }
     billingApi.refreshInvoices()
     await profileApi.refresh().catch(() => undefined)
   }
@@ -115,12 +145,18 @@ function BusinessBillingPage() {
 
   const current = summary.current_plan
   const planActive = summary.subscription_status === 'active' || summary.subscription_status === 'trial'
+  const hasCurrentPlan = planActive || summary.subscription_status === 'past_due'
+    || (summary.subscription_status === 'suspended' && summary.assignment_source !== 'bootstrap')
+  const mailAccessAvailable = planActive || summary.subscription_status === 'past_due'
+  const purgeInProgress = Boolean(summary.purge_started_at && !summary.data_purged_at)
   const openInvoice = summary.orders.find((order) => order.invoice_status === 'issued' && (order.status === 'pending' || order.status === 'submitted'))
   const storageTotal = summary.storage_pool_bytes || current.storage_pool_bytes || summary.quota_bytes || current.mailbox_bytes
   const storageAllocated = summary.storage_allocated_bytes ?? 0
+  const storageUsed = summary.storage_used_bytes ?? 0
   const storagePct = storageTotal > 0 ? Math.min(100, (storageAllocated / storageTotal) * 100) : 0
   const { value: storageValue, unit: storageUnit } = splitBytes(storageTotal)
   const selectedPlan = activePlans.find((plan) => plan.code === chosenPlan) ?? activePlans[0]
+  const selectedReduction = Boolean(planActive && selectedPlan && isReduction(selectedPlan, current, summary.mailbox_limit, mailboxCount))
   const selectedExtraCount = selectedPlan ? Math.max(0, mailboxCount - selectedPlan.mailbox_limit) : 0
   const selectedSubtotal = selectedPlan ? selectedPlan.price_cents + selectedExtraCount * selectedPlan.extra_mailbox_price_cents : 0
   const selectedTaxBps = summary.settings.seller_vat_number ? summary.settings.tax_rate_bps : 0
@@ -128,13 +164,22 @@ function BusinessBillingPage() {
 
   const placeOrder = async (event: FormEvent) => {
     event.preventDefault()
+    if (purgeInProgress) {
+      showNotice('Retained-data purge is in progress. Contact support before placing another plan order.')
+      return
+    }
     if (!chosenPlan || !method) return
     setBusy(true)
     try {
-      const order = await billingApi.createOrder(chosenPlan, mailboxCount, method, note.trim())
-      showNotice(order.activation_mode === 'test_instant'
-        ? `${order.plan_name} activated immediately for testing. Invoice ${order.invoice_number ?? ''} was issued and payment is still due.`
-        : `Invoice ${order.invoice_number ?? ''} issued. Pay it and submit the reference for activation.`)
+      if (selectedReduction) {
+        const change = await billingApi.schedulePlanChange(chosenPlan, mailboxCount, note.trim())
+        showNotice(`${change.target_plan_name ?? chosenPlan} scheduled for ${formatBillingDate(change.effective_at)}. Your current paid plan remains unchanged until then.`)
+      } else {
+        const order = await billingApi.createOrder(chosenPlan, mailboxCount, method, note.trim())
+        showNotice(order.activation_mode === 'test_instant'
+          ? `${order.plan_name} activated immediately for testing. Invoice ${order.invoice_number ?? ''} was issued and payment is still due.`
+          : `Invoice ${order.invoice_number ?? ''} issued. Pay it and submit the reference for activation.`)
+      }
       setOrdering(false)
       setNote('')
       await reload()
@@ -174,6 +219,25 @@ function BusinessBillingPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const scheduleCancellation = async () => {
+    if (!summary.current_period_end || !window.confirm(`End this subscription at the close of the current paid term on ${formatBillingDate(summary.current_period_end)}? Mail access will continue until then.`)) return
+    setBusy(true)
+    try {
+      await billingApi.scheduleCancellation()
+      showNotice(`Cancellation scheduled for ${formatBillingDate(summary.current_period_end)}. You can undo it before the term ends.`)
+      await reload()
+    } catch (error) { showNotice(friendlyError(error)) } finally { setBusy(false) }
+  }
+
+  const cancelScheduledChange = async () => {
+    setBusy(true)
+    try {
+      await billingApi.cancelScheduledChange()
+      showNotice('Scheduled subscription change cancelled. Your current plan will continue unless you make another change.')
+      await reload()
+    } catch (error) { showNotice(friendlyError(error)) } finally { setBusy(false) }
   }
 
   const saveBillingProfile = async () => {
@@ -239,46 +303,86 @@ function BusinessBillingPage() {
         </button>
       </nav>
 
-      {notice && <p className="settings-notice settings-notice--ok">{notice}</p>}
+      {notice && <p className="settings-notice" role="status">{notice}</p>}
 
       {tab === 'plan' && (
         <>
+          {summary.subscription_status === 'past_due' && <section className="settings-section" role="status">
+            <h2>Renewal overdue — grace period active</h2>
+            <p>Your existing mail access remains available{summary.renewal_grace_end ? ` until ${formatBillingDate(summary.renewal_grace_end)}` : ' during the renewal grace period'}. New mailboxes, domains, storage increases and app passwords are paused until renewal is approved.</p>
+          </section>}
+          {summary.subscription_status === 'suspended' && hasCurrentPlan && <section className="settings-section" role="alert">
+            <h2>Subscription suspended</h2>
+            <p>Mail access is disabled, but your business and mailbox data are retained for recovery{summary.data_retention_until ? ` until ${formatBillingDate(summary.data_retention_until)}` : ''}. Renew an eligible plan and complete payment approval to restore provider access.</p>
+          </section>}
+          {summary.retention_expired_at && !summary.purge_started_at && !summary.data_purged_at && <section className="settings-section" role="alert">
+            <h2>Data-retention deadline reached</h2>
+            <p>Your retained mailbox data has not been deleted automatically. It is now eligible for an explicit platform-admin purge. Renew and complete payment approval before a purge begins to restore the retained mailbox data.</p>
+          </section>}
+          {purgeInProgress && <section className="settings-section" role="alert">
+            <h2>Retained-data purge in progress</h2>
+            <p>Mailbox/provider deletion has already started, so new plan orders and reactivation are temporarily blocked. Contact support if you need help with this account.</p>
+          </section>}
+          {summary.data_purged_at && <section className="settings-section" role="status">
+            <h2>Previous retained mailbox data was purged</h2>
+            <p>The earlier retained mailbox data was permanently removed on {formatBillingDate(summary.data_purged_at)}. You can purchase a new term, but it starts as a fresh mailbox service and cannot restore the purged messages.</p>
+          </section>}
+          {summary.scheduled_change && <section className="settings-section" role="status">
+            <div className="admin-section-head">
+              <div>
+                <h2>{summary.scheduled_change.change_type === 'cancel' ? 'Cancellation scheduled' : 'Plan change scheduled'}</h2>
+                <p className="settings-hint">
+                  {summary.scheduled_change.change_type === 'cancel'
+                    ? `Your current plan stays active through ${formatBillingDate(summary.scheduled_change.effective_at)}. Mail access ends after the paid term unless you cancel this request or renew.`
+                    : `${summary.scheduled_change.target_plan_name ?? summary.scheduled_change.target_plan_code} with ${summary.scheduled_change.target_mailbox_count ?? 'the selected'} mailboxes is scheduled for renewal on ${formatBillingDate(summary.scheduled_change.effective_at)}.`}
+                </p>
+                {summary.scheduled_change.blocked_reason && <p className="settings-hint">Before renewal: {summary.scheduled_change.blocked_reason}.</p>}
+                {summary.scheduled_change.status === 'ready_for_renewal' && summary.scheduled_change.change_type === 'plan_change' && <p className="settings-hint">The current term has ended. Create and pay the renewal invoice for the scheduled plan to apply it.</p>}
+              </div>
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => void cancelScheduledChange()}>Cancel scheduled change</button>
+            </div>
+          </section>}
           {openInvoice && <section className="settings-section" role="status">
             <h2>Complete or cancel your open invoice</h2>
             <p>Invoice {openInvoice.invoice_number} for {openInvoice.plan_name} is {openInvoice.status === 'submitted' ? 'awaiting payment review' : 'unpaid'}. A second order cannot be placed while it is open.</p>
-            {summary.instant_activation && openInvoice.activation_mode === 'payment_approval' && <p>This invoice was created before test activation was enabled. It will not activate retroactively. {openInvoice.status === 'pending' ? 'Cancel the unpaid invoice and place a fresh test order for immediate access.' : 'Its submitted payment must be reviewed before another order can be placed.'}</p>}
+            {planActive && openInvoice.activation_mode === 'payment_approval' && <p>Your current plan remains active. The ordered plan will replace it only after payment approval.</p>}
+            {!planActive && summary.instant_activation && openInvoice.activation_mode === 'payment_approval' && <p>This invoice awaits payment approval and will not activate retroactively. {openInvoice.status === 'pending' ? 'You may cancel the unpaid invoice and place a new order.' : 'Its submitted payment must be reviewed before another order can be placed.'}</p>}
             {openInvoice.status === 'pending' && <button type="button" className="secondary-button" disabled={busy} onClick={() => void cancelOrder(openInvoice)}>Cancel invoice {openInvoice.invoice_number}</button>}
             {openInvoice.status === 'submitted' && <p>Payment was submitted for review. Contact billing support before replacing this invoice.</p>}
           </section>}
           <section className="settings-section">
             {planActive && <div className="row-actions"><button type="button" className="primary-button" onClick={() => navigate('/mail/business')}>Continue to domain setup</button></div>}
-            {!planActive && openInvoice && !summary.instant_activation && <p className="settings-hint" role="status">Your invoice is awaiting payment. Domain setup will be available when the order is approved.</p>}
+            {!mailAccessAvailable && openInvoice && !summary.instant_activation && <p className="settings-hint" role="status">Your invoice is awaiting payment. Mail access and capacity management will be available when the order is approved.</p>}
             <div className="admin-section-head">
-              <h2>{planActive ? 'Current plan' : 'Choose and activate a plan'}</h2>
-              <span className="admin-section-count">{planActive ? `${current.price} base / ${current.interval} · ${summary.mailbox_limit} mailboxes purchased` : 'Activation pending'}</span>
+              <h2>{hasCurrentPlan ? 'Current plan' : 'Choose and activate a plan'}</h2>
+              <span className="admin-section-count">{hasCurrentPlan ? `${current.price} base / ${current.interval} · ${summary.mailbox_limit} mailboxes purchased` : 'Activation pending'}</span>
             </div>
             <div className="billing-plan">
               <div>
-                <strong>{planActive ? current.name : 'No active plan'}</strong>
+                <strong>{hasCurrentPlan ? current.name : 'No active plan'}</strong>
                 <small>
-                  {planActive ? current.features.join(' · ') || summaryText(current.daily_send_limit) : openInvoice ? 'Resolve the open invoice above before setting up your domain.' : summary.instant_activation ? 'Place a test order to activate a plan before setting up your domain.' : 'Choose a plan and complete payment approval before setting up your domain.'}
+                  {hasCurrentPlan ? current.features.join(' · ') || summaryText(current.daily_send_limit) : openInvoice ? 'Resolve the open invoice above before setting up your domain.' : summary.instant_activation ? 'Place a test order to activate a plan before setting up your domain.' : 'Choose a plan and complete payment approval before setting up your domain.'}
                 </small>
+                {hasCurrentPlan && <small>Current term: {formatBillingDate(summary.current_period_start)} → {formatBillingDate(summary.current_period_end)}</small>}
               </div>
               <button
                 type="button"
                 className="secondary-button"
-                disabled={Boolean(openInvoice)}
+                disabled={Boolean(openInvoice) || purgeInProgress}
                 onClick={() => setOrdering((value) => !value)}
               >
-                {ordering ? 'Close' : planActive ? 'Change plan' : 'Choose plan'}
+              {ordering ? 'Close' : planActive ? 'Upgrade or renew' : hasCurrentPlan ? 'Renew or change plan' : 'Choose plan'}
               </button>
+              {planActive && !summary.scheduled_change && <button type="button" className="text-button" disabled={busy} onClick={() => void scheduleCancellation()}>Cancel at renewal</button>}
             </div>
-            {planActive && <div className="storage">
-              <span>Storage allocated</span>
+            {hasCurrentPlan && <div className="storage">
+              <span>Storage pool</span>
               <strong>{storagePct.toFixed(0)}% of {storageValue} {storageUnit}</strong>
               <div className="storage-bar">
                 <span style={{ width: `${storagePct}%` }} />
               </div>
+              <small>{splitBytes(storageUsed).value} {splitBytes(storageUsed).unit} used · {splitBytes(storageAllocated).value} {splitBytes(storageAllocated).unit} reserved · {splitBytes(Math.max(0, storageTotal - storageAllocated)).value} {splitBytes(Math.max(0, storageTotal - storageAllocated)).unit} unreserved.</small>
+              <button type="button" className="text-button" onClick={() => navigate('/mail/business')}>Manage mailbox storage</button>
             </div>}
           </section>
 
@@ -306,11 +410,15 @@ function BusinessBillingPage() {
             )}
           </section>
 
-          {ordering && !openInvoice && (
+          {ordering && !openInvoice && !purgeInProgress && (
             <form className="settings-section" onSubmit={placeOrder}>
-              <h2>Order a plan</h2>
+              <h2>{planActive ? 'Upgrade or renew your plan' : hasCurrentPlan ? 'Renew or change your plan' : 'Order a plan'}</h2>
               <p className="settings-hint">
-                {summary.instant_activation
+                {planActive
+                  ? 'Your current plan remains active while a new invoice is reviewed. A same-plan renewal with the same mailbox quantity extends from your existing expiry; an approved upgrade starts a new billing term. Reductions can be scheduled for the renewal date without shortening your current paid access.'
+                  : hasCurrentPlan
+                  ? 'Choose the plan you want to reactivate. Existing mail access is restored only after payment approval; capacity limits are validated before the invoice can be applied.'
+                  : summary.instant_activation
                   ? 'Testing mode is enabled: placing the order activates the plan immediately and issues an invoice. Payment remains due and can still be submitted for manual review.'
                   : 'Choose a plan and payment method. The invoice is issued immediately; the plan activates after manual payment verification.'}
               </p>
@@ -319,6 +427,7 @@ function BusinessBillingPage() {
                   type="button"
                   className={`plan-option ${chosenPlan === plan.code ? 'plan-option--active' : ''}`}
                   key={plan.code}
+                  disabled={false}
                   onClick={() => {
                     setChosenPlan(plan.code)
                     setMailboxCount(Math.max(plan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats))
@@ -337,6 +446,7 @@ function BusinessBillingPage() {
                     <small>base / {plan.interval}</small>
                   </span>
                   {chosenPlan === plan.code && <Check size={15} />}
+                  {planActive && isReduction(plan, current, summary.mailbox_limit) && <small>Schedule for renewal — current paid term stays unchanged</small>}
                 </button>
               ))}
               {selectedPlan && (
@@ -345,11 +455,11 @@ function BusinessBillingPage() {
                     Mailboxes
                     <input
                       type="number"
-                      min={Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)}
+                      min={selectedReduction ? selectedPlan.mailbox_limit : Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)}
                       max={selectedPlan.max_mailboxes}
                       value={mailboxCount}
                       onChange={(event) => {
-                        const minimum = Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)
+                        const minimum = selectedReduction ? selectedPlan.mailbox_limit : Math.max(selectedPlan.mailbox_limit, summary.usage.mailboxes, summary.usage.seats)
                         const next = Number(event.target.value) || minimum
                         setMailboxCount(Math.max(minimum, Math.min(selectedPlan.max_mailboxes, next)))
                       }}
@@ -363,20 +473,29 @@ function BusinessBillingPage() {
                   </div>
                 </>
               )}
-              <label>
-                Payment method
-                <select value={method} onChange={(event) => setMethod(event.target.value)}>
-                  <option value="bank">Bank transfer</option>
-                  {summary.settings.paypal_email && <option value="paypal">PayPal</option>}
-                  <option value="other">Other manual payment</option>
-                </select>
-              </label>
-              <div className="billing-pay-instructions">
-                <strong>
-                  {method === 'bank' ? 'Bank transfer' : paymentMethodLabel(method)} — how to pay
-                </strong>
-                <p>{instructionsFor(method, summary.settings)}</p>
-              </div>
+              {selectedReduction ? (
+                <div className="billing-pay-instructions">
+                  <strong>No payment is collected now</strong>
+                  <p>This schedules the lower plan or mailbox quantity for the current term end. Your current paid capacity stays unchanged. When the renewal date arrives, Billing will ask you to place and pay the renewal invoice before the scheduled reduction is activated.</p>
+                </div>
+              ) : (
+                <>
+                  <label>
+                    Payment method
+                    <select value={method} onChange={(event) => setMethod(event.target.value)}>
+                      <option value="bank">Bank transfer</option>
+                      {summary.settings.paypal_email && <option value="paypal">PayPal</option>}
+                      <option value="other">Other manual payment</option>
+                    </select>
+                  </label>
+                  <div className="billing-pay-instructions">
+                    <strong>
+                      {method === 'bank' ? 'Bank transfer' : paymentMethodLabel(method)} — how to pay
+                    </strong>
+                    <p>{instructionsFor(method, summary.settings)}</p>
+                  </div>
+                </>
+              )}
               <label>
                 Order note (optional)
                 <input
@@ -395,8 +514,8 @@ function BusinessBillingPage() {
                 >
                   Cancel
                 </button>
-                <button className="primary-button" disabled={busy || !chosenPlan}>
-                  {busy ? 'Placing…' : 'Place order'}
+                <button className="primary-button" disabled={busy || !chosenPlan || purgeInProgress}>
+                  {busy ? (selectedReduction ? 'Scheduling…' : 'Placing…') : selectedReduction ? 'Schedule for renewal' : 'Place order'}
                 </button>
               </div>
             </form>

@@ -14,7 +14,7 @@ for shared_file in nginx-inner.conf nginx-admin-inner.conf nginx-shared-edge.boo
   [[ -f "$ROOT/deploy/production/$shared_file" ]] || fail "shared Messenger proxy file is missing: $shared_file"
 done
 [[ -f "$ROOT/deploy/production/CREDENTIALS.md" ]] || fail "production credential checklist is missing"
-for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh bootstrap-first-admin.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py render-alertmanager.py; do
+for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh bootstrap-first-admin.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh record-backup-proof.sh freeze-launch.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py render-alertmanager.py; do
   [[ -x "$ROOT/deploy/production/$script" ]] || fail "production script is missing/not executable: $script"
 done
 for edge_file in .env.example docker-compose.yml haproxy.cfg nginx-mail.conf reload-on-renew.sh README.md; do
@@ -30,6 +30,9 @@ grep -q 'listen 80;' "$nginx_file" || fail "web vhost must listen on shared HTTP
 grep -q 'listen 127.0.0.1:18081;' "$nginx_file" || fail "Platform Admin must remain localhost-only"
 if grep -q 'listen 127.0.0.1:18082' "$nginx_file"; then fail "legacy Cloudflare Tunnel origin must not remain"; fi
 if grep -q 'real_ip_header CF-Connecting-IP' "$nginx_file"; then fail "Cloudflare-only real-IP trust must not remain in direct-DNS mode"; fi
+grep -q '^CS_MAIL_ENVIRONMENT=production$' "$ROOT/deploy/production/.env.production.example" || fail "production runtime profile is missing from the env contract"
+grep -q '^CS_MAIL_BILLING_INSTANT_ACTIVATION=false$' "$ROOT/deploy/production/.env.production.example" || fail "production billing must fail closed"
+grep -q 'CS_MAIL_RELEASE_SHA256:.*unknown' "$ROOT/deploy/production/docker-compose.yml" || fail "running API release identity injection is missing"
 grep -q 'CS_MAIL_WEB_PROXY_MODE=edge' "$ROOT/deploy/production/.env.production.example" || fail "edge proxy mode is missing from the production env contract"
 grep -q 'CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web' "$ROOT/deploy/production/.env.production.example" || fail "platform web network is missing from the production env contract"
 grep -q 'aliases: \[cs-mail-web\]' "$ROOT/deploy/production/docker-compose.yml" || fail "CS Mail private web alias is missing"
@@ -73,7 +76,9 @@ grep -q 'cargo build --release --locked' "$ROOT/backend/Dockerfile" || fail "bac
 grep -q 'cargo clippy --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run Clippy"
 grep -q 'cargo test --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run Rust tests"
 grep -q 'npm ci' "$ROOT/frontend/Dockerfile.production" || fail "frontend image must use npm ci"
-ok "locked backend/frontend builds are configured"
+grep -q 'RUN npm run lint' "$ROOT/frontend/Dockerfile.production" || fail "frontend deploy image must block on lint"
+grep -q '0048_launch_freeze_operational_evidence.sql' "$ROOT/deploy/production/certify_launch.py" || fail "launch certifier must require operational-evidence migration"
+ok "locked backend/frontend builds and launch-freeze evidence are configured"
 
 python3 "$ROOT/deploy/production/certify_launch.py" --static-only --root "$ROOT" --report /tmp/cs-mail-release-static.json
 ok "static production launch certification passes"

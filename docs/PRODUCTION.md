@@ -14,3 +14,15 @@ Production deploys are Git-driven and deterministic. Builds/tests happen in
 Docker using committed lockfiles. Frontend releases are published atomically
 under `/opt/cs-mail/www/releases`; runtime state and secrets live outside Git
 under `/opt/cs-mail`.
+
+## Final public-launch invariants
+
+The production runtime is explicit (`CS_MAIL_ENVIRONMENT=production`) and is
+bound to the exact deployed source digest through `CS_MAIL_RELEASE_SHA256`.
+Unsafe production settings such as instant unpaid plan activation cause API
+startup to fail instead of silently falling back.
+
+Migration `0048_launch_freeze_operational_evidence.sql` adds append-only local
+backup, restore-drill and offsite-backup evidence. The final launch gate is
+`sh manage launch-freeze`; it must pass with public controls closed before those
+controls are opened deliberately from localhost Platform Admin.

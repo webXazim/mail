@@ -43,6 +43,9 @@ pub struct CreateMailboxIn {
     pub invite_email: Option<String>,
     #[serde(default = "default_role")]
     pub role: String,
+    /// Optional initial reservation from the organization's pooled storage.
+    /// Omitted means the plan's default per-mailbox allocation.
+    pub quota_bytes: Option<i64>,
 }
 fn default_role() -> String { "member".to_string() }
 
@@ -171,7 +174,7 @@ pub async fn create(
     let marker = state.stalwart.ownership_marker("mailbox", &organization_id.to_string(), &mailbox_id.to_string());
     let display_name = body.display_name.trim().chars().take(120).collect::<String>();
     let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let mailbox_quota=crate::services::entitlements::default_mailbox_allocation_tx(&mut tx,organization_id).await?;
+    let mailbox_quota=crate::services::entitlements::mailbox_allocation_tx(&mut tx,organization_id,body.quota_bytes).await?;
 
     let assigned_user = body.member_user_id;
     if let Some(user_id) = assigned_user {
@@ -183,10 +186,11 @@ pub async fn create(
 
     sqlx::query(
         "INSERT INTO mailboxes(id,organization_id,domain_id,user_id,address,local_part,display_name,status,
-           is_primary_for_user,provider_marker,sync_status,quota_bytes,invited_email)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'pending',FALSE,$8,'pending',$9,$10)",
+           is_primary_for_user,provider_marker,sync_status,quota_bytes,quota_override_bytes,invited_email)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'pending',FALSE,$8,'pending',$9,$10,$11)",
     ).bind(mailbox_id).bind(organization_id).bind(body.domain_id).bind(assigned_user)
      .bind(&address).bind(&local).bind(&display_name).bind(&marker).bind(mailbox_quota)
+     .bind(body.quota_bytes.map(|_| mailbox_quota))
      .bind(body.invite_email.as_ref().map(|v| v.trim().to_ascii_lowercase()))
      .execute(&mut *tx).await.map_err(|e| {
         if let sqlx::Error::Database(db)=&e { if db.code().as_deref()==Some("23505") { return ApiError::conflict("That business address is already in use"); } }
@@ -232,7 +236,7 @@ pub async fn create(
         }
     }
     audit::record(&state,Some(auth.user_id),"business.mailbox.create",json!({"organization_id":organization_id,"mailbox_id":mailbox_id,"address":address,"assigned_user":assigned_user})).await;
-    Ok((axum::http::StatusCode::CREATED,Json(json!({"id":mailbox_id,"address":address,"status":"pending","user_id":assigned_user}))))
+    Ok((axum::http::StatusCode::CREATED,Json(json!({"id":mailbox_id,"address":address,"status":"pending","user_id":assigned_user,"quota_bytes":mailbox_quota}))))
 }
 
 /// Requeue a failed provider creation without deleting the customer's address
@@ -341,6 +345,12 @@ pub async fn update_storage(
          WHERE m.id=$1 AND m.organization_id=$2 AND m.deleted_at IS NULL AND m.status <> 'deleting'"
     ).bind(mailbox_id).bind(organization_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let (address,provider_account_id,current_quota,provider_domain_id,local_part,provider_marker)=mailbox.ok_or_else(|| ApiError::not_found("Mailbox not found"))?;
+    if !matches!(ent.subscription_status.as_str(), "active" | "trial" | "past_due") {
+        return Err(ApiError::forbidden("Renew the business plan before changing mailbox storage"));
+    }
+    if ent.subscription_status == "past_due" && target > current_quota {
+        return Err(ApiError::forbidden("Renew the business plan before increasing mailbox storage"));
+    }
 
     let cached_used: Option<i64>=sqlx::query_scalar("SELECT quota_used FROM realtime_mailbox_state WHERE mailbox_id=$1")
         .bind(mailbox_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?.flatten();
@@ -374,8 +384,8 @@ pub async fn update_storage(
 
     let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
     let pool: i64=sqlx::query_scalar(
-        "SELECT COALESCE(s.storage_pool_override_bytes,p.storage_pool_bytes::bigint + p.mailbox_bytes::bigint*GREATEST(s.purchased_mailbox_count-p.mailbox_limit,0)::bigint)::bigint
-         FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code
+        "SELECT COALESCE(s.storage_pool_override_bytes,COALESCE(pv.storage_pool_bytes,p.storage_pool_bytes)::bigint + COALESCE(pv.mailbox_bytes,p.mailbox_bytes)::bigint*GREATEST(s.purchased_mailbox_count-COALESCE(pv.mailbox_limit,p.mailbox_limit),0)::bigint)::bigint
+         FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
          WHERE s.organization_id=$1 FOR UPDATE OF s"
     ).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?
      .ok_or_else(|| ApiError::forbidden("Business subscription is not available"))?;
@@ -402,6 +412,68 @@ pub async fn update_storage(
         "previous_quota_bytes":current_quota,"quota_bytes":target,"reset_to_default":body.reset_to_default
     })).await;
     Ok(Json(json!({"ok":true,"mailbox_id":mailbox_id,"quota_bytes":target,"quota_source":if body.reset_to_default{"default"}else{"custom"}})))
+}
+
+/// Spread only the currently unreserved organization storage across existing
+/// mailboxes. This operation never lowers an allocation, so it cannot place a
+/// mailbox below its actual provider usage. Individual allocations remain
+/// editable afterwards.
+pub async fn distribute_available_storage(
+    State(state): State<AppState>, auth: AuthUser, Path(organization_id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    tenancy::require_admin(&state.db,auth.user_id,organization_id).await?;
+    let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let subscription: Option<(i64,String)>=sqlx::query_as(
+        "SELECT COALESCE(s.storage_pool_override_bytes,
+                         COALESCE(pv.storage_pool_bytes,p.storage_pool_bytes)::bigint+COALESCE(pv.mailbox_bytes,p.mailbox_bytes)::bigint*GREATEST(s.purchased_mailbox_count-COALESCE(pv.mailbox_limit,p.mailbox_limit),0)::bigint)::bigint,
+                CASE
+                  WHEN s.status IN ('active','trial') AND s.current_period_end IS NOT NULL AND s.current_period_end<=now() THEN 'past_due'
+                  WHEN s.status='past_due' AND s.renewal_grace_end IS NOT NULL AND s.renewal_grace_end<=now() THEN 'suspended'
+                  ELSE s.status
+                END
+         FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
+         WHERE s.organization_id=$1 FOR UPDATE OF s"
+    ).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let (pool,status)=subscription.ok_or_else(|| ApiError::forbidden("Business subscription is not available"))?;
+    if !matches!(status.as_str(),"active"|"trial") {
+        return Err(ApiError::forbidden("Renew the business plan before increasing mailbox storage"));
+    }
+
+    let allocated: i64=sqlx::query_scalar(
+        "SELECT COALESCE(SUM(quota_bytes),0)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL"
+    ).bind(organization_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let available=pool.saturating_sub(allocated);
+    if available<=0 {
+        tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+        return Ok(Json(json!({"ok":true,"distributed_bytes":0,"pool_bytes":pool,"allocated_bytes":allocated,"unallocated_bytes":0})));
+    }
+
+    let mailboxes: Vec<(Uuid,i64,Option<String>)>=sqlx::query_as(
+        "SELECT id,quota_bytes,provider_account_id FROM mailboxes
+         WHERE organization_id=$1 AND deleted_at IS NULL AND status<>'deleting'
+         ORDER BY created_at,id FOR UPDATE"
+    ).bind(organization_id).fetch_all(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if mailboxes.is_empty() {
+        return Err(ApiError::conflict("Create a mailbox before distributing pooled storage"));
+    }
+    let count=mailboxes.len() as i64;
+    let share=available/count;
+    let remainder=available%count;
+    for (index,(mailbox_id,current_quota,provider_account_id)) in mailboxes.into_iter().enumerate() {
+        let target=current_quota.saturating_add(share).saturating_add(if (index as i64)<remainder {1}else{0});
+        sqlx::query(
+            "UPDATE mailboxes SET quota_bytes=$2,quota_override_bytes=$2,quota_updated_by=$3,quota_updated_at=now(),updated_at=now()
+             WHERE id=$1"
+        ).bind(mailbox_id).bind(target).bind(auth.user_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        if provider_account_id.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+            state.provisioning.enqueue_mailbox_quota_tx(&mut tx,mailbox_id,target).await?;
+        }
+    }
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    audit::record(&state,Some(auth.user_id),"business.storage.distribute",json!({
+        "organization_id":organization_id,"distributed_bytes":available,"pool_bytes":pool
+    })).await;
+    Ok(Json(json!({"ok":true,"distributed_bytes":available,"pool_bytes":pool,"allocated_bytes":pool,"unallocated_bytes":0})))
 }
 
 pub async fn delete(

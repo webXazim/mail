@@ -41,6 +41,7 @@ export function BusinessPage() {
   const [mailboxDomainId, setMailboxDomainId] = useState('')
   const [mailboxMemberId, setMailboxMemberId] = useState('')
   const [mailboxInviteEmail, setMailboxInviteEmail] = useState('')
+  const [mailboxStorageGb, setMailboxStorageGb] = useState('')
   const [mailboxQuotaDrafts, setMailboxQuotaDrafts] = useState<Record<string, string>>({})
   const [addresses, setAddresses] = useState<BusinessAddress[]>([])
   const [addressLocal, setAddressLocal] = useState('')
@@ -485,6 +486,11 @@ export function BusinessPage() {
       setError('Choose an existing member or enter an invitation email.')
       return
     }
+    const requestedStorageGb = mailboxStorageGb.trim() ? Number(mailboxStorageGb) : null
+    if (requestedStorageGb != null && (!Number.isFinite(requestedStorageGb) || requestedStorageGb <= 0)) {
+      setError('Enter a valid initial mailbox storage allocation in GB, or leave it blank to use the plan default.')
+      return
+    }
     setBusy(true); setError('')
     try {
       await organizationsApi.createMailbox(detail.id, {
@@ -493,8 +499,9 @@ export function BusinessPage() {
         member_user_id: mailboxMemberId || undefined,
         invite_email: mailboxMemberId ? undefined : mailboxInviteEmail.trim(),
         role: 'member',
+        quota_bytes: requestedStorageGb == null ? undefined : Math.round(requestedStorageGb * GIB),
       })
-      setMailboxLocal(''); setMailboxInviteEmail('')
+      setMailboxLocal(''); setMailboxInviteEmail(''); setMailboxStorageGb('')
       await load(detail.id)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to create mailbox') }
     finally { setBusy(false) }
@@ -549,6 +556,16 @@ export function BusinessPage() {
       await profileApi.refresh()
       await load(detail.id)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to update mailbox storage') }
+    finally { setBusy(false) }
+  }
+
+  const distributeAvailableStorage = async () => {
+    if (!detail || !detail.storage || detail.storage.unallocated_bytes <= 0) return
+    setBusy(true); setError('')
+    try {
+      await organizationsApi.distributeAvailableStorage(detail.id)
+      await load(detail.id)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to distribute available storage') }
     finally { setBusy(false) }
   }
 
@@ -854,7 +871,7 @@ export function BusinessPage() {
                   <div><Users size={17} /><h3>{detail.mailboxes.length ? 'Mailboxes & storage' : 'Mailboxes'}</h3></div>
                   <span>{detail.mailboxes.length}</span>
                 </header>
-                {detail.storage && detail.mailboxes.length > 0 && (
+                {detail.storage && (
                   <div className="business-storage-pool">
                     <div>
                       <span>Business storage pool</span>
@@ -865,7 +882,8 @@ export function BusinessPage() {
                       {detail.storage.used_bytes != null && <span>{formatStorage(detail.storage.used_bytes)} used by ready mailboxes</span>}
                     </div>
                     <div className="storage-bar"><span style={{ width: `${detail.storage.pool_bytes > 0 ? Math.min(100, (detail.storage.allocated_bytes / detail.storage.pool_bytes) * 100) : 0}%` }} /></div>
-                    <p>Creating a mailbox reserves {formatStorage(detail.storage.default_mailbox_bytes)} by default. Storage becomes usable when mail server setup finishes. Owners and admins can redistribute reserved space.</p>
+                    <p>Creating a mailbox reserves {formatStorage(detail.storage.default_mailbox_bytes)} by default. You can choose a different initial allocation when creating it, up to the unreserved pool. Storage becomes usable when mail server setup finishes.</p>
+                    {(detail.role === 'owner' || detail.role === 'admin') && detail.mailboxes.length > 0 && detail.storage.unallocated_bytes > 0 && <button type="button" className="secondary-button" disabled={busy} onClick={() => void distributeAvailableStorage()}>Distribute available storage</button>}
                   </div>
                 )}
                 {(detail.role === 'owner' || detail.role === 'admin') && detail.domains.some((domain) => domain.status === 'active') && (
@@ -874,6 +892,7 @@ export function BusinessPage() {
                     <div><label>Domain</label><select value={mailboxDomainId} onChange={(e) => setMailboxDomainId(e.target.value)}>{detail.domains.filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}</select></div>
                     <div><label>Assign existing member</label><select value={mailboxMemberId} onChange={(e) => setMailboxMemberId(e.target.value)}><option value="">Invite by email instead</option>{members.filter((m) => m.status === 'active').map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name || m.email}</option>)}</select></div>
                     {!mailboxMemberId && <div><label>Invitation email</label><input type="email" value={mailboxInviteEmail} onChange={(e) => setMailboxInviteEmail(e.target.value)} placeholder="employee@external.com" required /></div>}
+                    <div><label>Initial storage (GB)</label><input type="number" min="0.1" step="0.1" value={mailboxStorageGb} onChange={(e) => setMailboxStorageGb(e.target.value)} placeholder={detail.storage ? quotaDraft(detail.storage.default_mailbox_bytes) : 'Plan default'} /><small>{detail.storage ? `${formatStorage(detail.storage.unallocated_bytes)} currently unreserved. Leave blank for the ${formatStorage(detail.storage.default_mailbox_bytes)} plan default.` : 'Leave blank to use the plan default.'}</small></div>
                     <button className="primary-button" type="submit" disabled={busy}><Plus size={15}/> Create mailbox</button>
                   </form>
                 )}

@@ -53,6 +53,7 @@ CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web
 CS_MAIL_SHARED_EDGE_CONTAINER=cs-platform-edge-edge-1
 CS_MAIL_SMTP_HOST=smtp.crescentsphere.com
 CS_MAIL_SMTP_PORT=465
+CS_MAIL_ENVIRONMENT=production
 CS_MAIL_BILLING_INSTANT_ACTIVATION=false
 ```
 
@@ -68,4 +69,8 @@ accounts as described in `CREDENTIALS.md` and `README.md`. Verify customer MX,
 SPF, DKIM and DMARC, inbound/outbound delivery, IMAP login, alert delivery and
 external inbox placement. Keep automated backups for the CS Mail database and
 attachments, and separate encrypted offsite backups for the shared Stalwart
-volumes. Public signups should begin only after these checks pass.
+volumes. After each external backup succeeds, record its root-owned proof
+manifest with `sh manage record-backup-proof cs-mail ...` and
+`sh manage record-backup-proof stalwart ...`. Finally run `sh manage launch-freeze`
+with every public control still closed. Public signups should begin only after
+that exact-release gate passes.

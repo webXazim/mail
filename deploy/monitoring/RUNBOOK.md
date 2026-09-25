@@ -18,3 +18,40 @@ Neither listener should be exposed publicly. `/api/metrics` is blocked at public
 7. Use emergency service switches if an incident requires pausing signup, ordering, domain onboarding, mailbox provisioning or customer outbound sending.
 
 Before destructive recovery, create a fresh CS Mail backup. Shared Stalwart recovery must follow its own platform-level backup/runbook because multiple products use it.
+
+## Billing lifecycle
+
+Use **Platform Admin → Diagnostics → Public launch readiness** first. A durable billing/provider alert is not cleared by restarting the API because the gauges are rebuilt from PostgreSQL on every Prometheus scrape.
+
+For `provisioning_dead`, `lifecycle_email_failed`, `invoice_email_failed`, or `purge_failed`, open **Platform Admin → Billing → Operations**, inspect the affected organization and error, repair the underlying provider/mail configuration, then use the scoped retry action. Never mark a failed purge complete directly in PostgreSQL.
+
+For `provider_stale_mailboxes`, use **Reconcile provider** on the affected subscription and confirm Stalwart access/quota state returns to sync. If the count remains non-zero, inspect API/provisioning logs before changing subscription status manually.
+
+For `payment_review_aging`, review the submitted invoice/payment reference. Approve only after payment is verified; otherwise reject it with an operator note. Do not enable `CS_MAIL_BILLING_INSTANT_ACTIVATION` to bypass a payment backlog.
+
+## Recoverability
+
+`cs_mail_operational_evidence_age_seconds` is rebuilt from the append-only
+PostgreSQL evidence ledger on every scrape. A process restart cannot make stale
+backup evidence look healthy.
+
+For `CSMailLocalBackupStale`, run `sh manage backup`, inspect the generated
+manifest/checksums, and confirm `cs-mail-backup.timer` is active. For
+`CSMailRestoreDrillStale`, run `sh manage restore-drill`; do not acknowledge the
+alert based only on the existence of a backup archive.
+
+`CSMailOffsiteBackupStale` covers two independent data sets: CS Mail
+(database/attachments) and the shared Stalwart mail store. Run the appropriate
+external encrypted offsite backup job first. Only after that job succeeds and
+produces a root-owned proof manifest, record it:
+
+```bash
+sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
+sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
+```
+
+The proof command is deliberately not an offsite-copy command. Never use a
+locally fabricated manifest as a substitute for confirming the remote backup
+object/snapshot. During an actual restore incident, preserve the evidence and
+restore into an isolated target first unless the incident runbook explicitly
+requires an in-place recovery.

@@ -58,6 +58,8 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         db: pool.clone(),
+        environment: config.environment.clone(),
+        release_sha256: config.release_sha256.clone(),
         jwt_secret: config.jwt_secret.clone(),
         jwt_access_ttl_secs: config.jwt_access_ttl_secs,
         jwt_refresh_ttl_secs: config.jwt_refresh_ttl_secs,
@@ -136,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
     cs_mail_api::services::business_addressing::spawn_worker(state.clone());
     cs_mail_api::handlers::mail_clients::spawn_import_worker(state.clone());
     cs_mail_api::services::billing::spawn_email_worker(state.clone());
+    cs_mail_api::services::billing::spawn_lifecycle_worker(state.clone());
 
     let app = build_router(state);
 
@@ -158,9 +161,6 @@ fn spawn_maintenance(state: AppState) {
         let mut tick = tokio::time::interval(Duration::from_secs(6 * 3600));
         loop {
             tick.tick().await;
-            if let Err(e) = cs_mail_api::services::billing::reconcile_subscription_lifecycle(&state).await {
-                tracing::warn!("subscription lifecycle reconciliation failed: {e}");
-            }
             if let Err(e) = sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
                 .execute(&state.db)
                 .await

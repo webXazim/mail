@@ -17,7 +17,9 @@ Before accepting another business, complete these checks in order:
    domains, members, mailboxes, messages, drafts, or settings. Run the full
    `certify-launch.sh` gate and retain its report. Do not treat a static-only
    pass as this live test.
-3. Migration 0042 closes public signup, business creation, plan ordering,
+3. Before opening any public switch, use localhost **Platform Admin → Diagnostics → Public launch readiness**. Resolve every blocker, then run the full live launch certification and re-check readiness. A static certification pass is only a release-layout check; it does not replace provider/DNS/TLS/tenant/protocol/backup acceptance.
+
+4. Migration 0042 closes public signup, business creation, plan ordering,
    domain onboarding, mailbox provisioning, and outbound sending in the
    platform control plane. Open only what is needed for an operator-led test;
    keep public capabilities disabled until the two-business test, billing
@@ -25,7 +27,7 @@ Before accepting another business, complete these checks in order:
    Set `CS_MAIL_BILLING_INSTANT_ACTIVATION=false`; a test bypass must never
    activate a real order. Use the platform admin interface to enable controls
    deliberately after the gates pass.
-4. Verify a real mailbox over web, IMAP TLS 993, and authenticated SMTP TLS
+5. Verify a real mailbox over web, IMAP TLS 993, and authenticated SMTP TLS
    465. Send externally, receive externally, reply, attach a file, and confirm
    sent, inbox, and spam behavior. Apply the shared sender policy in Mailer's
    `STALWART_DOMAIN_PROVISIONING.md` to Stalwart's AUTH and MAIL FROM stages.
@@ -33,24 +35,24 @@ Before accepting another business, complete these checks in order:
    Mailer bounce sender; confirm `mailer-submit` accepts a verified Mailer
    bounce sender but rejects a CS Mail mailbox sender. Test these negative
    cases with authenticated SMTP, not just the applications' API checks.
-5. For each customer domain, verify ownership before provisioning. Publish MX
+6. For each customer domain, verify ownership before provisioning. Publish MX
    to `smtp.crescentsphere.com` only after the destination mailbox is ready;
    publish the provider's actual DKIM key, a single valid SPF policy and a
    DMARC policy, then validate alignment on received test mail. Keep
    `smtp.crescentsphere.com` DNS-only. Ensure the VPS provider's PTR matches
    that hostname. Replace Cloudflare Email Routing MX for
    `crescentsphere.com` only after its migration test passes.
-6. Verify backup coverage for the CS Mail database and attachments and for
+7. Verify backup coverage for the CS Mail database and attachments and for
    Stalwart's mail data. Store encrypted copies off this VPS; run the restore
    drill and document the recovery time. Check alerts for API health, mail
    queues, failed provisioning jobs, disk space, TLS expiry, and backup age.
-7. Keep Mailer developer sending credentials, rate limits, and provider
+8. Keep Mailer developer sending credentials, rate limits, and provider
    namespace separate from CS Mail. A shared Stalwart and outbound IP remain
    a shared reputation and outage boundary. Before broad public developer
    sending, allocate a separate outbound IP or mail node and change Mailer's
    egress/DNS/PTR accordingly; CS Mail business mail should retain its own
    stable sending identity.
-8. Reconcile every pre-existing Mailer domain and DKIM signature against its
+9. Reconcile every pre-existing Mailer domain and DKIM signature against its
    Mailer database provider IDs before opening either product to customers.
    Existing unmarked provider domains require an operator ownership review;
    never attach a CS Mail domain to Mailer merely because its name matches.
@@ -60,3 +62,36 @@ release pipeline, preserve a predeploy backup, and run the public health and
 security gates before marking a release successful. Rehearse both the web
 edge rollback and the database/mail-data restoration. The company homepage
 can replace Messenger's root/www route later without touching mail routing.
+
+## Final launch freeze and opening sequence
+
+The production API must run with `CS_MAIL_ENVIRONMENT=production` and
+`CS_MAIL_BILLING_INSTANT_ACTIVATION=false`. Production startup fails closed if
+the billing bypass is enabled.
+
+Before the first public opening, complete the independent encrypted offsite
+backup jobs and have each job emit a root-owned, non-world-writable proof
+manifest. The proof should identify the external backup set/object and its
+checksum or provider snapshot identifier. Then record the successful external
+jobs:
+
+```bash
+cd /opt/sites/cs-mail
+sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
+sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
+sh manage launch-freeze
+```
+
+`record-backup-proof` does not perform or verify a remote copy by itself. It
+records the evidence produced by the independent backup system. `launch-freeze`
+runs release verification, production preflight, the full live certification,
+a fresh local backup and restore drill, and requires fresh offsite evidence for
+both CS Mail and shared Stalwart. It also requires every public platform switch
+to remain closed while the evidence is created.
+
+Only after **PUBLIC LAUNCH FREEZE PASS**, open switches in localhost Platform
+Admin in this order, checking alerts and one real customer path after each
+stage: **Public signup → Business creation → Plan ordering → Domain onboarding
+→ Mailbox provisioning → Customer outbound sending**. Do not edit the
+`platform_controls` table directly. If a stage creates unexplained errors,
+close that stage again and investigate before opening the next one.

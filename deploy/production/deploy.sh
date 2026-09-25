@@ -90,6 +90,9 @@ WEB_STAGING_DIR="$STATE/www/releases/.${RELEASE_TAG}.tmp"
 export CS_MAIL_BUILD_SHA="$GIT_SHA"
 export CS_MAIL_BUILD_DATE="$BUILD_DATE"
 export CS_MAIL_API_IMAGE="$API_IMAGE"
+# The running API uses this immutable digest to bind launch certification and
+# recovery evidence to the exact deployed source tree.
+export CS_MAIL_RELEASE_SHA256="$SOURCE_SHA256"
 
 printf '\n=== CS Mail production deployment ===\n'
 printf 'release: %s\n' "$RELEASE_LABEL"

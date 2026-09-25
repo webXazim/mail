@@ -1,0 +1,2 @@
+import{n as e}from"./api-BC8ntAUe.js";var t={async plans(){return(await e(`/api/public/plans`,{},{retry:!1})).plans??[]},status(){return e(`/api/public/status`,{},{retry:!1})}};export{t};
+//# sourceMappingURL=public-DBq7aOek.js.map

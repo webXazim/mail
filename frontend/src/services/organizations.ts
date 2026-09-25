@@ -225,8 +225,8 @@ export const organizationsApi = {
       { method: 'POST', body: JSON.stringify({ token }) },
     ),
   mailboxes: (id: string) => apiFetch<{ mailboxes: OrganizationMailbox[]; storage: OrganizationStorage | null }>(`/api/organizations/${id}/mailboxes`),
-  createMailbox: (id: string, payload: { domain_id: string; local_part: string; display_name?: string; member_user_id?: string; invite_email?: string; role?: OrganizationRole }) =>
-    apiFetch<{ id: string; address: string; status: string; user_id: string | null }>(`/api/organizations/${id}/mailboxes`, { method: 'POST', body: JSON.stringify(payload) }),
+  createMailbox: (id: string, payload: { domain_id: string; local_part: string; display_name?: string; member_user_id?: string; invite_email?: string; role?: OrganizationRole; quota_bytes?: number }) =>
+    apiFetch<{ id: string; address: string; status: string; user_id: string | null; quota_bytes: number }>(`/api/organizations/${id}/mailboxes`, { method: 'POST', body: JSON.stringify(payload) }),
   activateMailbox: async (organizationId: string, mailboxId: string) => {
     const result = await apiFetch<{ ok: true; active_organization_id: string; active_mailbox_id: string; address: string }>(`/api/organizations/${organizationId}/mailboxes/${mailboxId}/activate`, { method: 'POST' })
     mailboxContextStore.set(result.active_organization_id, result.active_mailbox_id)
@@ -239,6 +239,8 @@ export const organizationsApi = {
       method: 'PATCH',
       body: JSON.stringify(resetToDefault ? { reset_to_default: true } : { quota_bytes: quotaBytes }),
     }),
+  distributeAvailableStorage: (organizationId: string) =>
+    apiFetch<{ ok: true; distributed_bytes: number; pool_bytes: number; allocated_bytes: number; unallocated_bytes: number }>(`/api/organizations/${organizationId}/mailboxes/storage/distribute`, { method: 'POST' }),
   retryMailbox: (organizationId: string, mailboxId: string) =>
     apiFetch<{ ok: true; status: string }>(`/api/organizations/${organizationId}/mailboxes/${mailboxId}/retry`, { method: 'POST' }),
   deleteMailbox: (organizationId: string, mailboxId: string) =>

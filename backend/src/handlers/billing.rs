@@ -56,13 +56,21 @@ pub async fn summary(
     let settings = billing::settings(&state).await?;
     let billing_profile = billing::billing_profile(&state, user_entitlements.organization_id).await?;
     let orders = billing::orders_for_user(&state, auth.user_id).await?;
-    let usage: (i64,i64,i64,i64) = sqlx::query_as(
+    let usage: (i64,i64,i64,i64,i64) = sqlx::query_as(
         "SELECT (SELECT count(*)::bigint FROM organization_memberships WHERE organization_id=$1 AND status IN ('active','invited')),
                 (SELECT count(*)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND status <> 'deleted'),
                 (SELECT count(*)::bigint FROM organization_domains WHERE organization_id=$1 AND status <> 'removing'),
-                COALESCE((SELECT sum(quota_bytes)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND status <> 'deleted'),0)::bigint"
+                COALESCE((SELECT sum(quota_bytes)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL AND status <> 'deleted'),0)::bigint,
+                COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$1),0)::bigint"
     ).bind(user_entitlements.organization_id).fetch_one(&state.db).await
      .map_err(|e| ApiError::internal(e.to_string()))?;
+    let lifecycle: (chrono::DateTime<chrono::Utc>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,String,Option<Uuid>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT current_period_start,current_period_end,renewal_grace_end,payment_due_at,grace_period_end,assignment_source,last_order_id,
+                retention_started_at,data_retention_until,purge_eligible_at,retention_expired_at,purge_started_at,data_purged_at
+         FROM organization_subscriptions WHERE organization_id=$1"
+    ).bind(user_entitlements.organization_id).fetch_one(&state.db).await
+     .map_err(|e| ApiError::internal(e.to_string()))?;
+    let scheduled_change=billing::scheduled_change_for_organization(&state,user_entitlements.organization_id).await?;
 
     Ok(Json(json!({
         "organization_id": user_entitlements.organization_id,
@@ -72,11 +80,28 @@ pub async fn summary(
         "mailbox_quota_bytes": user_entitlements.quota_bytes,
         "storage_pool_bytes": user_entitlements.storage_pool_bytes,
         "storage_allocated_bytes": usage.3,
+        "storage_used_bytes": usage.4,
         "seat_limit": user_entitlements.seat_limit,
         "mailbox_limit": user_entitlements.mailbox_limit,
+        "max_mailboxes": current.max_mailboxes,
+        "alias_limit_per_mailbox": current.alias_limit_per_mailbox,
         "domain_limit": user_entitlements.domain_limit,
         "organization_daily_send_limit": user_entitlements.organization_daily_send_limit,
         "usage": {"seats": usage.0, "mailboxes": usage.1, "domains": usage.2},
+        "current_period_start": lifecycle.0,
+        "current_period_end": lifecycle.1,
+        "renewal_grace_end": lifecycle.2,
+        "payment_due_at": lifecycle.3,
+        "grace_period_end": lifecycle.4,
+        "assignment_source": lifecycle.5,
+        "last_order_id": lifecycle.6,
+        "retention_started_at": lifecycle.7,
+        "data_retention_until": lifecycle.8,
+        "purge_eligible_at": lifecycle.9,
+        "retention_expired_at": lifecycle.10,
+        "purge_started_at": lifecycle.11,
+        "data_purged_at": lifecycle.12,
+        "scheduled_change": scheduled_change,
         "quota_override_bytes": user_entitlements.quota_override_bytes,
         "quota_source": if user_entitlements.quota_is_overridden() { "override" } else { "plan" },
         "settings": settings,
@@ -216,6 +241,43 @@ pub async fn cancel_order(
     )
     .await;
     Ok(Json(json!({ "ok": true })))
+}
+
+
+#[derive(Deserialize)]
+pub struct ScheduleChangeIn {
+    change_type: String,
+    #[serde(default)] plan_code: Option<String>,
+    #[serde(default)] mailbox_count: Option<i32>,
+    #[serde(default)] note: String,
+}
+
+/// `POST /api/billing/subscription/change` — schedule a downgrade or
+/// cancellation for the end of the already-paid term. Upgrades remain an
+/// immediate invoice flow; this endpoint never shortens current paid access.
+pub async fn schedule_subscription_change(
+    State(state): State<AppState>, auth: AuthUser, Json(body): Json<ScheduleChangeIn>,
+) -> Result<Json<Value>, ApiError> {
+    let kind=body.change_type.trim();
+    if !matches!(kind,"plan_change"|"cancel") { return Err(ApiError::bad_request("change_type must be plan_change or cancel")); }
+    let change=billing::schedule_subscription_change(
+        &state,auth.user_id,body.plan_code.as_deref(),body.mailbox_count,kind=="cancel",&body.note
+    ).await?;
+    audit::record(&state,Some(auth.user_id),"billing.subscription_change_schedule",json!({
+        "organization_id":change.organization_id,"change_type":change.change_type,"target_plan_code":change.target_plan_code,
+        "target_mailbox_count":change.target_mailbox_count,"effective_at":change.effective_at
+    })).await;
+    Ok(Json(serde_json::to_value(change).unwrap_or(Value::Null)))
+}
+
+/// `DELETE /api/billing/subscription/change` — withdraw the pending renewal
+/// change while leaving the paid current term untouched.
+pub async fn cancel_subscription_change(
+    State(state): State<AppState>, auth: AuthUser,
+) -> Result<Json<Value>, ApiError> {
+    billing::cancel_scheduled_change(&state,auth.user_id).await?;
+    audit::record(&state,Some(auth.user_id),"billing.subscription_change_cancel",json!({})).await;
+    Ok(Json(json!({"ok":true})))
 }
 
 /// `GET /api/billing/invoices` — paid orders (the customer's invoice list).
@@ -544,10 +606,16 @@ pub struct SettingsIn {
     #[serde(default = "default_tax_rate_bps")] tax_rate_bps: i32,
     #[serde(default = "default_invoice_due_days")] invoice_due_days: i32,
     #[serde(default = "default_grace_days")] grace_days: i32,
+    #[serde(default = "default_retention_days")] retention_days: i32,
+    #[serde(default = "default_renewal_reminder_days")] renewal_reminder_days: i32,
+    #[serde(default = "default_suspension_warning_days")] suspension_warning_days: i32,
 }
 fn default_tax_rate_bps() -> i32 { 1500 }
 fn default_invoice_due_days() -> i32 { 7 }
 fn default_grace_days() -> i32 { 7 }
+fn default_retention_days() -> i32 { 30 }
+fn default_renewal_reminder_days() -> i32 { 14 }
+fn default_suspension_warning_days() -> i32 { 2 }
 
 /// `PUT /api/admin/billing-settings` — update bank/PayPal details.
 pub async fn admin_update_settings(
@@ -555,8 +623,13 @@ pub async fn admin_update_settings(
     admin: AdminUser,
     Json(body): Json<SettingsIn>,
 ) -> Result<Json<billing::BillingSettings>, ApiError> {
-    if !(0..=10000).contains(&body.tax_rate_bps) || !(0..=90).contains(&body.invoice_due_days) || !(0..=90).contains(&body.grace_days) {
-        return Err(ApiError::bad_request("Invalid tax, due-day or grace-day setting"));
+    if !(0..=10000).contains(&body.tax_rate_bps)
+        || !(0..=90).contains(&body.invoice_due_days)
+        || !(0..=90).contains(&body.grace_days)
+        || !(1..=365).contains(&body.retention_days)
+        || !(1..=90).contains(&body.renewal_reminder_days)
+        || !(0..=30).contains(&body.suspension_warning_days) {
+        return Err(ApiError::bad_request("Invalid tax, due-day, grace, reminder, suspension-warning, or retention setting"));
     }
     let input = billing::BillingSettingsInput {
         bank_details: body.bank_details.trim().to_string(),
@@ -570,6 +643,9 @@ pub async fn admin_update_settings(
         tax_rate_bps: body.tax_rate_bps,
         invoice_due_days: body.invoice_due_days,
         grace_days: body.grace_days,
+        retention_days: body.retention_days,
+        renewal_reminder_days: body.renewal_reminder_days,
+        suspension_warning_days: body.suspension_warning_days,
     };
     billing::update_settings(&state, &input).await?;
     audit::record(
@@ -676,6 +752,19 @@ struct AdminSubscriptionRow {
     payment_due_at: Option<chrono::DateTime<chrono::Utc>>,
     grace_period_end: Option<chrono::DateTime<chrono::Utc>>,
     cancelled_at: Option<chrono::DateTime<chrono::Utc>>,
+    retention_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    data_retention_until: Option<chrono::DateTime<chrono::Utc>>,
+    purge_eligible_at: Option<chrono::DateTime<chrono::Utc>>,
+    retention_expired_at: Option<chrono::DateTime<chrono::Utc>>,
+    purge_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    data_purged_at: Option<chrono::DateTime<chrono::Utc>>,
+    failed_provisioning_jobs: i64,
+    pending_provisioning_jobs: i64,
+    failed_lifecycle_emails: i64,
+    provider_stale_mailboxes: i64,
+    purge_run_id: Option<Uuid>,
+    purge_run_status: Option<String>,
+    purge_run_last_error: Option<String>,
     owner_email: Option<String>,
     billing_email: Option<String>,
     last_paid_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -715,16 +804,22 @@ pub async fn admin_subscriptions(
      .fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let rows: Vec<AdminSubscriptionRow> = sqlx::query_as(
         "SELECT o.id AS organization_id,o.name AS organization_name,o.is_system,o.created_at AS organization_created_at,
-          s.plan_code,s.status,p.name AS plan_name,s.purchased_mailbox_count,
+          s.plan_code,s.status,COALESCE(pv.name,p.name) AS plan_name,s.purchased_mailbox_count,
           (SELECT count(*)::bigint FROM organization_memberships om WHERE om.organization_id=o.id AND om.status IN ('active','invited')) AS seat_count,
           (SELECT count(*)::bigint FROM mailboxes m WHERE m.organization_id=o.id AND m.deleted_at IS NULL AND m.status <> 'deleted') AS mailbox_count,
           (SELECT count(*)::bigint FROM organization_domains d WHERE d.organization_id=o.id AND d.status <> 'removing') AS domain_count,
           COALESCE((SELECT storage_bytes FROM organization_usage ou WHERE ou.organization_id=o.id),0)::bigint AS storage_used_bytes,
           COALESCE((SELECT sum(m.quota_bytes) FROM mailboxes m WHERE m.organization_id=o.id AND m.deleted_at IS NULL),0)::bigint AS storage_allocated_bytes,
-          COALESCE(s.storage_pool_override_bytes,p.storage_pool_bytes::bigint + p.mailbox_bytes::bigint*GREATEST(s.purchased_mailbox_count-p.mailbox_limit,0)::bigint)::bigint AS storage_pool_bytes,
+          COALESCE(s.storage_pool_override_bytes,COALESCE(pv.storage_pool_bytes,p.storage_pool_bytes)::bigint + COALESCE(pv.mailbox_bytes,p.mailbox_bytes)::bigint*GREATEST(s.purchased_mailbox_count-COALESCE(pv.mailbox_limit,p.mailbox_limit),0)::bigint)::bigint AS storage_pool_bytes,
           s.assignment_source,s.assigned_at,s.assignment_invoice_number,au.email::text AS assignment_order_user_email,
           ab.email::text AS assigned_by_email,s.last_order_id,s.current_period_start,s.current_period_end,
           s.renewal_grace_end,s.payment_due_at,s.grace_period_end,s.cancelled_at,
+          s.retention_started_at,s.data_retention_until,s.purge_eligible_at,s.retention_expired_at,s.purge_started_at,s.data_purged_at,
+          (SELECT count(*)::bigint FROM provisioning_jobs pj WHERE pj.organization_id=o.id AND pj.status='dead') AS failed_provisioning_jobs,
+          (SELECT count(*)::bigint FROM provisioning_jobs pj WHERE pj.organization_id=o.id AND pj.status IN('pending','processing','retry')) AS pending_provisioning_jobs,
+          (SELECT count(*)::bigint FROM billing_lifecycle_outbox blo WHERE blo.organization_id=o.id AND blo.status='failed') AS failed_lifecycle_emails,
+          (SELECT count(*)::bigint FROM mailboxes m WHERE m.organization_id=o.id AND m.deleted_at IS NULL AND (m.provider_reconciled_at IS NULL OR m.provider_reconciled_at<now()-interval '30 minutes')) AS provider_stale_mailboxes,
+          pr.id AS purge_run_id,pr.status AS purge_run_status,pr.last_error AS purge_run_last_error,
           (SELECT u.email::text FROM organization_memberships om JOIN users u ON u.id=om.user_id
              WHERE om.organization_id=o.id AND om.role='owner' AND om.status='active' ORDER BY om.joined_at LIMIT 1) AS owner_email,
           bp.billing_email::text AS billing_email,
@@ -733,9 +828,14 @@ pub async fn admin_subscriptions(
           COALESCE((SELECT sum(ord.total_cents)::bigint FROM orders ord WHERE ord.organization_id=o.id AND ord.invoice_status='paid'),0)::bigint AS total_paid_cents
          FROM organizations o JOIN organization_subscriptions s ON s.organization_id=o.id
          JOIN plans p ON p.code=s.plan_code
+         LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
          LEFT JOIN users au ON au.id=s.assignment_order_user_id
          LEFT JOIN users ab ON ab.id=s.assigned_by
          LEFT JOIN organization_billing_profiles bp ON bp.organization_id=o.id
+         LEFT JOIN LATERAL (
+           SELECT id,status,last_error FROM subscription_purge_runs pr0
+           WHERE pr0.organization_id=o.id ORDER BY requested_at DESC LIMIT 1
+         ) pr ON TRUE
          WHERE ($1::text='' OR o.name ILIKE '%'||$1||'%' OR p.name ILIKE '%'||$1||'%' OR p.code ILIKE '%'||$1||'%'
             OR COALESCE(bp.billing_email::text,'') ILIKE '%'||$1||'%' OR COALESCE(s.assignment_invoice_number,'') ILIKE '%'||$1||'%'
             OR EXISTS (SELECT 1 FROM organization_memberships omq JOIN users uq ON uq.id=omq.user_id WHERE omq.organization_id=o.id AND omq.role='owner' AND uq.email::text ILIKE '%'||$1||'%'))
@@ -755,6 +855,11 @@ pub async fn admin_subscriptions(
         "assignment_order_user_email":r.assignment_order_user_email,"assigned_by_email":r.assigned_by_email,"last_order_id":r.last_order_id,
         "current_period_start":r.current_period_start,"current_period_end":r.current_period_end,"renewal_grace_end":r.renewal_grace_end,
         "payment_due_at":r.payment_due_at,"grace_period_end":r.grace_period_end,"cancelled_at":r.cancelled_at,
+        "retention_started_at":r.retention_started_at,"data_retention_until":r.data_retention_until,"purge_eligible_at":r.purge_eligible_at,
+        "retention_expired_at":r.retention_expired_at,"purge_started_at":r.purge_started_at,"data_purged_at":r.data_purged_at,
+        "operations":{"failed_provisioning_jobs":r.failed_provisioning_jobs,"pending_provisioning_jobs":r.pending_provisioning_jobs,
+          "failed_lifecycle_emails":r.failed_lifecycle_emails,"provider_stale_mailboxes":r.provider_stale_mailboxes,
+          "purge_run_id":r.purge_run_id,"purge_run_status":r.purge_run_status,"purge_run_last_error":r.purge_run_last_error},
         "owner_email":r.owner_email,"billing_email":r.billing_email,"last_paid_at":r.last_paid_at,
         "paid_invoice_count":r.paid_invoice_count,"total_paid_cents":r.total_paid_cents
     })).collect::<Vec<_>>(), "total": total, "limit": limit, "offset": offset })))
@@ -833,6 +938,15 @@ pub async fn admin_update_subscription(
     }
     if body.organization_daily_send_override.is_some_and(|v| v<0) { return Err(ApiError::bad_request("Daily send override cannot be negative")); }
 
+    if matches!(status,"active"|"trial"|"past_due") {
+        let purge_blocker: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM subscription_purge_runs WHERE organization_id=$1 AND status IN ('queued','processing','failed'))"
+        ).bind(organization_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        if purge_blocker {
+            return Err(ApiError::conflict("This business has an unfinished retained-data purge. Retry and finish that operation before restoring mailbox access."));
+        }
+    }
+
     let current: Option<(String,i32,String,chrono::DateTime<chrono::Utc>,Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
         "SELECT plan_code,purchased_mailbox_count,status,current_period_start,current_period_end
          FROM organization_subscriptions WHERE organization_id=$1"
@@ -895,7 +1009,7 @@ pub async fn admin_update_subscription(
     let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
     if assignment_changed {
         sqlx::query(
-            "UPDATE organization_subscriptions SET plan_code=$2,status=$3,purchased_mailbox_count=$4,
+            "UPDATE organization_subscriptions SET plan_code=$2,plan_version_id=(SELECT current_version_id FROM plans WHERE code=$2),status=$3,purchased_mailbox_count=$4,
               storage_pool_override_bytes=$5,mailbox_quota_override_bytes=$6,seat_limit_override=$7,mailbox_limit_override=$8,
               domain_limit_override=$9,organization_daily_send_override=$10,current_period_end=$11,
               renewal_grace_end=CASE WHEN $11::timestamptz IS NULL THEN NULL ELSE $11::timestamptz+((SELECT grace_days FROM billing_settings WHERE id=TRUE)::text||' days')::interval END,
@@ -917,6 +1031,21 @@ pub async fn admin_update_subscription(
          .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
+    if matches!(status,"active"|"trial"|"past_due") {
+        sqlx::query(
+            "UPDATE organization_subscriptions SET retention_started_at=NULL,data_retention_until=NULL,purge_eligible_at=NULL,
+             retention_expired_at=NULL,purge_started_at=NULL,data_purged_at=NULL,updated_at=now() WHERE organization_id=$1"
+        ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    } else if matches!(status,"suspended"|"cancelled") {
+        sqlx::query(
+            "UPDATE organization_subscriptions SET retention_started_at=COALESCE(retention_started_at,now()),
+             data_retention_until=COALESCE(data_retention_until,now()+((SELECT retention_days FROM billing_settings WHERE id=TRUE)::text||' days')::interval),
+             purge_eligible_at=COALESCE(purge_eligible_at,now()+((SELECT retention_days FROM billing_settings WHERE id=TRUE)::text||' days')::interval),
+             retention_expired_at=CASE WHEN COALESCE(purge_eligible_at,now()+((SELECT retention_days FROM billing_settings WHERE id=TRUE)::text||' days')::interval)<=now() THEN COALESCE(retention_expired_at,now()) ELSE retention_expired_at END,
+             updated_at=now() WHERE organization_id=$1"
+        ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    }
+
     let event_type=if assignment_changed{"assignment"}else if period_changed{"period"}else if status_changed{"status"}else{"limits"};
     sqlx::query(
         "INSERT INTO subscription_assignment_history
@@ -929,7 +1058,7 @@ pub async fn admin_update_subscription(
      .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
 
     let effective: i64=sqlx::query_scalar(
-        "SELECT COALESCE(s.mailbox_quota_override_bytes,p.mailbox_bytes)::bigint FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code WHERE s.organization_id=$1"
+        "SELECT COALESCE(s.mailbox_quota_override_bytes,pv.mailbox_bytes,p.mailbox_bytes)::bigint FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id WHERE s.organization_id=$1"
     ).bind(organization_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     sqlx::query(
         "UPDATE users SET plan=$2,quota_override_bytes=NULL,quota_bytes=$3,updated_at=now()
@@ -940,17 +1069,283 @@ pub async fn admin_update_subscription(
     sqlx::query(
         "INSERT INTO provisioning_jobs
           (user_id,organization_id,mailbox_id,operation,target_email,account_id,quota_bytes,status,max_attempts,dedupe_key)
-         SELECT COALESCE(m.user_id,o.created_by),m.organization_id,m.id,'quota',m.address::text,m.provider_account_id,
+         SELECT COALESCE(m.user_id,o.created_by),m.organization_id,m.id,'set_quota',m.address::text,m.provider_account_id,
                 m.quota_bytes,'pending',8,'mailbox.quota:'||m.id::text
          FROM mailboxes m JOIN organizations o ON o.id=m.organization_id
          WHERE m.organization_id=$1 AND m.deleted_at IS NULL AND COALESCE(m.user_id,o.created_by) IS NOT NULL
          ON CONFLICT (dedupe_key) WHERE status IN ('pending','retry')
          DO UPDATE SET quota_bytes=EXCLUDED.quota_bytes,status='pending',attempts=0,next_attempt_at=now(),last_error='',completed_at=NULL,updated_at=now()"
     ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    billing::enqueue_organization_access_tx(&mut tx, organization_id).await?;
     tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
     audit::record(&state,Some(admin.0.user_id),"admin.billing.subscription_update",json!({
         "organization_id":organization_id,"plan":body.plan_code,"status":status,"purchased_mailbox_count":purchased_mailboxes,
         "assignment_changed":assignment_changed,"period_end":effective_period_end,"reason":reason
     })).await;
     Ok(Json(json!({"ok":true,"organization_id":organization_id,"plan_code":body.plan_code,"status":status,"current_period_end":effective_period_end})))
+}
+
+#[derive(Deserialize)]
+pub struct AdminPurgeIn {
+    confirm_name: String,
+    #[serde(default)]
+    reason: String,
+}
+
+/// Platform billing/recovery operations dashboard. This intentionally reports
+/// durable queue state rather than only application-level subscription state,
+/// so an operator can see when provider reconciliation or customer notices
+/// have fallen behind.
+pub async fn admin_billing_operations(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> Result<Json<Value>, ApiError> {
+    billing::reconcile_subscription_lifecycle(&state).await?;
+
+    let counts: (i64,i64,i64,i64,i64,i64,i64,i64,i64) = sqlx::query_as(
+        "SELECT
+           (SELECT count(*)::bigint FROM organization_subscriptions s JOIN organizations o ON o.id=s.organization_id
+             WHERE o.is_system=FALSE AND s.status IN('suspended','cancelled') AND s.purge_eligible_at IS NOT NULL
+               AND s.purge_eligible_at<=now() AND s.data_purged_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM subscription_purge_runs pr WHERE pr.organization_id=s.organization_id AND pr.status IN('queued','processing','failed')))::bigint,
+           (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status IN('queued','processing'))::bigint,
+           (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status='failed')::bigint,
+           (SELECT count(*)::bigint FROM provisioning_jobs WHERE status='dead')::bigint,
+           (SELECT count(*)::bigint FROM provisioning_jobs WHERE status IN('pending','processing','retry'))::bigint,
+           (SELECT count(*)::bigint FROM billing_lifecycle_outbox WHERE status='failed')::bigint,
+           (SELECT count(*)::bigint FROM billing_lifecycle_outbox WHERE status IN('pending','sending','retry'))::bigint,
+           (SELECT count(*)::bigint FROM billing_email_outbox WHERE status='failed')::bigint,
+           (SELECT count(*)::bigint FROM mailboxes m JOIN organizations o ON o.id=m.organization_id
+             WHERE o.is_system=FALSE AND m.deleted_at IS NULL
+               AND (m.provider_reconciled_at IS NULL OR m.provider_reconciled_at<now()-interval '30 minutes'))::bigint"
+    ).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let purge_eligible: Vec<(Uuid,String,String,Option<chrono::DateTime<chrono::Utc>>,i64,i64)> = sqlx::query_as(
+        "SELECT o.id,o.name,s.status,s.purge_eligible_at,
+                (SELECT count(*)::bigint FROM mailboxes m WHERE m.organization_id=o.id AND m.deleted_at IS NULL),
+                COALESCE((SELECT storage_bytes FROM organization_usage ou WHERE ou.organization_id=o.id),0)::bigint
+         FROM organizations o JOIN organization_subscriptions s ON s.organization_id=o.id
+         WHERE o.is_system=FALSE AND s.status IN('suspended','cancelled') AND s.purge_eligible_at IS NOT NULL
+           AND s.purge_eligible_at<=now() AND s.data_purged_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM subscription_purge_runs pr WHERE pr.organization_id=s.organization_id AND pr.status IN('queued','processing','failed'))
+         ORDER BY s.purge_eligible_at,o.name LIMIT 100"
+    ).fetch_all(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let failed_jobs: Vec<(Uuid,Uuid,String,String,String,i32,String,chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT pj.id,o.id,o.name,pj.operation,pj.target_email::text,pj.attempts,pj.last_error,pj.updated_at
+         FROM provisioning_jobs pj JOIN organizations o ON o.id=pj.organization_id
+         WHERE pj.status='dead' ORDER BY pj.updated_at DESC LIMIT 100"
+    ).fetch_all(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let failed_notices: Vec<(Uuid,Uuid,String,String,String,i32,String,chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT b.id,o.id,o.name,b.kind,b.recipient::text,b.attempts,b.last_error,b.updated_at
+         FROM billing_lifecycle_outbox b JOIN organizations o ON o.id=b.organization_id
+         WHERE b.status='failed' ORDER BY b.updated_at DESC LIMIT 100"
+    ).fetch_all(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let purge_runs: Vec<(Uuid,Uuid,String,String,i32,i32,i32,i32,String,chrono::DateTime<chrono::Utc>,Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT pr.id,o.id,o.name,pr.status,pr.mailbox_count_snapshot,pr.completed_mailbox_count,
+                pr.address_count_snapshot,pr.completed_address_count,pr.last_error,pr.requested_at,pr.completed_at
+         FROM subscription_purge_runs pr JOIN organizations o ON o.id=pr.organization_id
+         ORDER BY pr.requested_at DESC LIMIT 100"
+    ).fetch_all(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(json!({
+        "counts": {
+            "purge_eligible": counts.0,
+            "purge_running": counts.1,
+            "purge_failed": counts.2,
+            "provisioning_dead": counts.3,
+            "provisioning_pending": counts.4,
+            "lifecycle_email_failed": counts.5,
+            "lifecycle_email_pending": counts.6,
+            "invoice_email_failed": counts.7,
+            "provider_stale_mailboxes": counts.8
+        },
+        "purge_eligible": purge_eligible.into_iter().map(|r| json!({
+            "organization_id":r.0,"organization_name":r.1,"subscription_status":r.2,"purge_eligible_at":r.3,
+            "mailbox_count":r.4,"storage_bytes":r.5
+        })).collect::<Vec<_>>(),
+        "failed_provisioning_jobs": failed_jobs.into_iter().map(|r| json!({
+            "id":r.0,"organization_id":r.1,"organization_name":r.2,"operation":r.3,"target":r.4,
+            "attempts":r.5,"last_error":r.6,"updated_at":r.7
+        })).collect::<Vec<_>>(),
+        "failed_lifecycle_notices": failed_notices.into_iter().map(|r| json!({
+            "id":r.0,"organization_id":r.1,"organization_name":r.2,"kind":r.3,"recipient":r.4,
+            "attempts":r.5,"last_error":r.6,"updated_at":r.7
+        })).collect::<Vec<_>>(),
+        "purge_runs": purge_runs.into_iter().map(|r| json!({
+            "id":r.0,"organization_id":r.1,"organization_name":r.2,"status":r.3,
+            "mailbox_count":r.4,"completed_mailbox_count":r.5,"address_count":r.6,"completed_address_count":r.7,
+            "last_error":r.8,"requested_at":r.9,"completed_at":r.10
+        })).collect::<Vec<_>>()
+    })))
+}
+
+/// Re-assert subscription-owned mailbox access/quota and force the provider
+/// reconciler to inspect every live mailbox again. This is safe to repeat.
+pub async fn admin_reconcile_subscription(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    let is_system: bool = sqlx::query_scalar("SELECT is_system FROM organizations WHERE id=$1")
+        .bind(organization_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("Business not found"))?;
+    if is_system { return Err(ApiError::forbidden("The protected system organization cannot be reconciled here")); }
+
+    let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query("UPDATE mailboxes SET provider_reconciled_at=NULL,updated_at=now() WHERE organization_id=$1 AND deleted_at IS NULL")
+        .bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    billing::enqueue_organization_access_tx(&mut tx,organization_id).await?;
+    sqlx::query(
+        "INSERT INTO provisioning_jobs
+          (user_id,organization_id,mailbox_id,operation,target_email,account_id,quota_bytes,status,max_attempts,dedupe_key)
+         SELECT COALESCE(m.user_id,o.created_by),m.organization_id,m.id,'set_quota',m.address::text,m.provider_account_id,
+                m.quota_bytes,'pending',8,'mailbox.quota:'||m.id::text
+         FROM mailboxes m JOIN organizations o ON o.id=m.organization_id
+         WHERE m.organization_id=$1 AND m.deleted_at IS NULL AND m.status<>'deleting' AND COALESCE(m.user_id,o.created_by) IS NOT NULL
+         ON CONFLICT (dedupe_key) WHERE status IN('pending','retry')
+         DO UPDATE SET quota_bytes=EXCLUDED.quota_bytes,status='pending',attempts=0,next_attempt_at=now(),last_error='',completed_at=NULL,updated_at=now()"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL"
+    ).bind(organization_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    audit::record(&state,Some(admin.0.user_id),"admin.billing.subscription_reconcile",json!({"organization_id":organization_id,"mailboxes":queued})).await;
+    Ok(Json(json!({"ok":true,"mailboxes_queued":queued})))
+}
+
+/// Retry durable billing/provider failures for one business. Failed purge runs
+/// are moved back to processing, but no new destructive scope is introduced.
+pub async fn admin_retry_subscription_failures(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1 AND is_system=FALSE)")
+        .bind(organization_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if !exists { return Err(ApiError::not_found("Business not found")); }
+    let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let provisioning=sqlx::query(
+        "UPDATE provisioning_jobs AS dead SET status='retry',attempts=0,next_attempt_at=now(),locked_at=NULL,locked_by=NULL,
+           completed_at=NULL,last_error='',updated_at=now()
+         WHERE dead.organization_id=$1 AND dead.status='dead'
+           AND NOT EXISTS(SELECT 1 FROM provisioning_jobs active WHERE active.id<>dead.id AND active.dedupe_key=dead.dedupe_key
+                          AND active.status IN('pending','processing','retry'))"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.rows_affected();
+    let lifecycle=sqlx::query(
+        "UPDATE billing_lifecycle_outbox SET status='retry',attempts=0,next_attempt_at=now(),last_error='',updated_at=now()
+         WHERE organization_id=$1 AND status='failed'"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.rows_affected();
+    let invoices=sqlx::query(
+        "UPDATE billing_email_outbox b SET status='retry',attempts=0,next_attempt_at=now(),last_error='',updated_at=now()
+         FROM orders o WHERE b.order_id=o.id AND o.organization_id=$1 AND b.status='failed'"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.rows_affected();
+    let purges=sqlx::query(
+        "UPDATE subscription_purge_runs SET status='processing',started_at=COALESCE(started_at,now()),last_error='',updated_at=now()
+         WHERE organization_id=$1 AND status='failed'"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.rows_affected();
+    let addresses=sqlx::query(
+        "UPDATE business_addresses SET sync_status='pending',sync_attempts=0,next_attempt_at=now(),sync_error='',updated_at=now()
+         WHERE organization_id=$1 AND deleted_at IS NOT NULL AND sync_status='error'"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.rows_affected();
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    audit::record(&state,Some(admin.0.user_id),"admin.billing.retry_failures",json!({
+        "organization_id":organization_id,"provisioning":provisioning,"lifecycle_notices":lifecycle,"invoice_emails":invoices,"purge_runs":purges,"business_addresses":addresses
+    })).await;
+    Ok(Json(json!({"ok":true,"provisioning":provisioning,"lifecycle_notices":lifecycle,"invoice_emails":invoices,"purge_runs":purges,"business_addresses":addresses})))
+}
+
+/// Explicit retained-data purge. Retention expiry alone never invokes this
+/// path. Exact business-name confirmation and an operator reason are required.
+pub async fn admin_purge_subscription_data(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(organization_id): Path<Uuid>,
+    Json(body): Json<AdminPurgeIn>,
+) -> Result<Json<Value>, ApiError> {
+    let reason=body.reason.trim().chars().take(500).collect::<String>();
+    if reason.chars().count()<5 { return Err(ApiError::bad_request("Enter an operator reason for the retained-data purge")); }
+
+    let mut tx=state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let row: Option<(String,bool,String,Option<chrono::DateTime<chrono::Utc>>,Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT o.name,o.is_system,s.status,s.purge_eligible_at,s.data_purged_at
+         FROM organizations o JOIN organization_subscriptions s ON s.organization_id=o.id
+         WHERE o.id=$1 FOR UPDATE OF s,o"
+    ).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let (name,is_system,status,purge_eligible_at,data_purged_at)=row.ok_or_else(|| ApiError::not_found("Business subscription not found"))?;
+    if is_system { return Err(ApiError::forbidden("The protected system organization cannot be purged")); }
+    if body.confirm_name.trim()!=name { return Err(ApiError::bad_request("Enter the exact business name to confirm the retained-data purge")); }
+    if !matches!(status.as_str(),"suspended"|"cancelled") { return Err(ApiError::conflict("Only suspended or cancelled subscriptions can enter retained-data purge")); }
+    if data_purged_at.is_some() { return Err(ApiError::conflict("Retained mailbox data was already purged for this subscription lifecycle")); }
+    let eligible=purge_eligible_at.ok_or_else(|| ApiError::conflict("This subscription has no purge-eligibility deadline"))?;
+    if eligible>chrono::Utc::now() { return Err(ApiError::conflict("The retained-data period has not ended yet")); }
+    let unfinished: bool=sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM subscription_purge_runs WHERE organization_id=$1 AND status IN('queued','processing','failed'))"
+    ).bind(organization_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if unfinished { return Err(ApiError::conflict("An unfinished purge run already exists. Retry that operation instead of starting another purge.")); }
+
+    let mailbox_ids: Vec<Uuid>=sqlx::query_scalar(
+        "SELECT id FROM mailboxes WHERE organization_id=$1 AND deleted_at IS NULL ORDER BY created_at FOR UPDATE"
+    ).bind(organization_id).fetch_all(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let address_count:i64=sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM business_addresses WHERE organization_id=$1 AND deleted_at IS NULL"
+    ).bind(organization_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let storage_bytes:i64=sqlx::query_scalar(
+        "SELECT COALESCE(storage_bytes,0)::bigint FROM organization_usage WHERE organization_id=$1"
+    ).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?.unwrap_or(0);
+
+    let run_id:Uuid=sqlx::query_scalar(
+        "INSERT INTO subscription_purge_runs
+          (organization_id,status,requested_by,reason,eligible_at_snapshot,mailbox_count_snapshot,address_count_snapshot,storage_bytes_snapshot,started_at)
+         VALUES($1,'processing',$2,$3,$4,$5,$6,$7,now()) RETURNING id"
+    ).bind(organization_id).bind(admin.0.user_id).bind(&reason).bind(eligible)
+     .bind(mailbox_ids.len() as i32).bind(address_count as i32).bind(storage_bytes)
+     .fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    sqlx::query(
+        "UPDATE organization_subscriptions SET retention_expired_at=COALESCE(retention_expired_at,now()),purge_started_at=now(),updated_at=now()
+         WHERE organization_id=$1"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "UPDATE mailbox_invitations SET status='revoked',revoked_at=now(),updated_at=now()
+         WHERE organization_id=$1 AND status='pending'"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "UPDATE business_addresses SET deleted_at=COALESCE(deleted_at,now()),enabled=FALSE,sync_status='pending',sync_error='',next_attempt_at=now(),updated_at=now()
+         WHERE organization_id=$1 AND deleted_at IS NULL"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "DELETE FROM business_address_members bam USING business_addresses ba
+         WHERE bam.business_address_id=ba.id AND ba.organization_id=$1"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query(
+        "UPDATE users SET primary_mailbox_id=NULL,active_mailbox_id=NULL,updated_at=now()
+         WHERE primary_mailbox_id IN(SELECT id FROM mailboxes WHERE organization_id=$1)
+            OR active_mailbox_id IN(SELECT id FROM mailboxes WHERE organization_id=$1)"
+    ).bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    sqlx::query("UPDATE mailboxes SET status='deleting',updated_at=now() WHERE organization_id=$1 AND deleted_at IS NULL")
+        .bind(organization_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    for mailbox_id in mailbox_ids.iter().copied() {
+        state.provisioning.enqueue_mailbox_delete_tx(&mut tx,mailbox_id).await?;
+    }
+    sqlx::query(
+        "INSERT INTO subscription_assignment_history
+          (organization_id,plan_code,plan_name,purchased_mailbox_count,assignment_source,payment_confirmed,assigned_by,event_type,period_start,period_end,status_after,reason,detail)
+         SELECT s.organization_id,s.plan_code,COALESCE(pv.name,p.name),s.purchased_mailbox_count,'admin_manual',FALSE,$2,'retention',
+                s.current_period_start,s.current_period_end,s.status,'Retained mailbox data purge started',
+                jsonb_build_object('purge_run_id',$3::text,'mailbox_count',$4,'address_count',$5,'storage_bytes',$6,'operator_reason',$7)
+         FROM organization_subscriptions s JOIN plans p ON p.code=s.plan_code LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
+         WHERE s.organization_id=$1"
+    ).bind(organization_id).bind(admin.0.user_id).bind(run_id).bind(mailbox_ids.len() as i32).bind(address_count as i32).bind(storage_bytes).bind(&reason)
+     .execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+
+    audit::record(&state,Some(admin.0.user_id),"admin.billing.retained_data_purge",json!({
+        "organization_id":organization_id,"organization_name":name,"purge_run_id":run_id,
+        "mailbox_count":mailbox_ids.len(),"address_count":address_count,"storage_bytes":storage_bytes,"reason":reason
+    })).await;
+    billing::reconcile_purge_runs(&state).await?;
+    Ok(Json(json!({"ok":true,"purge_run_id":run_id,"status":"processing","mailbox_count":mailbox_ids.len(),"address_count":address_count})))
 }

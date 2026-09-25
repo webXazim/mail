@@ -1,0 +1,2 @@
+import{t as e}from"./auth-Cz6v_vZJ.js";var t=`cs-mail:compose-draft`,n={load(){if(!e.isDemo())return null;try{let e=JSON.parse(localStorage.getItem(`cs-mail:compose-draft`)||`{}`);return e.to||e.subject||e.body||Array.isArray(e.attachments)&&e.attachments.length>0?e:null}catch{return null}},clear(){e.isDemo()&&localStorage.removeItem(t)}};export{n,t};
+//# sourceMappingURL=drafts-qYcZzyME.js.map

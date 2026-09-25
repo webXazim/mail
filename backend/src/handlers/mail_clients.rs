@@ -354,6 +354,12 @@ pub async fn create_app_password(
     Json(body): Json<CreateAppPassword>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let mailbox = selected_mailbox(&state, &auth).await?;
+    let subscription = entitlements::for_organization(&state, mailbox.organization_id).await?;
+    if !matches!(subscription.subscription_status.as_str(), "active" | "trial") {
+        return Err(ApiError::forbidden(
+            "Renew the business plan before creating a new app password",
+        ));
+    }
     let failure_key = format!("mail-client-password:{}:{}", auth.user_id, mailbox.id);
     let create_key = format!("mail-client-create:{}:{}", auth.user_id, mailbox.id);
     state.rate.check_lock(&failure_key).await?;

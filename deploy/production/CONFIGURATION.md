@@ -66,15 +66,36 @@ Known credential values are redacted. Preflight also checks root ownership,
 mode 0600, duplicate keys, unsafe shell interpolation and required secret
 lengths before Compose is touched.
 
-## Billing testing flag
+## Billing activation safety
 
-`CS_MAIL_BILLING_INSTANT_ACTIVATION=false` is the production default. Temporarily
-enable instant activation only for isolated acceptance tests; restore `false`
-before accepting real paid orders.
+Production is permanently payment-gated:
 
-The running API container must have `CS_MAIL_BILLING_INSTANT_ACTIVATION=true`
-for a **new** order to activate immediately. Changing the environment does not
-activate an invoice issued earlier. An unpaid open invoice must be cancelled
-from Billing before placing a fresh test order; a submitted payment needs
-review rather than a replacement order. The new order still issues an invoice
-that remains due until payment is reviewed.
+```dotenv
+CS_MAIL_ENVIRONMENT=production
+CS_MAIL_BILLING_INSTANT_ACTIVATION=false
+```
+
+The API now refuses to start with instant billing activation enabled under the
+`production` runtime profile. Do not toggle this flag on the public VPS for
+acceptance testing. Any test that needs instant/bootstrap activation must run in
+an isolated `development` or `test` environment with non-customer data.
+
+A public order therefore follows invoice → payment submission → operator/payment
+verification → activation. Changing an environment value never settles an
+existing invoice.
+
+## Recoverability evidence
+
+`backup.sh` and `restore-drill.sh` append evidence to PostgreSQL migration 0048.
+The independent offsite jobs for CS Mail data and the shared Stalwart data must
+produce a root-owned proof manifest after a successful encrypted offsite copy.
+Record those manifests with:
+
+```bash
+sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
+sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
+```
+
+Recording a manifest is **not** a backup operation; it only records evidence
+from the external backup system. The final `sh manage launch-freeze` gate fails
+when local backup, restore drill, or either offsite proof is stale/missing.

@@ -103,6 +103,21 @@ export type BusinessSubscriptionRow = {
   payment_due_at: string | null
   grace_period_end: string | null
   cancelled_at: string | null
+  retention_started_at: string | null
+  data_retention_until: string | null
+  purge_eligible_at: string | null
+  retention_expired_at: string | null
+  purge_started_at: string | null
+  data_purged_at: string | null
+  operations: {
+    failed_provisioning_jobs: number
+    pending_provisioning_jobs: number
+    failed_lifecycle_emails: number
+    provider_stale_mailboxes: number
+    purge_run_id: string | null
+    purge_run_status: 'queued' | 'processing' | 'completed' | 'failed' | null
+    purge_run_last_error: string | null
+  }
   owner_email: string | null
   billing_email: string | null
   last_paid_at: string | null
@@ -123,7 +138,7 @@ export type BusinessSubscriptionsPage = {
 export type SubscriptionHistoryRow = {
   id: string
   assigned_at: string
-  event_type: 'assignment' | 'status' | 'period' | 'limits'
+  event_type: 'assignment' | 'status' | 'period' | 'limits' | 'scheduled_change' | 'retention'
   assignment_source: 'bootstrap' | 'test_instant' | 'payment_approval' | 'admin_manual' | 'system_lifecycle'
   payment_confirmed: boolean
   plan_code: string
@@ -139,6 +154,24 @@ export type SubscriptionHistoryRow = {
   detail: Record<string, unknown>
 }
 
+export type BillingOperations = {
+  counts: {
+    purge_eligible: number
+    purge_running: number
+    purge_failed: number
+    provisioning_dead: number
+    provisioning_pending: number
+    lifecycle_email_failed: number
+    lifecycle_email_pending: number
+    invoice_email_failed: number
+    provider_stale_mailboxes: number
+  }
+  purge_eligible: Array<{ organization_id: string; organization_name: string; subscription_status: string; purge_eligible_at: string | null; mailbox_count: number; storage_bytes: number }>
+  failed_provisioning_jobs: Array<{ id: string; organization_id: string; organization_name: string; operation: string; target: string; attempts: number; last_error: string; updated_at: string }>
+  failed_lifecycle_notices: Array<{ id: string; organization_id: string; organization_name: string; kind: string; recipient: string; attempts: number; last_error: string; updated_at: string }>
+  purge_runs: Array<{ id: string; organization_id: string; organization_name: string; status: 'queued' | 'processing' | 'completed' | 'failed'; mailbox_count: number; completed_mailbox_count: number; address_count: number; completed_address_count: number; last_error: string; requested_at: string; completed_at: string | null }>
+}
+
 export type BillingSettingsRow = {
   bank_details: string
   paypal_email: string
@@ -151,6 +184,9 @@ export type BillingSettingsRow = {
   tax_rate_bps: number
   invoice_due_days: number
   grace_days: number
+  retention_days: number
+  renewal_reminder_days: number
+  suspension_warning_days: number
 }
 
 export type BillingProfileRow = {
@@ -166,6 +202,21 @@ export type BillingProfileRow = {
   country: string
 }
 
+
+export type ScheduledSubscriptionChange = {
+  id: string
+  organization_id: string
+  change_type: 'plan_change' | 'cancel'
+  target_plan_code: string | null
+  target_plan_name: string | null
+  target_mailbox_count: number | null
+  effective_at: string
+  status: 'pending' | 'ready_for_renewal' | 'blocked'
+  requested_at: string
+  blocked_reason: string
+  note: string
+}
+
 export type BillingSummary = {
   organization_id: string
   subscription_status: string
@@ -174,6 +225,7 @@ export type BillingSummary = {
   mailbox_quota_bytes: number
   storage_pool_bytes: number
   storage_allocated_bytes: number
+  storage_used_bytes: number
   seat_limit: number
   mailbox_limit: number
   max_mailboxes: number
@@ -183,6 +235,20 @@ export type BillingSummary = {
   usage: { seats: number; mailboxes: number; domains: number }
   quota_override_bytes: number | null
   quota_source: 'plan' | 'override'
+  current_period_start: string
+  current_period_end: string | null
+  renewal_grace_end: string | null
+  payment_due_at: string | null
+  grace_period_end: string | null
+  assignment_source: 'bootstrap' | 'test_instant' | 'payment_approval' | 'admin_manual'
+  last_order_id: string | null
+  retention_started_at: string | null
+  data_retention_until: string | null
+  purge_eligible_at: string | null
+  retention_expired_at: string | null
+  purge_started_at: string | null
+  data_purged_at: string | null
+  scheduled_change: ScheduledSubscriptionChange | null
   settings: BillingSettingsRow
   billing_profile: BillingProfileRow
   instant_activation: boolean
@@ -230,7 +296,7 @@ const DEMO_SETTINGS: BillingSettingsRow = {
   instructions: 'Pay the issued invoice and submit the transfer/reference from Billing. During testing, ordering activates the plan immediately.',
   seller_legal_name: 'CrescentSphere',
   seller_email: 'billing@crescentsphere.com',
-  seller_cr_number: '', seller_vat_number: '', seller_address: '', tax_rate_bps: 1500, invoice_due_days: 7, grace_days: 7,
+  seller_cr_number: '', seller_vat_number: '', seller_address: '', tax_rate_bps: 1500, invoice_due_days: 7, grace_days: 7, retention_days: 30, renewal_reminder_days: 14, suspension_warning_days: 2,
 }
 const DEMO_PROFILE: BillingProfileRow = { organization_id:'demo-business', legal_name:'Demo business', billing_email:'you@example.com', vat_number:'', cr_number:'', address_line1:'', address_line2:'', city:'', postal_code:'', country:'Saudi Arabia' }
 
@@ -296,13 +362,16 @@ export const billingApi = {
     return apiFetch<PlanCatalog>('/api/billing/plans')
   },
   async summary(): Promise<BillingSummary> {
-    if (!isRemoteMail()) { const plan=demoPlans[1] ?? demoPlans[0]; return { organization_id:'demo-business',subscription_status:'active',current_plan:plan,quota_bytes:plan.mailbox_bytes,mailbox_quota_bytes:plan.mailbox_bytes,storage_pool_bytes:plan.mailbox_bytes*plan.mailbox_limit,storage_allocated_bytes:plan.mailbox_bytes,seat_limit:plan.mailbox_limit,mailbox_limit:plan.mailbox_limit,max_mailboxes:plan.max_mailboxes,alias_limit_per_mailbox:plan.alias_limit_per_mailbox,domain_limit:plan.domain_limit,organization_daily_send_limit:plan.organization_daily_send_limit,usage:{seats:1,mailboxes:1,domains:1},quota_override_bytes:null,quota_source:'plan',settings:demoSettings,billing_profile:demoProfile,instant_activation:true,orders:demoOrders } }
+    if (!isRemoteMail()) { const plan=demoPlans[1] ?? demoPlans[0]; const now=nowIso(); return { organization_id:'demo-business',subscription_status:'active',current_plan:plan,quota_bytes:plan.mailbox_bytes,mailbox_quota_bytes:plan.mailbox_bytes,storage_pool_bytes:plan.mailbox_bytes*plan.mailbox_limit,storage_allocated_bytes:plan.mailbox_bytes,storage_used_bytes:Math.round(plan.mailbox_bytes*.35),seat_limit:plan.mailbox_limit,mailbox_limit:plan.mailbox_limit,max_mailboxes:plan.max_mailboxes,alias_limit_per_mailbox:plan.alias_limit_per_mailbox,domain_limit:plan.domain_limit,organization_daily_send_limit:plan.organization_daily_send_limit,usage:{seats:1,mailboxes:1,domains:1},quota_override_bytes:null,quota_source:'plan',current_period_start:now,current_period_end:new Date(Date.now()+365*86400000).toISOString(),renewal_grace_end:null,payment_due_at:null,grace_period_end:null,assignment_source:'test_instant',last_order_id:null,retention_started_at:null,data_retention_until:null,purge_eligible_at:null,retention_expired_at:null,purge_started_at:null,data_purged_at:null,scheduled_change:null,settings:demoSettings,billing_profile:demoProfile,instant_activation:true,orders:demoOrders } }
     return apiFetch<BillingSummary>('/api/billing')
   },
   async plans(): Promise<PlanView[]> { return (await this.catalog()).plans },
   async createOrder(planCode:string,mailboxCount:number,paymentMethod:string,customerNote:string):Promise<OrderRow> { if(!isRemoteMail()){const plan=demoPlans.find(p=>p.code===planCode)??demoPlans[0];const order=demoOrder(plan,mailboxCount,paymentMethod,customerNote);demoOrders=[order,...demoOrders];return order} return apiFetch<OrderRow>('/api/billing/orders',{method:'POST',body:JSON.stringify({plan_code:planCode,mailbox_count:mailboxCount,payment_method:paymentMethod,customer_note:customerNote})}) },
   async submitPaid(orderId:string,paymentMethod:string,reference:string):Promise<OrderRow>{ if(!isRemoteMail()){demoOrders=demoOrders.map(o=>o.id===orderId?{...o,status:'submitted',payment_reference:reference,submitted_at:nowIso()}:o);return demoOrders.find(o=>o.id===orderId)!} return apiFetch<OrderRow>(`/api/billing/orders/${encodeURIComponent(orderId)}/paid`,{method:'POST',body:JSON.stringify({payment_method:paymentMethod,payment_reference:reference})}) },
   async cancelOrder(orderId:string):Promise<void>{ if(!isRemoteMail()){demoOrders=demoOrders.map(o=>o.id===orderId?{...o,status:'cancelled',invoice_status:'void'}:o);return} await apiFetch(`/api/billing/orders/${encodeURIComponent(orderId)}/cancel`,{method:'POST'}) },
+  async schedulePlanChange(planCode:string,mailboxCount:number,note=''):Promise<ScheduledSubscriptionChange>{ if(!isRemoteMail()){throw new Error('Not available in demo mode')} return apiFetch<ScheduledSubscriptionChange>('/api/billing/subscription/change',{method:'POST',body:JSON.stringify({change_type:'plan_change',plan_code:planCode,mailbox_count:mailboxCount,note})}) },
+  async scheduleCancellation(note=''):Promise<ScheduledSubscriptionChange>{ if(!isRemoteMail()){throw new Error('Not available in demo mode')} return apiFetch<ScheduledSubscriptionChange>('/api/billing/subscription/change',{method:'POST',body:JSON.stringify({change_type:'cancel',note})}) },
+  async cancelScheduledChange():Promise<void>{ if(!isRemoteMail())return; await apiFetch('/api/billing/subscription/change',{method:'DELETE'}) },
   async invoices():Promise<OrderRow[]>{ const summary=await billingApi.summary(); return summary.orders.filter(o=>Boolean(o.invoice_number)) },
   async updateProfile(profile:BillingProfileRow):Promise<BillingProfileRow>{ if(!isRemoteMail()){demoProfile={...profile};return demoProfile} return apiFetch<BillingProfileRow>('/api/billing/profile',{method:'PUT',body:JSON.stringify(profile)}) },
   refreshInvoices(){ void billingApi.invoices().then(registerInvoiceResolverCached) },
@@ -320,13 +389,17 @@ export const adminBillingApi = {
   async approveOrder(orderId:string,adminNote:string):Promise<void>{ if(!isRemoteMail()){demoOrders=demoOrders.map(order=>order.id===orderId?{...order,status:'paid',invoice_status:'paid',admin_note:adminNote,paid_at:nowIso()}:order);return} await apiFetch(`/api/admin/orders/${encodeURIComponent(orderId)}/approve`,{method:'POST',body:JSON.stringify({admin_note:adminNote})}) },
   async rejectOrder(orderId:string,adminNote:string):Promise<void>{ if(!isRemoteMail()){demoOrders=demoOrders.map(order=>order.id===orderId?{...order,status:'rejected',invoice_status:'void',admin_note:adminNote}:order);return} await apiFetch(`/api/admin/orders/${encodeURIComponent(orderId)}/reject`,{method:'POST',body:JSON.stringify({admin_note:adminNote})}) },
   async subscriptionsPage(options:{q?:string;status?:BusinessSubscriptionRow['status'];plan?:string;organizationId?:string;limit?:number;offset?:number}={}):Promise<BusinessSubscriptionsPage>{
-    if(!isRemoteMail()){const plan=demoPlans[1]??demoPlans[0];const now=nowIso();const subscriptions=[{organization_id:'demo-business',organization_name:'Demo business',is_system:false,organization_created_at:now,plan_code:plan.code,plan_name:plan.name,status:'active' as const,purchased_mailbox_count:plan.mailbox_limit,assignment_source:'test_instant' as const,assigned_at:now,assignment_invoice_number:null,assignment_order_user_email:'you@example.com',assigned_by_email:null,last_order_id:null,current_period_start:now,current_period_end:new Date(Date.now()+365*86400000).toISOString(),renewal_grace_end:null,payment_due_at:null,grace_period_end:null,cancelled_at:null,owner_email:'you@example.com',billing_email:'you@example.com',last_paid_at:null,paid_invoice_count:0,total_paid_cents:0,storage_allocated_bytes:plan.mailbox_bytes,storage_pool_bytes:plan.storage_pool_bytes,usage:{seats:1,mailboxes:1,domains:1,storage_bytes:0}}];return {subscriptions,total:subscriptions.length,limit:options.limit??100,offset:options.offset??0}}
+    if(!isRemoteMail()){const plan=demoPlans[1]??demoPlans[0];const now=nowIso();const subscriptions=[{organization_id:'demo-business',organization_name:'Demo business',is_system:false,organization_created_at:now,plan_code:plan.code,plan_name:plan.name,status:'active' as const,purchased_mailbox_count:plan.mailbox_limit,assignment_source:'test_instant' as const,assigned_at:now,assignment_invoice_number:null,assignment_order_user_email:'you@example.com',assigned_by_email:null,last_order_id:null,current_period_start:now,current_period_end:new Date(Date.now()+365*86400000).toISOString(),renewal_grace_end:null,payment_due_at:null,grace_period_end:null,cancelled_at:null,retention_started_at:null,data_retention_until:null,purge_eligible_at:null,retention_expired_at:null,purge_started_at:null,data_purged_at:null,operations:{failed_provisioning_jobs:0,pending_provisioning_jobs:0,failed_lifecycle_emails:0,provider_stale_mailboxes:0,purge_run_id:null,purge_run_status:null,purge_run_last_error:null},owner_email:'you@example.com',billing_email:'you@example.com',last_paid_at:null,paid_invoice_count:0,total_paid_cents:0,storage_allocated_bytes:plan.mailbox_bytes,storage_pool_bytes:plan.storage_pool_bytes,usage:{seats:1,mailboxes:1,domains:1,storage_bytes:0}}];return {subscriptions,total:subscriptions.length,limit:options.limit??100,offset:options.offset??0}}
     const params=new URLSearchParams(); if(options.q?.trim())params.set('q',options.q.trim()); if(options.status)params.set('status',options.status); if(options.plan)params.set('plan',options.plan); if(options.organizationId)params.set('organization_id',options.organizationId); params.set('limit',String(options.limit??100)); params.set('offset',String(options.offset??0));
     const data=await apiFetch<{subscriptions:BusinessSubscriptionRow[];total?:number;limit?:number;offset?:number}>(`/api/admin/subscriptions?${params.toString()}`); return {subscriptions:data.subscriptions??[],total:data.total??data.subscriptions?.length??0,limit:data.limit??options.limit??100,offset:data.offset??options.offset??0}
   },
   async subscriptions():Promise<BusinessSubscriptionRow[]>{ return (await this.subscriptionsPage()).subscriptions },
   async subscriptionHistory(organizationId:string):Promise<SubscriptionHistoryRow[]>{ if(!isRemoteMail()) return []; return (await apiFetch<{history:SubscriptionHistoryRow[]}>(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}/history`)).history },
   async updateSubscription(organizationId:string,input:{plan_code:string;status:BusinessSubscriptionRow['status'];purchased_mailbox_count?:number;current_period_end?:string;reason?:string}):Promise<void>{ if(!isRemoteMail()) return; await apiFetch(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}`,{method:'PATCH',body:JSON.stringify(input)}) },
+  async operations():Promise<BillingOperations>{ if(!isRemoteMail()) return {counts:{purge_eligible:0,purge_running:0,purge_failed:0,provisioning_dead:0,provisioning_pending:0,lifecycle_email_failed:0,lifecycle_email_pending:0,invoice_email_failed:0,provider_stale_mailboxes:0},purge_eligible:[],failed_provisioning_jobs:[],failed_lifecycle_notices:[],purge_runs:[]}; return apiFetch<BillingOperations>('/api/admin/billing-operations') },
+  async reconcileSubscription(organizationId:string):Promise<{ok:boolean;mailboxes_queued:number}>{ if(!isRemoteMail()) return {ok:true,mailboxes_queued:0}; return apiFetch(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}/reconcile`,{method:'POST'}) },
+  async retrySubscriptionFailures(organizationId:string):Promise<{ok:boolean;provisioning:number;lifecycle_notices:number;invoice_emails:number;purge_runs:number;business_addresses:number}>{ if(!isRemoteMail()) return {ok:true,provisioning:0,lifecycle_notices:0,invoice_emails:0,purge_runs:0,business_addresses:0}; return apiFetch(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}/retry-failures`,{method:'POST'}) },
+  async purgeSubscriptionData(organizationId:string,confirmName:string,reason:string):Promise<{ok:boolean;purge_run_id:string;status:string;mailbox_count:number;address_count:number}>{ if(!isRemoteMail()) throw new Error('Not available in demo mode'); return apiFetch(`/api/admin/subscriptions/${encodeURIComponent(organizationId)}/purge`,{method:'POST',body:JSON.stringify({confirm_name:confirmName,reason})}) },
   async settings():Promise<BillingSettingsRow>{ if(!isRemoteMail()) return demoSettings; return apiFetch<BillingSettingsRow>('/api/admin/billing-settings') },
   async updateSettings(next:BillingSettingsRow):Promise<void>{ if(!isRemoteMail()){demoSettings={...next};return} await apiFetch('/api/admin/billing-settings',{method:'PUT',body:JSON.stringify(next)}) },
 }

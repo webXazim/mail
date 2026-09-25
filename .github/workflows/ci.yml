@@ -45,14 +45,16 @@ jobs:
         with:
           # Pin matches backend/rust-toolchain.toml so CI == local == image.
           toolchain: 1.88.0
-          components: clippy
+          components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
+      - name: Format
+        run: cargo fmt --check
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --locked --all-targets
       - name: Tests
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
   frontend:
     name: Frontend (lint, typecheck, tests, build)
@@ -70,7 +72,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Lint
-        continue-on-error: true
         run: npm run lint
       - name: Tests
         run: npm run test
@@ -165,7 +166,7 @@ jobs:
         run: ./deploy/production/verify-release.sh
 
   launch-cert-static:
-    name: Upgrade 37 release certification (static)
+    name: Public launch freeze certification (static)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

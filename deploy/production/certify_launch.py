@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CS Mail Upgrade 38 production launch certification.
+"""CS Mail Upgrade 05 public-launch freeze certification.
 
 Runs static and live production gates without logging credentials. A live PASS
 requires real DNS/TLS, public API readiness, anti-relay, two-tenant IDOR probes,
@@ -35,7 +35,7 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0043_mailbox_reconciliation_timestamp.sql"
+EXPECTED_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
 DEFAULT_PUBLIC_ORIGIN = "https://mail.crescentsphere.com"
 
@@ -88,7 +88,7 @@ def run_cmd(cmd: list[str], *, cwd: Path | None = None, timeout: int = 120, inpu
 def json_request(url: str, *, method: str = "GET", token: str | None = None,
                  headers: dict[str, str] | None = None, body: Any = None,
                  timeout: float = 15.0) -> tuple[int, dict[str, Any], dict[str, str]]:
-    request_headers = {"Accept": "application/json", "User-Agent": "cs-mail-launch-certifier/38"}
+    request_headers = {"Accept": "application/json", "User-Agent": "cs-mail-launch-certifier/5"}
     if token:
         request_headers["Authorization"] = f"Bearer {token}"
     if headers:
@@ -134,6 +134,8 @@ def check_static(root: Path) -> str:
         root / "deploy/production/nginx-mail.crescentsphere.com.conf",
         root / "deploy/production/backup.sh",
         root / "deploy/production/restore-drill.sh",
+        root / "deploy/production/record-backup-proof.sh",
+        root / "deploy/production/freeze-launch.sh",
         root / "deploy/production/deploy.sh",
         root / "deploy/production/deploy-from-git.sh",
         root / "deploy/production/bootstrap-vps.sh",
@@ -167,6 +169,8 @@ def check_static(root: Path) -> str:
         raise GateError("backend production image must run blocking Rust quality/test gates before release build")
     if "npm ci" not in frontend_dockerfile or "npm run build" not in frontend_dockerfile:
         raise GateError("frontend production image must use the committed package-lock with npm ci")
+    if "npm run lint" not in frontend_dockerfile or "npm run typecheck" not in frontend_dockerfile or "npm run test" not in frontend_dockerfile:
+        raise GateError("frontend production image must run blocking lint, typecheck and test gates before build")
     deploy_script = (root / "deploy/production/deploy.sh").read_text()
     for required_deploy_token in ("flock", "pre-deploy backup", "git archive", "www/current", "CS_MAIL_API_IMAGE", "nginx -t"):
         if required_deploy_token not in deploy_script:
@@ -280,8 +284,30 @@ def check_static(root: Path) -> str:
         raise GateError("reviewed payment must re-assert the exact ordered subscription")
     if "Invoice {invoice} is still open" not in billing_service:
         raise GateError("billing must prevent overlapping open invoices for one business")
-    if "pub async fn reconcile_subscription_lifecycle" not in billing_service or "Renewal grace period expired" not in billing_service:
+    if ("pub async fn reconcile_subscription_lifecycle" not in billing_service
+            or "SET status='past_due'" not in billing_service
+            or "SET status='suspended'" not in billing_service
+            or "renewal_grace_end" not in billing_service
+            or 'queue_lifecycle_notice(state,organization_id,"suspended")' not in billing_service):
         raise GateError("subscription expiration/grace lifecycle worker is incomplete")
+    recovery_migration = (root / "backend/migrations/0047_billing_recovery_operations.sql").read_text()
+    launch_freeze_migration = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    if ("operational_evidence" not in launch_freeze_migration
+            or "local_backup" not in launch_freeze_migration
+            or "restore_drill" not in launch_freeze_migration
+            or "cs_mail_offsite_backup" not in launch_freeze_migration
+            or "stalwart_offsite_backup" not in launch_freeze_migration
+            or "operational_evidence_no_update_delete" not in launch_freeze_migration):
+        raise GateError("launch-freeze migration must provide append-only backup/restore/offsite evidence")
+    if ("subscription_purge_runs" not in recovery_migration
+            or "retention_expired_at" not in recovery_migration
+            or "purge_started_at" not in recovery_migration
+            or "data_purged_at" not in recovery_migration):
+        raise GateError("billing recovery/retained-data migration is incomplete")
+    if ("pub async fn reconcile_purge_runs" not in billing_service
+            or "automatic_purge',FALSE" not in billing_service
+            or "data_purged_at=COALESCE(data_purged_at,now())" not in billing_service):
+        raise GateError("retention expiry must remain non-destructive and explicit purge completion must be durable")
     auth_middleware = (root / "backend/src/middleware/auth.rs").read_text()
     if 'ADMIN_LOCAL_HEADER: &str = "x-cs-admin-local"' not in auth_middleware or "is_local_admin_request(&parts.headers)" not in auth_middleware:
         raise GateError("platform-admin API extractor is not localhost-gated")
@@ -290,6 +316,24 @@ def check_static(root: Path) -> str:
         raise GateError("all /api/admin routes must be protected by the localhost route gate")
     if "/api/admin/subscriptions/:organization_id/history" not in router:
         raise GateError("platform admin must expose subscription history behind the localhost gate")
+    for route in (
+        "/api/admin/billing-operations",
+        "/api/admin/subscriptions/:organization_id/reconcile",
+        "/api/admin/subscriptions/:organization_id/retry-failures",
+        "/api/admin/subscriptions/:organization_id/purge",
+    ):
+        if route not in router:
+            raise GateError(f"platform admin billing recovery route missing: {route}")
+    for handler_name in (
+        "admin_billing_operations",
+        "admin_reconcile_subscription",
+        "admin_retry_subscription_failures",
+        "admin_purge_subscription_data",
+    ):
+        if f"pub async fn {handler_name}" not in billing_handler:
+            raise GateError(f"platform admin billing recovery handler missing: {handler_name}")
+    if "confirm_name" not in billing_handler or "Enter the exact business name" not in billing_handler:
+        raise GateError("retained-data purge must require exact business-name confirmation")
     admin_handler = (root / "backend/src/handlers/admin.rs").read_text()
     if "platform_role" not in admin_handler or "admin.user.platform_role" not in admin_handler:
         raise GateError("platform-role management is incomplete")
@@ -308,6 +352,8 @@ def check_static(root: Path) -> str:
     billing_ui = (root / "frontend/src/pages/AdminBillingPage.tsx").read_text()
     if "subscriptionHistory" not in billing_ui or "Subscription history" not in billing_ui or "Expiration" not in billing_ui or "applySubscription" not in billing_ui:
         raise GateError("platform subscription lifecycle/history UI is incomplete")
+    if "Purge retained mail data" not in billing_ui or "Reconcile provider" not in billing_ui or "retrySubscriptionFailures" not in billing_ui:
+        raise GateError("platform billing recovery operations UI is incomplete")
     if "subscriptionsPage" not in billing_ui or "Search business, owner, billing email, plan or invoice" not in billing_ui or "subscriptionPageSize" not in billing_ui:
         raise GateError("platform subscription inventory UI must be server-filtered and paginated")
     admin_ui = (root / "frontend/src/pages/AdminPage.tsx").read_text()
@@ -375,7 +421,55 @@ def check_static(root: Path) -> str:
     safety = (root / "backend/migrations" / SAFETY_MIGRATION).read_text()
     if "public_signup_enabled=FALSE" not in safety or "outbound_sending_enabled=FALSE" not in safety:
         raise GateError("production launch controls must default closed")
-    return "contract v32, migration 0043, independent edge option, smtp.crescentsphere.com mail/PTR identity, private control plane, deterministic Docker builds, atomic frontend publishing, pre-migration backup, and closed public launch controls are coherent"
+    admin_handler = (root / "backend/src/handlers/admin.rs").read_text()
+    router = (root / "backend/src/router.rs").read_text()
+    metrics_handler = (root / "backend/src/handlers/metrics.rs").read_text()
+    lifecycle_tests = (root / "backend/tests/api_flows.rs").read_text()
+    monitoring_rules = (root / "deploy/monitoring/prometheus.rules.yml").read_text()
+    if ("pub async fn launch_readiness" not in admin_handler
+            or "/api/admin/launch-readiness" not in router
+            or "billing_instant_activation" not in admin_handler
+            or "subscriptionsMissingPlanVersion" not in admin_handler
+            or "storageOverallocated" not in admin_handler
+            or "operationalEvidence" not in admin_handler
+            or "release_sha256=$1" not in admin_handler
+            or "local_backup" not in admin_handler
+            or "restore_drill" not in admin_handler
+            or "cs_mail_offsite_backup" not in admin_handler
+            or "stalwart_offsite_backup" not in admin_handler):
+        raise GateError("public-launch readiness endpoint must bind readiness to the exact release and recoverability evidence")
+    if ("cs_mail_billing_operational_issues" not in metrics_handler
+            or "cs_mail_operational_evidence_age_seconds" not in metrics_handler
+            or "CSMailBillingRecoveryFailure" not in monitoring_rules
+            or "CSMailProviderReconciliationStale" not in monitoring_rules
+            or "CSMailLocalBackupStale" not in monitoring_rules
+            or "CSMailRestoreDrillStale" not in monitoring_rules
+            or "CSMailOffsiteBackupStale" not in monitoring_rules):
+        raise GateError("durable billing/provider/recoverability metrics and alerts are required")
+    config_rs = (root / "backend/src/config.rs").read_text()
+    env_example = (root / "deploy/production/.env.production.example").read_text()
+    backup_script = (root / "deploy/production/backup.sh").read_text()
+    restore_script = (root / "deploy/production/restore-drill.sh").read_text()
+    proof_script = (root / "deploy/production/record-backup-proof.sh").read_text()
+    freeze_script = (root / "deploy/production/freeze-launch.sh").read_text()
+    if ("validate_runtime_profile" not in config_rs
+            or "CS_MAIL_ENVIRONMENT" not in config_rs
+            or "CS_MAIL_RELEASE_SHA256" not in config_rs
+            or "CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production" not in config_rs):
+        raise GateError("production runtime profile must fail closed on unsafe launch configuration")
+    if "CS_MAIL_ENVIRONMENT=production" not in env_example or "CS_MAIL_BILLING_INSTANT_ACTIVATION=false" not in env_example:
+        raise GateError("production environment example must pin production profile and payment-approved activation")
+    if "operational_evidence" not in backup_script or "operational_evidence" not in restore_script:
+        raise GateError("backup and restore drill must write durable operational evidence")
+    if "cs_mail_offsite_backup" not in proof_script or "stalwart_offsite_backup" not in proof_script:
+        raise GateError("offsite backup proof recorder must cover CS Mail and shared Stalwart data")
+    for freeze_token in ("certify-launch.sh", "public_signup_enabled", "cs_mail_offsite_backup", "stalwart_offsite_backup", "PUBLIC LAUNCH FREEZE PASS"):
+        if freeze_token not in freeze_script:
+            raise GateError(f"final launch-freeze gate is missing: {freeze_token}")
+    if ("expiry must enter grace before suspension" not in lifecycle_tests
+            or "test instant activation is bootstrap-only" not in lifecycle_tests):
+        raise GateError("billing integration tests must cover grace, suspension and recovery activation safety")
+    return "contract v32, migration 0048, exact-release certification, strict production runtime profile, append-only backup/restore/offsite evidence, retained-data purge controls, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:
@@ -395,6 +489,10 @@ def check_env_file(env_file: Path, env: dict[str, str]) -> str:
     sha = env["CS_MAIL_RELEASE_SHA256"].lower()
     if not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise GateError("CS_MAIL_RELEASE_SHA256 must be the 64-character deployed source-tree SHA-256")
+    if env.get("CS_MAIL_ENVIRONMENT", "").strip().lower() != "production":
+        raise GateError("CS_MAIL_ENVIRONMENT must be production for launch certification")
+    if env.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "").strip().lower() != "false":
+        raise GateError("CS_MAIL_BILLING_INSTANT_ACTIVATION must remain false in production; use an isolated non-production environment for bypass testing")
     if env.get("CS_MAIL_PROVIDER_NAMESPACE", "cs-mail") != "cs-mail":
         raise GateError("CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail")
     alert_from = env.get("CS_MAIL_ALERT_EMAIL_FROM") or env["CS_MAIL_SMTP_USERNAME"]
@@ -436,7 +534,7 @@ def check_public_admin_blocked(env: dict[str, str]) -> str:
     api_status, _, _ = json_request(origin + "/api/admin/overview")
     if api_status != 404:
         raise GateError(f"public /api/admin/* must return 404, got {api_status}")
-    req = urllib.request.Request(origin + "/mail/admin", headers={"User-Agent": "cs-mail-launch-certifier/38"})
+    req = urllib.request.Request(origin + "/mail/admin", headers={"User-Agent": "cs-mail-launch-certifier/5"})
     try:
         urllib.request.urlopen(req, timeout=15)
         status = 200
@@ -449,7 +547,7 @@ def check_public_admin_blocked(env: dict[str, str]) -> str:
 
 def check_https_headers(env: dict[str, str]) -> str:
     origin = env.get("CS_MAIL_PUBLIC_ORIGIN", DEFAULT_PUBLIC_ORIGIN).rstrip("/")
-    req = urllib.request.Request(origin + "/", headers={"User-Agent": "cs-mail-launch-certifier/38"})
+    req = urllib.request.Request(origin + "/", headers={"User-Agent": "cs-mail-launch-certifier/5"})
     with urllib.request.urlopen(req, timeout=15) as res:
         headers = {k.lower(): v for k, v in res.headers.items()}
     required = {
@@ -652,7 +750,7 @@ def check_protocol_roundtrip(env: dict[str, str]) -> str:
     msg["To"] = b_user
     msg["Subject"] = marker
     msg["Message-ID"] = f"<{marker}@{a_user.split('@',1)[-1]}>"
-    msg.set_content(f"CS Mail Upgrade 38 production certification marker: {marker}")
+    msg.set_content(f"CS Mail Upgrade 05 production certification marker: {marker}")
     smtp_factory = smtplib.SMTP_SSL if smtp_port == 465 else smtplib.SMTP
     with smtp_factory(host, smtp_port, timeout=20, context=context) if smtp_port == 465 else smtp_factory(host, smtp_port, timeout=20) as smtp:
         smtp.ehlo()
@@ -723,7 +821,7 @@ def record_ledger(root: Path, env_file: Path, env: dict[str, str], report: Path,
     compose = root / "deploy/production/docker-compose.yml"
     report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
     release_hash = env["CS_MAIL_RELEASE_SHA256"].lower()
-    label = env.get("CS_MAIL_RELEASE_LABEL", "cs-mail-upgrade-38-direct-nginx-secure-env")
+    label = env.get("CS_MAIL_RELEASE_LABEL", "cs-mail-upgrade-05-public-launch-freeze")
     status = "passed" if passed else "failed"
     sql = r"""
 INSERT INTO launch_certification_runs(
@@ -819,7 +917,7 @@ def main() -> int:
     payload = {
         "schema": 1,
         "product": "CS Mail",
-        "upgrade": 35,
+        "upgrade": 5,
         "api_contract": EXPECTED_CONTRACT,
         "migration_head": EXPECTED_MIGRATION,
         "started_at": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(milliseconds=sum(c.duration_ms for c in checks))).isoformat(),

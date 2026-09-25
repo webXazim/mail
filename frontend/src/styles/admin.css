@@ -533,3 +533,71 @@
 .admin-resource-main strong, .admin-resource-main small { overflow-wrap: anywhere; }
 .admin-danger { border-color: color-mix(in srgb, #b42318 35%, var(--border)); }
 @media (max-width: 900px) { .admin-resource-row { grid-template-columns: 1fr; align-items: start; } .admin-resource-row .admin-actions { justify-content: flex-start; flex-wrap: wrap; } }
+
+/* Upgrade 47: billing recovery and retained-data operations. */
+.billing-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 14px 0 20px;
+}
+.billing-ops-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--cs-mail-line-soft);
+}
+.billing-ops-grid strong {
+  font-size: 20px;
+  line-height: 1;
+}
+.billing-ops-grid small,
+.admin-ops-section small,
+.admin-purge-panel small {
+  color: var(--cs-mail-copy-soft);
+}
+.admin-ops-section {
+  display: grid;
+  gap: 8px;
+  padding: 16px 0;
+  border-top: 1px solid var(--cs-mail-line-soft);
+}
+.admin-ops-section h3 {
+  margin: 0;
+}
+.admin-purge-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, .7fr) minmax(220px, .9fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--cs-mail-line-soft);
+  background: var(--cs-mail-panel-soft);
+}
+.admin-purge-panel > div,
+.admin-purge-panel label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.admin-purge-panel strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-purge-panel input {
+  width: 100%;
+  min-width: 0;
+}
+.admin-error-text {
+  overflow-wrap: anywhere;
+}
+.admin-danger {
+  border-color: currentColor;
+}
+@media (max-width: 1000px) {
+  .admin-purge-panel { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .admin-purge-panel { grid-template-columns: 1fr; }
+}

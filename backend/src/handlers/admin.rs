@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::Argon2;
 use axum::extract::{Path, Query, State};
@@ -15,7 +17,7 @@ use crate::domain::quota;
 use crate::error::ApiError;
 use crate::handlers::auth::valid_email;
 use crate::middleware::auth::AdminUser;
-use crate::services::{automation, billing, email, imap, provisioning};
+use crate::services::{automation, billing, email, imap, platform_control, provisioning};
 use crate::state::AppState;
 
 const DEFAULT_AUDIT_LIMIT: i64 = 50;
@@ -1894,17 +1896,221 @@ pub async fn launch_certifications(
     })))
 }
 
+
+pub async fn launch_readiness(
+    State(state): State<AppState>, _admin: AdminUser
+) -> Result<Json<Value>, ApiError> {
+    // Reconcile clock-driven billing state before evaluating readiness so an
+    // expired subscription cannot hide behind the worker cadence.
+    billing::reconcile_subscription_lifecycle(&state).await?;
+
+    let controls = platform_control::load(&state.db).await?;
+    let provider_healthy = state.stalwart.enabled() && state.stalwart.healthcheck().await.is_ok();
+    let migration_head: Option<i64> = sqlx::query_scalar(
+        "SELECT max(version)::bigint FROM _sqlx_migrations WHERE success=TRUE",
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(None);
+
+    let operational: (i64,i64,i64,i64,i64,i64,i64,i64,i64) = sqlx::query_as(
+        "SELECT
+          (SELECT count(*)::bigint FROM provisioning_jobs WHERE status='dead'),
+          (SELECT count(*)::bigint FROM billing_lifecycle_outbox WHERE status='failed'),
+          (SELECT count(*)::bigint FROM billing_email_outbox WHERE status='failed'),
+          (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status='failed'),
+          (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status IN('queued','processing')),
+          (SELECT count(*)::bigint FROM mailboxes m JOIN organizations o ON o.id=m.organization_id
+             WHERE o.is_system=FALSE AND m.deleted_at IS NULL AND m.status IN('active','provisioning')
+               AND (m.provider_reconciled_at IS NULL OR m.provider_reconciled_at < now()-interval '30 minutes')),
+          (SELECT count(*)::bigint FROM organization_subscriptions s JOIN organizations o ON o.id=s.organization_id
+             WHERE o.is_system=FALSE AND s.status IN('active','trial','past_due') AND s.plan_version_id IS NULL),
+          (SELECT count(*)::bigint FROM organization_subscriptions s
+             JOIN organizations o ON o.id=s.organization_id
+             JOIN plans p ON p.code=s.plan_code
+             LEFT JOIN plan_versions pv ON pv.id=s.plan_version_id
+             WHERE o.is_system=FALSE AND s.status IN('active','trial','past_due')
+               AND COALESCE((SELECT sum(m.quota_bytes) FROM mailboxes m WHERE m.organization_id=s.organization_id AND m.deleted_at IS NULL),0) >
+                   COALESCE(s.storage_pool_override_bytes,
+                     COALESCE(pv.storage_pool_bytes,p.storage_pool_bytes)::bigint +
+                     COALESCE(pv.mailbox_bytes,p.mailbox_bytes)::bigint*GREATEST(s.purchased_mailbox_count-COALESCE(pv.mailbox_limit,p.mailbox_limit),0)::bigint)),
+          (SELECT count(*)::bigint FROM orders ord JOIN organizations o ON o.id=ord.organization_id
+             WHERE o.is_system=FALSE AND ord.status='submitted' AND ord.invoice_status='issued'
+               AND ord.updated_at < now()-interval '48 hours')"
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let release_hash_valid = state.release_sha256.len() == 64
+        && state.release_sha256.chars().all(|c| c.is_ascii_hexdigit());
+    let latest_cert: Option<(String,chrono::DateTime<chrono::Utc>,i32,i32,String)> = if release_hash_valid {
+        sqlx::query_as(
+            "SELECT status,COALESCE(completed_at,created_at),mandatory_passed,mandatory_failed,release_sha256
+               FROM launch_certification_runs
+              WHERE environment='production' AND release_sha256=$1
+              ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&state.release_sha256)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+    } else { None };
+
+    let evidence_rows: Vec<(String,chrono::DateTime<chrono::Utc>,String)> = sqlx::query_as(
+        "SELECT DISTINCT ON (kind) kind,recorded_at,release_sha256
+           FROM operational_evidence WHERE status='passed'
+          ORDER BY kind,recorded_at DESC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let evidence: HashMap<String,(chrono::DateTime<chrono::Utc>,String)> = evidence_rows
+        .into_iter().map(|(kind,at,release)| (kind,(at,release))).collect();
+
+    let mut blockers: Vec<Value> = Vec::new();
+    let mut warnings: Vec<Value> = Vec::new();
+    let mut push_blocker = |code: &str, message: String| blockers.push(json!({"code":code,"message":message}));
+    let mut push_warning = |code: &str, message: String| warnings.push(json!({"code":code,"message":message}));
+
+    if state.billing_instant_activation {
+        push_blocker("instant_activation", "Test instant plan activation is enabled. Public billing must require verified payment approval.".into());
+    }
+    if !provider_healthy {
+        push_blocker("mail_provider", "The configured mail provider is unavailable or unhealthy.".into());
+    }
+    if migration_head.unwrap_or_default() < 48 {
+        push_blocker("migration_head", format!("Database migration head is {}, expected at least 48.", migration_head.unwrap_or_default()));
+    }
+    if state.environment != "production" {
+        push_blocker("runtime_profile", format!("Runtime profile is '{}', expected production.", state.environment));
+    }
+    if !release_hash_valid {
+        push_blocker("release_identity", "The running API has no valid immutable release SHA-256. Deploy through the guarded production pipeline before launch.".into());
+    }
+    for (code,count,label) in [
+        ("provisioning_dead",operational.0,"dead provider provisioning jobs"),
+        ("lifecycle_email_failed",operational.1,"failed billing lifecycle notifications"),
+        ("invoice_email_failed",operational.2,"failed invoice email jobs"),
+        ("purge_failed",operational.3,"failed retained-data purge runs"),
+        ("plan_version_missing",operational.6,"active subscriptions without immutable plan versions"),
+        ("storage_overallocated",operational.7,"subscriptions whose mailbox allocations exceed their storage pool"),
+    ] {
+        if count > 0 { push_blocker(code, format!("{count} {label} require operator action.")); }
+    }
+    if operational.4 > 0 { push_warning("purge_running", format!("{} retained-data purge run(s) are still in progress.", operational.4)); }
+    if operational.5 > 0 { push_warning("provider_stale", format!("{} mailbox(es) have stale provider reconciliation.", operational.5)); }
+    if operational.8 > 0 { push_warning("payment_review_aging", format!("{} submitted manual-payment order(s) have waited more than 48 hours for review.", operational.8)); }
+
+    match &latest_cert {
+        Some((status,at,_,failed,_)) if status == "passed" && *failed == 0 => {
+            if *at < chrono::Utc::now() - chrono::Duration::hours(24) {
+                push_warning("certification_stale", "The passing certification for this exact release is older than 24 hours. Re-run it immediately before launch.".into());
+            }
+        }
+        Some((status,_,_,_,_)) => push_blocker("certification", format!("Certification for the currently deployed release is '{status}', not passed.")),
+        None if release_hash_valid => push_blocker("certification_missing", "No production launch certification has been recorded for the currently deployed release SHA-256.".into()),
+        None => {}
+    }
+
+    let now = chrono::Utc::now();
+    for (kind,max_age,label,require_release_match) in [
+        ("local_backup",26_i64,"local CS Mail database + attachment backup",true),
+        ("restore_drill",168_i64,"isolated CS Mail restore drill",true),
+        ("cs_mail_offsite_backup",26_i64,"encrypted offsite CS Mail backup proof",false),
+        ("stalwart_offsite_backup",26_i64,"encrypted offsite shared Stalwart backup proof",false),
+    ] {
+        match evidence.get(kind) {
+            Some((at,release)) => {
+                let age_hours=(now-*at).num_minutes().max(0) as f64/60.0;
+                if age_hours > max_age as f64 {
+                    push_blocker(&format!("{kind}_stale"), format!("Latest {label} evidence is {:.1} hours old; maximum is {max_age} hours.", age_hours));
+                } else if require_release_match && release_hash_valid && release != &state.release_sha256 {
+                    push_blocker(&format!("{kind}_release"), format!("Latest {label} evidence belongs to a different release. Re-run it after deploying the current release."));
+                }
+            }
+            None => push_blocker(&format!("{kind}_missing"), format!("No successful {label} evidence has been recorded.")),
+        }
+    }
+
+    let controls_json = json!({
+        "publicSignup":controls.public_signup_enabled,
+        "businessCreation":controls.business_creation_enabled,
+        "planOrdering":controls.plan_ordering_enabled,
+        "domainOnboarding":controls.domain_onboarding_enabled,
+        "mailboxProvisioning":controls.mailbox_provisioning_enabled,
+        "outboundSending":controls.outbound_sending_enabled,
+    });
+    let all_public_controls = controls.public_signup_enabled && controls.business_creation_enabled
+        && controls.plan_ordering_enabled && controls.domain_onboarding_enabled
+        && controls.mailbox_provisioning_enabled && controls.outbound_sending_enabled;
+    if !all_public_controls {
+        push_warning("platform_controls", "One or more public platform controls are paused. This is safe before launch, but confirm the intended switches when opening service.".into());
+    }
+
+    let status = if !blockers.is_empty() { "blocked" } else if !warnings.is_empty() { "attention" } else { "ready" };
+    Ok(Json(json!({
+        "status":status,
+        "evaluatedAt":chrono::Utc::now(),
+        "blockers":blockers,
+        "warnings":warnings,
+        "checks":{
+            "runtimeProfile":state.environment,
+            "releaseSha256":state.release_sha256,
+            "mailProviderHealthy":provider_healthy,
+            "billingInstantActivation":state.billing_instant_activation,
+            "migrationHead":migration_head,
+            "platformControls":controls_json,
+            "operational":{
+                "provisioningDead":operational.0,
+                "lifecycleEmailFailed":operational.1,
+                "invoiceEmailFailed":operational.2,
+                "purgeFailed":operational.3,
+                "purgeRunning":operational.4,
+                "providerStaleMailboxes":operational.5,
+                "subscriptionsMissingPlanVersion":operational.6,
+                "storageOverallocated":operational.7,
+                "agingPaymentReviews":operational.8
+            },
+            "latestCertification": latest_cert.map(|r| json!({"status":r.0,"at":r.1,"mandatoryPassed":r.2,"mandatoryFailed":r.3,"releaseSha256":r.4})),
+            "operationalEvidence": {
+                "localBackup": evidence.get("local_backup").map(|r| json!({"at":&r.0,"releaseSha256":r.1.as_str()})),
+                "restoreDrill": evidence.get("restore_drill").map(|r| json!({"at":&r.0,"releaseSha256":r.1.as_str()})),
+                "csMailOffsiteBackup": evidence.get("cs_mail_offsite_backup").map(|r| json!({"at":&r.0,"releaseSha256":r.1.as_str()})),
+                "stalwartOffsiteBackup": evidence.get("stalwart_offsite_backup").map(|r| json!({"at":&r.0,"releaseSha256":r.1.as_str()}))
+            }
+        }
+    })))
+}
+
 pub async fn diagnostics(
     State(state):State<AppState>, _admin:AdminUser
 )->Result<Json<Value>,ApiError>{
     let database=sqlx::query_scalar::<_,i32>("SELECT 1").fetch_one(&state.db).await.is_ok();
     let provider=if state.stalwart.enabled(){state.stalwart.healthcheck().await.is_ok()}else{false};
+    // Diagnostics should describe the state an operator would act on now, not
+    // a lifecycle snapshot that may be waiting for the next maintenance tick.
+    billing::reconcile_subscription_lifecycle(&state).await?;
     let provisioning:Vec<(String,i64)>=sqlx::query_as("SELECT status,count(*) FROM provisioning_jobs GROUP BY status ORDER BY status")
         .fetch_all(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
     let automation_errors:i64=sqlx::query_scalar("SELECT count(*) FROM mail_automation_state WHERE status='error'")
         .fetch_one(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
     let address_errors:i64=sqlx::query_scalar("SELECT count(*) FROM address_sync_state WHERE status='error'")
         .fetch_one(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
+    let billing_operations:(i64,i64,i64,i64,i64,i64)=sqlx::query_as(
+        "SELECT
+           (SELECT count(*)::bigint FROM organization_subscriptions s JOIN organizations o ON o.id=s.organization_id
+             WHERE o.is_system=FALSE AND s.status IN('suspended','cancelled') AND s.purge_eligible_at IS NOT NULL
+               AND s.purge_eligible_at<=now() AND s.data_purged_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM subscription_purge_runs pr WHERE pr.organization_id=s.organization_id AND pr.status IN('queued','processing','failed')))::bigint,
+           (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status IN('queued','processing'))::bigint,
+           (SELECT count(*)::bigint FROM subscription_purge_runs WHERE status='failed')::bigint,
+           (SELECT count(*)::bigint FROM provisioning_jobs WHERE status='dead')::bigint,
+           (SELECT count(*)::bigint FROM billing_lifecycle_outbox WHERE status='failed')::bigint,
+           (SELECT count(*)::bigint FROM mailboxes m JOIN organizations o ON o.id=m.organization_id
+             WHERE o.is_system=FALSE AND m.deleted_at IS NULL
+               AND (m.provider_reconciled_at IS NULL OR m.provider_reconciled_at<now()-interval '30 minutes'))::bigint"
+    ).fetch_one(&state.db).await.map_err(|e|ApiError::internal(e.to_string()))?;
     let queue_total=if provider {
         state.stalwart.management_read("x:QueuedMessage/query",json!({"position":0,"limit":1,"calculateTotal":true})).await
             .ok().and_then(|v|v.get("total").and_then(Value::as_u64)).unwrap_or(0)
@@ -1912,6 +2118,14 @@ pub async fn diagnostics(
     Ok(Json(json!({
         "database":database,"mailProvider":provider,"queueTotal":queue_total,
         "automationErrors":automation_errors,"addressSyncErrors":address_errors,
+        "billingOperations":{
+            "purgeEligible":billing_operations.0,
+            "purgeRunning":billing_operations.1,
+            "purgeFailed":billing_operations.2,
+            "provisioningDead":billing_operations.3,
+            "lifecycleEmailFailed":billing_operations.4,
+            "providerStaleMailboxes":billing_operations.5
+        },
         "provisioning":provisioning.into_iter().map(|(status,count)|json!({"status":status,"count":count})).collect::<Vec<_>>()
     })))
 }
