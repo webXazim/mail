@@ -85,6 +85,19 @@
   font-size: 9px;
   letter-spacing: 0.12em;
 }
+.is-spinning {
+  animation: mail-refresh-spin 0.8s linear infinite;
+}
+@keyframes mail-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning {
+    animation: none;
+  }
+}
 
 .mail-list {
   flex: 1;

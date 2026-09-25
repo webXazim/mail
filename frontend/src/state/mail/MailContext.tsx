@@ -108,7 +108,7 @@ export type MailContextValue = {
   handleSent: (draft: Draft) => Promise<boolean>
   importMails: (mails: Mail[]) => void
   notify: (message: string) => void
-  reload: () => void
+  reload: () => Promise<void>
 }
 
 const MailContext = createContext<MailContextValue | null>(null)
@@ -194,7 +194,11 @@ export function MailProvider({ children }: { children: ReactNode }) {
       remoteRef.current = isSessionActive() && isRemoteMail()
       dispatch({ type: 'retry' })
       void loadMailbox()
-      if (remoteRef.current) void profileApi.refresh().then(() => setAccounts(accountsApi.list())).catch(() => {})
+      if (remoteRef.current)
+        void profileApi
+          .refresh()
+          .then(() => setAccounts(accountsApi.list()))
+          .catch(() => {})
       else setAccounts(accountsApi.list())
     }
     window.addEventListener('cs-mail-auth-changed', syncAuth)
@@ -226,7 +230,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!remoteRef.current || !isRemoteMail()) return
-    const refresh = () => { void refreshMailboxRoster().catch(() => {}) }
+    const refresh = () => {
+      void refreshMailboxRoster().catch(() => {})
+    }
     window.addEventListener('cs-mail-folders-changed', refresh)
     return () => window.removeEventListener('cs-mail-folders-changed', refresh)
   }, [refreshMailboxRoster])
@@ -245,10 +251,16 @@ export function MailProvider({ children }: { children: ReactNode }) {
           void loadMailbox()
           break
         case 'schedule':
-          void scheduleApi.refresh().then((items) => setScheduledCount(items.length)).catch(() => {})
+          void scheduleApi
+            .refresh()
+            .then((items) => setScheduledCount(items.length))
+            .catch(() => {})
           break
         case 'profile':
-          void profileApi.refresh().then(() => setAccounts(accountsApi.list())).catch(() => {})
+          void profileApi
+            .refresh()
+            .then(() => setAccounts(accountsApi.list()))
+            .catch(() => {})
           break
       }
     }
@@ -256,9 +268,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('cs-mail-realtime', onRealtime)
   }, [loadMailbox])
 
-  const reload = useCallback(() => {
+  const reload = useCallback(async () => {
     dispatch({ type: 'retry' })
-    void loadMailbox()
+    await loadMailbox()
   }, [loadMailbox])
 
   useEffect(() => {
@@ -327,11 +339,12 @@ export function MailProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const settings = settingsApi.load()
     const trashId = remoteMailboxes.find((mailbox) => mailbox.role === 'trash')?.id
-    const unread = remoteRef.current && remoteMailboxes.length
-      ? remoteMailboxes
-          .filter((mailbox) => mailbox.id !== trashId)
-          .reduce((sum, mailbox) => sum + mailbox.unread, 0)
-      : state.mailbox.filter((mail) => mail.unread && mail.folder !== 'Trash').length
+    const unread =
+      remoteRef.current && remoteMailboxes.length
+        ? remoteMailboxes
+            .filter((mailbox) => mailbox.id !== trashId)
+            .reduce((sum, mailbox) => sum + mailbox.unread, 0)
+        : state.mailbox.filter((mail) => mail.unread && mail.folder !== 'Trash').length
     document.title = settings.unreadBadge && unread ? `(${unread}) CS Mail` : 'CS Mail'
     applyFaviconBadge(settings.unreadBadge ? unread : 0)
   }, [state.mailbox, remoteMailboxes])
@@ -424,23 +437,44 @@ export function MailProvider({ children }: { children: ReactNode }) {
     setComposerInitial(null)
   }, [])
 
-  const markRead = useCallback((id: string) => {
-    dispatch({ type: 'mark-read', ids: [id] })
-    if (remoteRef.current) void setRead([id], true).then(refreshMailboxRoster).catch(() => {})
-  }, [refreshMailboxRoster])
-  const markUnread = useCallback((ids: string[]) => {
-    dispatch({ type: 'mark-unread', ids })
-    if (remoteRef.current) void setRead(ids, false).then(refreshMailboxRoster).catch(() => {})
-  }, [refreshMailboxRoster])
-  const markAllRead = useCallback((ids: string[]) => {
-    dispatch({ type: 'mark-all-read', ids })
-    if (remoteRef.current) void setRead(ids, true).then(refreshMailboxRoster).catch(() => {})
-  }, [refreshMailboxRoster])
+  const markRead = useCallback(
+    (id: string) => {
+      dispatch({ type: 'mark-read', ids: [id] })
+      if (remoteRef.current)
+        void setRead([id], true)
+          .then(refreshMailboxRoster)
+          .catch(() => {})
+    },
+    [refreshMailboxRoster],
+  )
+  const markUnread = useCallback(
+    (ids: string[]) => {
+      dispatch({ type: 'mark-unread', ids })
+      if (remoteRef.current)
+        void setRead(ids, false)
+          .then(refreshMailboxRoster)
+          .catch(() => {})
+    },
+    [refreshMailboxRoster],
+  )
+  const markAllRead = useCallback(
+    (ids: string[]) => {
+      dispatch({ type: 'mark-all-read', ids })
+      if (remoteRef.current)
+        void setRead(ids, true)
+          .then(refreshMailboxRoster)
+          .catch(() => {})
+    },
+    [refreshMailboxRoster],
+  )
   const toggleStar = useCallback(
     (ids: string[]) => {
       const starred = !ids.every((id) => state.mailbox.find((mail) => mail.id === id)?.starred)
       dispatch({ type: 'toggle-star', ids })
-      if (remoteRef.current) void setStarred(ids, starred).then(refreshMailboxRoster).catch(() => {})
+      if (remoteRef.current)
+        void setStarred(ids, starred)
+          .then(refreshMailboxRoster)
+          .catch(() => {})
     },
     [state.mailbox, refreshMailboxRoster],
   )
@@ -448,17 +482,27 @@ export function MailProvider({ children }: { children: ReactNode }) {
     (ids: string[], label: string) => dispatch({ type: 'toggle-label', ids, label }),
     [],
   )
-  const moveToFolder = useCallback((ids: string[], folder: string) => {
-    dispatch({ type: 'move-to', ids, folder })
-    if (!remoteRef.current) return
-    const fromMailboxes = Object.fromEntries(
-      ids.map((id) => [id, emailMailboxFor(id)] as const).filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
-    )
-    void moveEmails(ids, folder, fromMailboxes).then(refreshMailboxRoster).catch(() => {})
-  }, [refreshMailboxRoster])
+  const moveToFolder = useCallback(
+    (ids: string[], folder: string) => {
+      dispatch({ type: 'move-to', ids, folder })
+      if (!remoteRef.current) return
+      const fromMailboxes = Object.fromEntries(
+        ids
+          .map((id) => [id, emailMailboxFor(id)] as const)
+          .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+      )
+      void moveEmails(ids, folder, fromMailboxes)
+        .then(refreshMailboxRoster)
+        .catch(() => {})
+    },
+    [refreshMailboxRoster],
+  )
   const emptyTrash = useCallback(() => {
     dispatch({ type: 'empty-trash' })
-    if (remoteRef.current) void emptyTrashRemote().then(refreshMailboxRoster).catch(() => {})
+    if (remoteRef.current)
+      void emptyTrashRemote()
+        .then(refreshMailboxRoster)
+        .catch(() => {})
   }, [refreshMailboxRoster])
   const snooze = useCallback(
     (ids: string[], until: string) => dispatch({ type: 'snooze', ids, until }),
@@ -479,26 +523,35 @@ export function MailProvider({ children }: { children: ReactNode }) {
       })
   }, [])
 
-  const applyAction = useCallback((action: MailActionKind, ids: string[]) => {
-    dispatch({ type: 'apply', ids, action })
-    if (remoteRef.current) {
-      if (action === 'read') {
-        void setRead(ids, true).then(refreshMailboxRoster).catch(() => {})
-      } else if (action === 'archive' || action === 'trash') {
-        const target = action === 'archive' ? 'Archive' : 'Trash'
-        const fromMailboxes = Object.fromEntries(
-          ids.map((id) => [id, emailMailboxFor(id)] as const).filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
-        )
-        void moveEmails(ids, target, fromMailboxes).then(refreshMailboxRoster).catch(() => {})
+  const applyAction = useCallback(
+    (action: MailActionKind, ids: string[]) => {
+      dispatch({ type: 'apply', ids, action })
+      if (remoteRef.current) {
+        if (action === 'read') {
+          void setRead(ids, true)
+            .then(refreshMailboxRoster)
+            .catch(() => {})
+        } else if (action === 'archive' || action === 'trash') {
+          const target = action === 'archive' ? 'Archive' : 'Trash'
+          const fromMailboxes = Object.fromEntries(
+            ids
+              .map((id) => [id, emailMailboxFor(id)] as const)
+              .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+          )
+          void moveEmails(ids, target, fromMailboxes)
+            .then(refreshMailboxRoster)
+            .catch(() => {})
+        }
       }
-    }
-    timersRef.current.push(
-      window.setTimeout(() => {
-        dispatch({ type: 'clear-notice' })
-        dispatch({ type: 'too-late' })
-      }, 5000),
-    )
-  }, [refreshMailboxRoster])
+      timersRef.current.push(
+        window.setTimeout(() => {
+          dispatch({ type: 'clear-notice' })
+          dispatch({ type: 'too-late' })
+        }, 5000),
+      )
+    },
+    [refreshMailboxRoster],
+  )
 
   const undoAction = useCallback(() => {
     dispatch({ type: 'undo' })
@@ -525,7 +578,8 @@ export function MailProvider({ children }: { children: ReactNode }) {
           return false
         }
         try {
-          const sourceDraftId = remoteRef.current && isRemoteMail() ? remoteDraftApi.activeId() : null
+          const sourceDraftId =
+            remoteRef.current && isRemoteMail() ? remoteDraftApi.activeId() : null
           await scheduleApi.enqueue({
             id: `scheduled-${Date.now()}`,
             draft,
@@ -576,6 +630,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
             draft.sendKey || crypto.randomUUID(),
             remoteDraftApi.activeId(),
           )
+          if (!outcome.ok) throw new Error('The mail server did not confirm delivery')
           chime()
           dispatch({
             type: 'notice',

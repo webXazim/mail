@@ -2,7 +2,14 @@ import { apiFetch } from '../lib/api'
 import { authApi } from './auth'
 import { foldersApi } from './folders'
 import { labelsApi } from './labels'
-import type { Draft, DraftAttachment, Mail, Mailbox, ReaderThreadItem, SecurityVerdicts } from '../types'
+import type {
+  Draft,
+  DraftAttachment,
+  Mail,
+  Mailbox,
+  ReaderThreadItem,
+  SecurityVerdicts,
+} from '../types'
 
 export type RemoteMailbox = {
   id: string
@@ -84,7 +91,8 @@ export type RemotePageOptions = {
   limit?: number
   anchor?: string | null
   queryState?: string | null
-  sort?: 'received_desc' | 'received_asc' | 'sender_asc' | 'sender_desc' | 'subject_asc' | 'subject_desc'
+  sort?:
+    'received_desc' | 'received_asc' | 'sender_asc' | 'sender_desc' | 'subject_asc' | 'subject_desc'
   unread?: boolean
   starred?: boolean
   attachment?: boolean
@@ -109,25 +117,39 @@ export const invalidateMailboxRoster = () => {
 
 const roleFor = (label: Mailbox): string | null => {
   switch (label) {
-    case 'Inbox': return 'inbox'
-    case 'Sent': return 'sent'
-    case 'Drafts': return 'drafts'
-    case 'Trash': return 'trash'
-    case 'Spam': return 'junk'
-    case 'Archive': return 'archive'
-    default: return null
+    case 'Inbox':
+      return 'inbox'
+    case 'Sent':
+      return 'sent'
+    case 'Drafts':
+      return 'drafts'
+    case 'Trash':
+      return 'trash'
+    case 'Spam':
+      return 'junk'
+    case 'Archive':
+      return 'archive'
+    default:
+      return null
   }
 }
 
 const labelForRole = (role: string | null): Mailbox | null => {
   switch (role) {
-    case 'inbox': return 'Inbox'
-    case 'sent': return 'Sent'
-    case 'drafts': return 'Drafts'
-    case 'trash': return 'Trash'
-    case 'junk': return 'Spam'
-    case 'archive': return 'Archive'
-    default: return null
+    case 'inbox':
+      return 'Inbox'
+    case 'sent':
+      return 'Sent'
+    case 'drafts':
+      return 'Drafts'
+    case 'trash':
+      return 'Trash'
+    case 'junk':
+      return 'Spam'
+    case 'archive':
+      return 'Archive'
+    default:
+      return null
   }
 }
 
@@ -167,7 +189,11 @@ const initialsOf = (name: string, email: string): string => {
   const words = name.trim().split(/\s+/).filter(Boolean)
   if (words.length === 0 && email) return email.slice(0, 2).toUpperCase()
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-  return words.slice(0, 2).map((word) => word[0]).join('').toUpperCase()
+  return words
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase()
 }
 
 const colorOf = (email: string): string => {
@@ -182,7 +208,9 @@ export const formatTime = (iso: string | null | undefined): string => {
   if (Number.isNaN(date.getTime())) return ''
   const now = new Date()
   const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   if (sameDay(date, now)) {
     const diff = now.getTime() - date.getTime()
     const minutes = Math.floor(diff / 60000)
@@ -220,12 +248,14 @@ const labelFromKeywords = (keywords?: Record<string, boolean>): string => {
   if (!key) return 'Mail'
   const configured = labelsApi.list().find((label) => automationLabelKeyword(label.name) === key)
   if (configured) return configured.name
-  return key
-    .slice('cs-label-'.length)
-    .split('-')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'Mail'
+  return (
+    key
+      .slice('cs-label-'.length)
+      .split('-')
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ') || 'Mail'
+  )
 }
 
 const folderFromMailboxIds = (
@@ -295,10 +325,20 @@ const resolvePageScope = async (
   return { scope: 'mailbox', mailbox: custom?.id }
 }
 
-export async function fetchMailPage(folder: string, options: RemotePageOptions = {}): Promise<RemoteMailPage> {
+export async function fetchMailPage(
+  folder: string,
+  options: RemotePageOptions = {},
+): Promise<RemoteMailPage> {
   const resolved = await resolvePageScope(folder, options.mailboxId)
   if (resolved.scope === 'mailbox' && (!resolved.mailbox || resolved.mailbox === '__missing__')) {
-    return { mails: [], hasMore: false, nextAnchor: null, queryState: null, resetRequired: false, total: 0 }
+    return {
+      mails: [],
+      hasMore: false,
+      nextAnchor: null,
+      queryState: null,
+      resetRequired: false,
+      total: 0,
+    }
   }
   const query = new URLSearchParams({
     scope: resolved.scope,
@@ -319,14 +359,15 @@ export async function fetchMailPage(folder: string, options: RemotePageOptions =
     reset_required?: boolean
     total?: number
   }>(`/api/mail/threads?${query}`)
-  const fallback = folder === 'All Mail' || folder === 'Unread' || folder === 'Starred' ? undefined : folder
+  const fallback =
+    folder === 'All Mail' || folder === 'Unread' || folder === 'Starred' ? undefined : folder
   return {
     mails: (data.emails ?? []).map((row) => rowToMail(row, fallback, resolved.mailbox)),
     hasMore: Boolean(data.has_more),
     nextAnchor: data.next_anchor ?? null,
     queryState: data.query_state ?? null,
     resetRequired: Boolean(data.reset_required),
-    total: data.total ?? (data.emails?.length ?? 0),
+    total: data.total ?? data.emails?.length ?? 0,
   }
 }
 
@@ -372,7 +413,7 @@ export async function searchMail(
     nextAnchor: data.next_anchor ?? null,
     queryState: data.query_state ?? null,
     resetRequired: Boolean(data.reset_required),
-    total: data.total ?? (data.emails?.length ?? 0),
+    total: data.total ?? data.emails?.length ?? 0,
   }
 }
 
@@ -417,7 +458,9 @@ export function rawThreadToItem(email: RawThreadEmail): ReaderThreadItem {
     to: email.to?.map(formatAddress),
     cc: email.cc?.map(formatAddress),
     attachments: email.attachments?.map((part) => ({
-      name: part.name ?? 'attachment', blobId: part.blobId ?? '', type: part.type ?? 'application/octet-stream',
+      name: part.name ?? 'attachment',
+      blobId: part.blobId ?? '',
+      type: part.type ?? 'application/octet-stream',
     })),
     messageId: email['header:Message-ID'],
     security: email.security,
@@ -433,16 +476,23 @@ export async function fetchThreadFor(mailId: string): Promise<ReaderThreadItem[]
   return (data.emails ?? []).map(rawThreadToItem)
 }
 
-export const attachmentBlobUrl = (blobId: string) => `/api/mail/attachment/${encodeURIComponent(blobId)}`
+export const attachmentBlobUrl = (blobId: string) =>
+  `/api/mail/attachment/${encodeURIComponent(blobId)}`
 
 export async function setRead(emailIds: string[], read: boolean): Promise<void> {
   if (!emailIds.length) return
-  await apiFetch('/api/mail/threads/state', { method: 'POST', body: JSON.stringify({ emailIds, read }) })
+  await apiFetch('/api/mail/threads/state', {
+    method: 'POST',
+    body: JSON.stringify({ emailIds, read }),
+  })
 }
 
 export async function setStarred(emailIds: string[], starred: boolean): Promise<void> {
   if (!emailIds.length) return
-  await apiFetch('/api/mail/threads/state', { method: 'POST', body: JSON.stringify({ emailIds, starred }) })
+  await apiFetch('/api/mail/threads/state', {
+    method: 'POST',
+    body: JSON.stringify({ emailIds, starred }),
+  })
 }
 
 export async function moveEmails(
@@ -453,7 +503,7 @@ export async function moveEmails(
   if (!emailIds.length) return
   await fetchMailboxes()
   const role = roleFor(toFolder as Mailbox)
-  const custom = !role ? foldersApi.byName(toFolder) ?? foldersApi.byId(toFolder) : undefined
+  const custom = !role ? (foldersApi.byName(toFolder) ?? foldersApi.byId(toFolder)) : undefined
   const body: Record<string, unknown> = { emailIds }
   if (role) body.toRole = role
   else if (custom) body.toMailbox = custom.id
@@ -465,7 +515,10 @@ export async function moveEmails(
 
 export async function destroyEmails(emailIds: string[]): Promise<void> {
   if (!emailIds.length) return
-  await apiFetch('/api/mail/threads/destroy', { method: 'POST', body: JSON.stringify({ emailIds }) })
+  await apiFetch('/api/mail/threads/destroy', {
+    method: 'POST',
+    body: JSON.stringify({ emailIds }),
+  })
   invalidateMailboxRoster()
 }
 
@@ -509,6 +562,7 @@ export type SendOutcome = {
 }
 
 let activeDraftId: string | null = null
+let draftSaveQueue: Promise<void> = Promise.resolve()
 
 export const remoteDraftApi = {
   activeId: () => activeDraftId,
@@ -544,21 +598,34 @@ export const remoteDraftApi = {
   },
 
   async save(compose: RemoteCompose): Promise<string> {
-    let id = activeDraftId
-    if (id) {
-      await apiFetch(`/api/drafts/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(compose),
-      })
-    } else {
-      const created = await apiFetch<{ id: string }>('/api/drafts', {
-        method: 'POST',
-        body: JSON.stringify(compose),
-      })
-      id = created.id
-      activeDraftId = id
+    // Autosave and an explicit Send can arrive together. Serialize them so
+    // they update one server draft instead of racing two POST requests and
+    // leaving an orphaned duplicate behind.
+    let savedId = ''
+    const save = async () => {
+      let id = activeDraftId
+      if (id) {
+        await apiFetch(`/api/drafts/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(compose),
+        })
+      } else {
+        const created = await apiFetch<{ id: string }>('/api/drafts', {
+          method: 'POST',
+          body: JSON.stringify(compose),
+        })
+        id = created.id
+        activeDraftId = id
+      }
+      savedId = id
     }
-    return id as string
+    const pending = draftSaveQueue.then(save, save)
+    draftSaveQueue = pending.then(
+      () => undefined,
+      () => undefined,
+    )
+    await pending
+    return savedId
   },
 
   async remove(id: string): Promise<void> {

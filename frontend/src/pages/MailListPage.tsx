@@ -16,6 +16,7 @@ import {
   MailCheck,
   MailOpen,
   Palmtree,
+  RefreshCw,
   RotateCcw,
   SquarePen,
   Star,
@@ -50,7 +51,13 @@ import { vacationApi } from '../services/vacation'
 import { useMail } from '../state/mail/MailContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useMailListKeyboard } from '../hooks/useMailListKeyboard'
-import { composeToDraft, fetchMailPage, formatTime, isRemoteMail, remoteDraftApi } from '../services/remote-mail'
+import {
+  composeToDraft,
+  fetchMailPage,
+  formatTime,
+  isRemoteMail,
+  remoteDraftApi,
+} from '../services/remote-mail'
 import { localIdentity } from '../services/profile'
 import { NotFoundPage } from './NotFoundPage'
 import type { MailActionKind } from '../state/mail/mailboxReducer'
@@ -61,7 +68,12 @@ const pageSize = 25
 
 const toDraftMail = (draft: Draft): Mail => ({
   id: 'draft-local',
-  initials: localIdentity().name.split(/\s+/).map((part) => part[0]?.toUpperCase() ?? '').slice(0, 2).join('') || '?',
+  initials:
+    localIdentity()
+      .name.split(/\s+/)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .slice(0, 2)
+      .join('') || '?',
   sender: 'You',
   email: localIdentity().email,
   subject: draft.subject || '(no subject)',
@@ -106,6 +118,7 @@ export function MailListPage() {
     notify,
     importMails,
     mergeRemoteMails,
+    refreshMailboxRoster,
     undoAction,
     toasts,
     dismissToast,
@@ -127,6 +140,7 @@ export function MailListPage() {
   const [remoteQueryState, setRemoteQueryState] = useState<string | null>(null)
   const [remoteLoading, setRemoteLoading] = useState(false)
   const [remoteError, setRemoteError] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [mailForwarding, setMailForwarding] = useState(() => forwardingApi.load())
   const [mailVacation, setMailVacation] = useState(() => vacationApi.load())
   const [sheet, setSheet] = useState<Mail | null>(null)
@@ -206,10 +220,15 @@ export function MailListPage() {
       const detail = (incoming as CustomEvent<RealtimeEvent>).detail
       if (!detail || detail.kind !== 'resource-changed') return
       if (detail.payload.resource === 'drafts' && folder === 'Drafts') {
-        void fetchServerDrafts().then(setServerDrafts).catch(() => {})
+        void fetchServerDrafts()
+          .then(setServerDrafts)
+          .catch(() => {})
       }
       if (detail.payload.resource === 'schedule' && folder === 'Scheduled') {
-        void scheduleApi.refresh().then(setScheduledList).catch(() => {})
+        void scheduleApi
+          .refresh()
+          .then(setScheduledList)
+          .catch(() => {})
       }
     }
     window.addEventListener('cs-mail-realtime', onRealtime)
@@ -280,7 +299,8 @@ export function MailListPage() {
     return counts
   }, [mailbox])
 
-  const remotePaged = isRemoteMail() && !query && !['Drafts', 'Scheduled', 'Snoozed'].includes(folder)
+  const remotePaged =
+    isRemoteMail() && !query && !['Drafts', 'Scheduled', 'Snoozed'].includes(folder)
   const remoteSort = useMemo(() => {
     if (sortKey === 'oldest') return 'received_asc' as const
     if (sortKey === 'sender-az') return 'sender_asc' as const
@@ -290,55 +310,69 @@ export function MailListPage() {
     return 'received_desc' as const
   }, [sortKey])
 
-  const loadRemotePage = useCallback(async (reset: boolean) => {
-    if (!remotePaged) return
-    setRemoteLoading(true)
-    setRemoteError(false)
-    try {
-      const result = await fetchMailPage(folder, {
-        limit: 50,
-        anchor: reset ? null : remoteAnchor,
-        queryState: reset ? null : remoteQueryState,
-        sort: remoteSort,
-        unread: filters.unread,
-        starred: filters.starred,
-        attachment: filters.attachment,
-        mailboxId: customMailboxId,
-      })
-      if (!reset && result.resetRequired) {
-        const fresh = await fetchMailPage(folder, {
+  const loadRemotePage = useCallback(
+    async (reset: boolean) => {
+      if (!remotePaged) return
+      setRemoteLoading(true)
+      setRemoteError(false)
+      try {
+        const result = await fetchMailPage(folder, {
           limit: 50,
+          anchor: reset ? null : remoteAnchor,
+          queryState: reset ? null : remoteQueryState,
           sort: remoteSort,
           unread: filters.unread,
           starred: filters.starred,
           attachment: filters.attachment,
           mailboxId: customMailboxId,
         })
-        setRemoteRows(fresh.mails)
-        mergeRemoteMails(fresh.mails)
-        setRemoteTotal(fresh.total)
-        setRemoteHasMore(fresh.hasMore)
-        setRemoteAnchor(fresh.nextAnchor)
-        setRemoteQueryState(fresh.queryState)
-        setPage(1)
-      } else {
-        setRemoteRows((current) => {
-          if (reset) return result.mails
-          const seen = new Set(current.map((mail) => mail.id))
-          return [...current, ...result.mails.filter((mail) => !seen.has(mail.id))]
-        })
-        mergeRemoteMails(result.mails)
-        setRemoteTotal(result.total)
-        setRemoteHasMore(result.hasMore)
-        setRemoteAnchor(result.nextAnchor)
-        setRemoteQueryState(result.queryState)
+        if (!reset && result.resetRequired) {
+          const fresh = await fetchMailPage(folder, {
+            limit: 50,
+            sort: remoteSort,
+            unread: filters.unread,
+            starred: filters.starred,
+            attachment: filters.attachment,
+            mailboxId: customMailboxId,
+          })
+          setRemoteRows(fresh.mails)
+          mergeRemoteMails(fresh.mails)
+          setRemoteTotal(fresh.total)
+          setRemoteHasMore(fresh.hasMore)
+          setRemoteAnchor(fresh.nextAnchor)
+          setRemoteQueryState(fresh.queryState)
+          setPage(1)
+        } else {
+          setRemoteRows((current) => {
+            if (reset) return result.mails
+            const seen = new Set(current.map((mail) => mail.id))
+            return [...current, ...result.mails.filter((mail) => !seen.has(mail.id))]
+          })
+          mergeRemoteMails(result.mails)
+          setRemoteTotal(result.total)
+          setRemoteHasMore(result.hasMore)
+          setRemoteAnchor(result.nextAnchor)
+          setRemoteQueryState(result.queryState)
+        }
+      } catch {
+        setRemoteError(true)
+      } finally {
+        setRemoteLoading(false)
       }
-    } catch {
-      setRemoteError(true)
-    } finally {
-      setRemoteLoading(false)
-    }
-  }, [remotePaged, folder, customMailboxId, remoteAnchor, remoteQueryState, remoteSort, filters.unread, filters.starred, filters.attachment, mergeRemoteMails])
+    },
+    [
+      remotePaged,
+      folder,
+      customMailboxId,
+      remoteAnchor,
+      remoteQueryState,
+      remoteSort,
+      filters.unread,
+      filters.starred,
+      filters.attachment,
+      mergeRemoteMails,
+    ],
+  )
 
   useEffect(() => {
     if (!remotePaged) return
@@ -350,7 +384,64 @@ export function MailListPage() {
     // loadRemotePage intentionally includes cursor state; a reset must only
     // rerun when the view/filter/sort changes, not after every fetched page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remotePaged, folder, customMailboxId, remoteSort, filters.unread, filters.starred, filters.attachment])
+  }, [
+    remotePaged,
+    folder,
+    customMailboxId,
+    remoteSort,
+    filters.unread,
+    filters.starred,
+    filters.attachment,
+  ])
+
+  const refreshCurrentView = useCallback(
+    async (showProgress = true) => {
+      if (showProgress) setRefreshing(true)
+      try {
+        if (remotePaged) {
+          await Promise.all([refreshMailboxRoster(), loadRemotePage(true)])
+        } else if (isRemoteMail() && folder === 'Drafts') {
+          setServerDrafts(await fetchServerDrafts())
+        } else if (isRemoteMail() && folder === 'Scheduled') {
+          setScheduledList(await scheduleApi.refresh())
+        } else {
+          await reload()
+        }
+      } catch {
+        if (showProgress) notify('Could not refresh mail')
+      } finally {
+        if (showProgress) setRefreshing(false)
+      }
+    },
+    [fetchServerDrafts, folder, loadRemotePage, notify, refreshMailboxRoster, reload, remotePaged],
+  )
+
+  useEffect(() => {
+    if (!isRemoteMail()) return
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshCurrentView(false)
+    }
+    const timer = window.setInterval(refreshWhenVisible, 30000)
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [refreshCurrentView])
+
+  useEffect(() => {
+    if (!remotePaged) return
+    const onRealtime = (incoming: Event) => {
+      const detail = (incoming as CustomEvent<RealtimeEvent>).detail
+      if (detail?.kind === 'resource-changed' && detail.payload.resource === 'mailbox') {
+        void refreshCurrentView(false)
+      }
+    }
+    window.addEventListener('cs-mail-realtime', onRealtime)
+    return () => window.removeEventListener('cs-mail-realtime', onRealtime)
+  }, [refreshCurrentView, remotePaged])
 
   const filtered = useMemo(() => {
     if (folder === 'Scheduled') return scheduledList.map(buildScheduledMail)
@@ -364,15 +455,17 @@ export function MailListPage() {
   const visiblePool = useMemo(() => {
     if (remotePaged) {
       const current = new Map(mailbox.map((mail) => [mail.id, mail]))
-      return remoteRows.map((mail) => current.get(mail.id) ?? mail).filter((mail) => {
-        if (filters.unread && !mail.unread) return false
-        if (filters.starred && !mail.starred) return false
-        if (filters.attachment && !mail.attachment) return false
-        if (folder === 'Unread') return mail.unread && mail.folder !== 'Trash'
-        if (folder === 'Starred') return Boolean(mail.starred) && mail.folder !== 'Trash'
-        if (folder === 'All Mail') return mail.folder !== 'Trash'
-        return (mail.folder || 'Inbox') === folder
-      })
+      return remoteRows
+        .map((mail) => current.get(mail.id) ?? mail)
+        .filter((mail) => {
+          if (filters.unread && !mail.unread) return false
+          if (filters.starred && !mail.starred) return false
+          if (filters.attachment && !mail.attachment) return false
+          if (folder === 'Unread') return mail.unread && mail.folder !== 'Trash'
+          if (folder === 'Starred') return Boolean(mail.starred) && mail.folder !== 'Trash'
+          if (folder === 'All Mail') return mail.folder !== 'Trash'
+          return (mail.folder || 'Inbox') === folder
+        })
     }
     let items = filtered
     if (filters.unread) items = items.filter((mail) => mail.unread)
@@ -576,7 +669,8 @@ export function MailListPage() {
             <div className="status-banner">
               <CornerDownRight size={14} />
               <span>
-                Forwarding is on — incoming mail is sent to <strong>{mailForwarding.address}</strong>
+                Forwarding is on — incoming mail is sent to{' '}
+                <strong>{mailForwarding.address}</strong>
                 {mailForwarding.keepCopy ? '' : ' (no copy is kept in this mailbox)'}.
               </span>
             </div>
@@ -806,6 +900,15 @@ export function MailListPage() {
           )}
         </div>
         <span className="toolbar-spacer" />
+        <button
+          className="icon-button"
+          aria-label="Refresh mail"
+          title="Refresh mail"
+          disabled={refreshing || remoteLoading}
+          onClick={() => void refreshCurrentView()}
+        >
+          <RefreshCw className={refreshing ? 'is-spinning' : undefined} size={17} />
+        </button>
         {folder === 'All Mail' && (
           <>
             <input

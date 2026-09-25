@@ -35,16 +35,15 @@ const emptyDraft: Draft = {
 }
 const normalizeAttachments = (value: unknown): DraftAttachment[] =>
   Array.isArray(value)
-    ? value.filter(
-        (item): item is DraftAttachment =>
-          Boolean(
-            item &&
-              typeof item === 'object' &&
-              'id' in item &&
-              typeof item.id === 'string' &&
-              'filename' in item &&
-              typeof item.filename === 'string',
-          ),
+    ? value.filter((item): item is DraftAttachment =>
+        Boolean(
+          item &&
+          typeof item === 'object' &&
+          'id' in item &&
+          typeof item.id === 'string' &&
+          'filename' in item &&
+          typeof item.filename === 'string',
+        ),
       )
     : []
 
@@ -91,17 +90,23 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const [showCopies, setShowCopies] = useState(Boolean(draft.cc || draft.bcc))
   const [status, setStatus] = useState(remote ? 'Ready' : 'Saved to Drafts')
   const [uploading, setUploading] = useState(false)
+  const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
   const [dragging, setDragging] = useState(false)
   const identityById = useMemo(
     () => new Map(identities.map((identity) => [identity.id, identity])),
     [identities],
   )
   const [fromIdentityId, setFromIdentityId] = useState(
-    draft.identityId || identities.find((identity) => identity.primary)?.id || identities[0]?.id || '',
+    draft.identityId ||
+      identities.find((identity) => identity.primary)?.id ||
+      identities[0]?.id ||
+      '',
   )
   const [recipientError, setRecipientError] = useState<'to' | 'cc' | 'bcc' | null>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const remoteAutosaveTimerRef = useRef<number | null>(null)
   const initialBodyRef = useRef(draft.body)
   const skipInitialSave = useRef(true)
   useFocusTrap(dialogRef)
@@ -126,7 +131,11 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
           setDraft((current) =>
             current.identityId === selected.id
               ? current
-              : { ...current, identityId: selected.id, from: { name: selected.displayName, email: selected.email } },
+              : {
+                  ...current,
+                  identityId: selected.id,
+                  from: { name: selected.displayName, email: selected.email },
+                },
           )
         }
       })
@@ -158,6 +167,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   useEffect(() => {
     if (skipInitialSave.current || !remote) return
     const timer = window.setTimeout(() => {
+      remoteAutosaveTimerRef.current = null
       if (
         !draft.to &&
         !draft.cc &&
@@ -174,16 +184,24 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
         subject: draft.subject,
         body_text: draft.body,
         attachments: draft.attachments.map((attachment) => ({ id: attachment.id })),
-        identity_id: draft.identityId,
+        identity_id: fromIdentityId || draft.identityId,
         client_key: draft.clientKey,
         send_key: draft.sendKey,
       }
       remoteDraftApi
         .save(compose)
-        .then(() => setStatus('Saved to Drafts'))
-        .catch(() => setStatus('Draft not saved — retrying'))
+        .then(() => {
+          if (!sendingRef.current) setStatus('Saved to Drafts')
+        })
+        .catch(() => {
+          if (!sendingRef.current) setStatus('Draft not saved — retrying')
+        })
     }, 1500)
-    return () => window.clearTimeout(timer)
+    remoteAutosaveTimerRef.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (remoteAutosaveTimerRef.current === timer) remoteAutosaveTimerRef.current = null
+    }
   }, [draft])
   const syncBody = () => {
     update('body', editorRef.current?.innerText ?? '')
@@ -260,7 +278,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   }
   const send = async (event: FormEvent) => {
     event.preventDefault()
-    if (uploading) return
+    if (uploading || sendingRef.current) return
     if (remote && (!fromIdentityId || !identityById.has(fromIdentityId))) {
       setStatus('A verified mailbox sender is required before sending')
       return
@@ -289,30 +307,49 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
       setStatus('Check the recipients: enter valid email addresses')
       return
     }
-    if (remote) {
-      try {
+    const finalizedDraft = { ...draft, identityId: fromIdentityId || draft.identityId }
+    if (remoteAutosaveTimerRef.current !== null) {
+      window.clearTimeout(remoteAutosaveTimerRef.current)
+      remoteAutosaveTimerRef.current = null
+    }
+    sendingRef.current = true
+    setSending(true)
+    try {
+      if (remote) {
         setStatus('Saving draft before send...')
         await remoteDraftApi.save({
-          to: parseRecipients(draft.to),
-          cc: parseRecipients(draft.cc),
-          bcc: parseRecipients(draft.bcc),
-          subject: draft.subject,
-          body_text: draft.body,
-          attachments: draft.attachments.map((attachment) => ({ id: attachment.id })),
-          identity_id: draft.identityId,
-          client_key: draft.clientKey,
-          send_key: draft.sendKey,
+          to: parseRecipients(finalizedDraft.to),
+          cc: parseRecipients(finalizedDraft.cc),
+          bcc: parseRecipients(finalizedDraft.bcc),
+          subject: finalizedDraft.subject,
+          body_text: finalizedDraft.body,
+          attachments: finalizedDraft.attachments.map((attachment) => ({ id: attachment.id })),
+          identity_id: finalizedDraft.identityId,
+          client_key: finalizedDraft.clientKey,
+          send_key: finalizedDraft.sendKey,
         })
-      } catch (error) {
-        setStatus(error instanceof Error ? `Draft not saved — ${error.message}` : 'Draft not saved')
+      }
+      setStatus(finalizedDraft.scheduledAt ? 'Scheduling...' : 'Sending...')
+      const ok = (await onSent?.(finalizedDraft)) ?? true
+      if (!ok) {
+        setStatus(
+          finalizedDraft.scheduledAt
+            ? 'Could not schedule — try again'
+            : 'Could not send — check the alert and try again',
+        )
         return
       }
+      draftsApi.clear()
+      setStatus(finalizedDraft.scheduledAt ? 'Scheduled' : 'Message sent')
+      window.setTimeout(close, 700)
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? `Could not send — ${error.message}` : 'Could not send — try again',
+      )
+    } finally {
+      sendingRef.current = false
+      setSending(false)
     }
-    const ok = (await onSent?.(draft)) ?? true
-    if (!ok) return
-    draftsApi.clear()
-    setStatus(draft.scheduledAt ? 'Scheduled' : 'Message sent')
-    window.setTimeout(close, 700)
   }
   return (
     <div className="compose-layer">
@@ -517,9 +554,20 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
             <button className="secondary-button" type="button" onClick={discard}>
               Discard
             </button>
-            <button className="primary-button compose-send" type="submit">
+            <button
+              className="primary-button compose-send"
+              type="submit"
+              disabled={uploading || sending}
+              aria-busy={sending}
+            >
               <Send size={15} />
-              {draft.scheduledAt ? 'Schedule' : 'Send'}
+              {sending
+                ? draft.scheduledAt
+                  ? 'Scheduling…'
+                  : 'Sending…'
+                : draft.scheduledAt
+                  ? 'Schedule'
+                  : 'Send'}
             </button>
             {draft.scheduledAt && (
               <small className="scheduled-hint">
