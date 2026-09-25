@@ -60,7 +60,17 @@ ok "independent platform edge topology is configured"
 for generated in frontend/node_modules frontend/dist frontend/coverage backend/target backend/.cs-mail-target .cache; do
   [[ ! -e "$ROOT/$generated" ]] || fail "generated path must not be committed: $generated"
 done
-ok "generated dependency/build directories are absent"
+if [[ -d "$ROOT/.git" ]]; then
+  tracked_generated=$(
+    cd "$ROOT"
+    git ls-files | grep -E '(^|/)(__pycache__/|[^/]+\.py[co]$)|^frontend/(dist|node_modules|coverage)/|^backend/(target|\.cs-mail-target)/|^\.cache/' || true
+  )
+  [[ -z "$tracked_generated" ]] || {
+    printf '%s\n' "$tracked_generated" >&2
+    fail "generated build/cache artifacts are still tracked by Git; remove them from the repository index"
+  }
+fi
+ok "generated dependency/build directories are absent and not tracked"
 
 if find "$ROOT" -type f \( -name '.env.production' -o -name '.env.certification' -o -name '*.pem' -o -name '*.key' -o -name 'id_rsa' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
   fail "private environment/key material is present in the repository"
