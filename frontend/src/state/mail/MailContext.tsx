@@ -624,6 +624,8 @@ export function MailProvider({ children }: { children: ReactNode }) {
           identity_id: draft.identityId,
           client_key: draft.clientKey,
           send_key: draft.sendKey,
+          in_reply_to: draft.inReplyTo,
+          references: draft.references,
         }
         try {
           const outcome = await sendCompose(
@@ -633,6 +635,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
           )
           if (!outcome.ok) throw new Error('The mail server did not confirm delivery')
           chime()
+          window.dispatchEvent(new Event('cs-mail-sent'))
           dispatch({
             type: 'notice',
             message: outcome.stored
@@ -660,6 +663,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
                 if (status.status === 'sent') {
                   remoteDraftApi.clearActive()
                   chime()
+                  window.dispatchEvent(new Event('cs-mail-sent'))
                   dispatch({ type: 'notice', message: 'Message sent' })
                   void loadMailbox()
                   return true

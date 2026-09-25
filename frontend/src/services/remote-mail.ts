@@ -435,6 +435,7 @@ export type RawThreadEmail = {
   starred?: boolean
   attachments?: { name?: string; blobId?: string; type?: string; size?: number }[]
   'header:Message-ID'?: string
+  'header:References'?: string
   security?: SecurityVerdicts
 }
 
@@ -463,6 +464,9 @@ export function rawThreadToItem(email: RawThreadEmail): ReaderThreadItem {
       type: part.type ?? 'application/octet-stream',
     })),
     messageId: email['header:Message-ID'],
+    references: email['header:References']?.match(/<[^<>]+>/g) ?? [],
+    seen: email.seen,
+    starred: email.starred,
     security: email.security,
   }
 }
@@ -593,6 +597,8 @@ export const remoteDraftApi = {
       identity_id: data.identity_id,
       client_key: data.client_key,
       send_key: data.send_key,
+      in_reply_to: data.in_reply_to,
+      references: data.references,
       draft_id: data.id,
     }
   },
@@ -663,6 +669,8 @@ export const composeToDraft = (compose: RemoteCompose): Draft => ({
   serverDraftId: compose.draft_id,
   clientKey: compose.client_key,
   sendKey: compose.send_key || crypto.randomUUID(),
+  inReplyTo: compose.in_reply_to,
+  references: compose.references,
   attachments: compose.attachments.map((item) => ({
     id: item.id,
     filename: 'filename' in item ? item.filename : 'attachment',

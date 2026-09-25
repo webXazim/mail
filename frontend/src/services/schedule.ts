@@ -60,6 +60,8 @@ const draftToCompose = (draft: Draft): RemoteCompose => ({
   identity_id: draft.identityId,
   client_key: draft.clientKey,
   send_key: draft.sendKey,
+  in_reply_to: draft.inReplyTo,
+  references: draft.references,
 })
 
 const rowToMessage = (row: ScheduledRow): ScheduledMessage => ({

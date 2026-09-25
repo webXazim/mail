@@ -4,7 +4,7 @@ const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 
 vi.mock('../lib/api', () => ({ apiFetch }))
 
-import { rawThreadToItem, remoteDraftApi } from './remote-mail'
+import { composeToDraft, rawThreadToItem, remoteDraftApi } from './remote-mail'
 
 describe('live thread response mapping', () => {
   it('maps a Stalwart Email/get message to a real reader item', () => {
@@ -17,6 +17,8 @@ describe('live thread response mapping', () => {
       subject: 'Test',
       preview: 'Hello world',
       body_text: 'The actual message body',
+      'header:Message-ID': '<original@example.com>',
+      'header:References': '<first@example.com> <prior@example.com>',
       attachments: [{ name: 'invoice.pdf', blobId: 'blob-1', type: 'application/pdf' }],
     })
 
@@ -26,6 +28,19 @@ describe('live thread response mapping', () => {
     expect(item.clearBody).toBe('The actual message body')
     expect(item.to).toEqual(['hello@webxazim.com'])
     expect(item.attachments?.[0].blobId).toBe('blob-1')
+    expect(item.messageId).toBe('<original@example.com>')
+    expect(item.references).toEqual(['<first@example.com>', '<prior@example.com>'])
+  })
+
+  it('keeps threading headers when reopening a saved reply draft', () => {
+    const draft = composeToDraft({
+      to: [{ email: 'person@example.com' }], cc: [], bcc: [],
+      subject: 'Re: Hello', body_text: 'Reply', attachments: [],
+      in_reply_to: '<original@example.com>',
+      references: ['<first@example.com>', '<original@example.com>'],
+    })
+    expect(draft.inReplyTo).toBe('<original@example.com>')
+    expect(draft.references).toEqual(['<first@example.com>', '<original@example.com>'])
   })
 })
 

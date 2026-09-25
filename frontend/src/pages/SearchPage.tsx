@@ -216,7 +216,7 @@ export function SearchPage() {
   const openThread = useCallback(
     (mail: Mail) =>
       navigate(`/mail/${folderPath(mail.folder || 'Inbox')}/thread/${mail.id}`, {
-        state: { background: pathname },
+        state: { background: pathname, mail },
       }),
     [navigate, pathname],
   )

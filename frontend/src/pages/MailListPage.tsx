@@ -508,7 +508,7 @@ export function MailListPage() {
       const base = customMailboxId
         ? `folders/${encodeURIComponent(customMailboxId)}`
         : folderPath(folder)
-      navigate(`/mail/${base}/thread/${mail.id}`)
+      navigate(`/mail/${base}/thread/${mail.id}`, { state: { mail } })
     },
     [folder, customMailboxId, markRead, navigate, notify],
   )

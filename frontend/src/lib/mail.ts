@@ -12,7 +12,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { foldersApi } from '../services/folders'
-import type { Draft, Mail, Mailbox } from '../types'
+import type { Draft, Mail, Mailbox, ReaderThreadItem } from '../types'
 
 type NavGroup = 'mail' | 'compose' | 'more'
 type FolderNav = { label: Mailbox; icon: typeof InboxIcon; group: NavGroup }
@@ -292,13 +292,23 @@ export const parseAddresses = (value: string): string[] =>
     .map((part) => part.trim())
     .filter(Boolean)
 
-export const buildReplyDraft = (mail: Mail): Partial<Draft> => ({
+const replyHeaders = (source?: ReaderThreadItem): Pick<Draft, 'inReplyTo' | 'references'> => {
+  const messageId = source?.messageId?.trim()
+  if (!messageId) return {}
+  return {
+    inReplyTo: messageId,
+    references: [...(source?.references ?? []), messageId].slice(-25),
+  }
+}
+
+export const buildReplyDraft = (mail: Mail, source?: ReaderThreadItem): Partial<Draft> => ({
   to: mail.email,
   subject: prefixSubject(mail, 'Re:'),
   body: '',
+  ...replyHeaders(source),
 })
 
-export const buildReplyAllDraft = (mail: Mail, ownAddress = selfEmail): Partial<Draft> => ({
+export const buildReplyAllDraft = (mail: Mail, ownAddress = selfEmail, source?: ReaderThreadItem): Partial<Draft> => ({
   to: [
     mail.email,
     ...(mail.to ?? []).filter((recipient) => recipient.toLowerCase() !== ownAddress.toLowerCase()),
@@ -308,6 +318,7 @@ export const buildReplyAllDraft = (mail: Mail, ownAddress = selfEmail): Partial<
     .join(', '),
   subject: prefixSubject(mail, 'Re:'),
   body: '',
+  ...replyHeaders(source),
 })
 
 export const buildForwardDraft = (mail: Mail): Partial<Draft> => ({

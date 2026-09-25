@@ -443,18 +443,40 @@ pub async fn empty_mailbox(
 
 /// Full thread (conversation) with every message's bodies and headers.
 pub async fn thread(bridge: &StalwartService, account: &str, thread_id: &str) -> Result<Value, String> {
-    let t = bridge
+    let mut resolved_thread_id = thread_id.to_string();
+    let mut t = bridge
         .mail_read(
             "Thread/get",
             json!({ "accountId": account, "ids": [thread_id] }),
         )
         .await?;
+    // Deep links carry an Email id, while the conversation endpoint expects a
+    // Thread id. Resolve the former server-side so opening a link after a
+    // reload does not depend on a browser-only Email→Thread cache.
+    if t.get("list").and_then(Value::as_array).is_none_or(|list| list.is_empty()) {
+        let email = bridge.mail_read("Email/get", json!({
+            "accountId": account,
+            "ids": [thread_id],
+            "properties": ["id", "threadId"]
+        })).await?;
+        resolved_thread_id = email.get("list")
+            .and_then(Value::as_array)
+            .and_then(|list| list.first())
+            .and_then(|item| item.get("threadId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("message or thread {thread_id} not found"))?
+            .to_string();
+        t = bridge.mail_read("Thread/get", json!({
+            "accountId": account,
+            "ids": [resolved_thread_id]
+        })).await?;
+    }
     let thread = t
         .get("list")
         .and_then(Value::as_array)
         .and_then(|a| a.first())
         .cloned()
-        .ok_or_else(|| format!("thread {thread_id} not found"))?;
+        .ok_or_else(|| format!("thread {resolved_thread_id} not found"))?;
     let ids: Vec<Value> = thread
         .get("emailIds")
         .and_then(Value::as_array)
@@ -478,7 +500,7 @@ pub async fn thread(bridge: &StalwartService, account: &str, thread_id: &str) ->
         }
     }
     Ok(json!({
-        "thread_id": thread_id,
+        "thread_id": resolved_thread_id,
         "count": emails.len(),
         "emails": emails
     }))

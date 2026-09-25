@@ -187,6 +187,8 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
         identity_id: fromIdentityId || draft.identityId,
         client_key: draft.clientKey,
         send_key: draft.sendKey,
+        in_reply_to: draft.inReplyTo,
+        references: draft.references,
       }
       remoteDraftApi
         .save(compose)
@@ -327,6 +329,8 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
           identity_id: finalizedDraft.identityId,
           client_key: finalizedDraft.clientKey,
           send_key: finalizedDraft.sendKey,
+          in_reply_to: finalizedDraft.inReplyTo,
+          references: finalizedDraft.references,
         })
       }
       setStatus(finalizedDraft.scheduledAt ? 'Scheduling...' : 'Sending...')

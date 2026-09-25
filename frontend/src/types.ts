@@ -56,6 +56,9 @@ export type ReaderThreadItem = {
   cc?: string[]
   attachments?: { name: string; blobId: string; type: string }[]
   messageId?: string
+  references?: string[]
+  seen?: boolean
+  starred?: boolean
   security?: SecurityVerdicts
 }
 export type DraftAttachment = {
@@ -85,4 +88,7 @@ export type Draft = {
   clientKey?: string
   /** Stable key for one logical immediate-send attempt. */
   sendKey?: string
+  /** RFC 5322 conversation headers retained through autosave and scheduling. */
+  inReplyTo?: string
+  references?: string[]
 }

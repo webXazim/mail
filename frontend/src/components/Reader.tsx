@@ -30,8 +30,8 @@ type ReaderProps = {
   thread?: ReaderThreadItem[]
   threadStatus?: 'loading' | 'ready' | 'error' | 'demo'
   onRetryThread?: () => void
-  onReply: () => void
-  onReplyAll: () => void
+  onReply: (item?: ReaderThreadItem) => void
+  onReplyAll: (item?: ReaderThreadItem) => void
   onForward: () => void
   onToggleStar: () => void
   onToggleRead: () => void
@@ -596,11 +596,19 @@ export function Reader({
           </div>
         )}
         <div className="reader-actions">
-          <button className="primary-button" onClick={onReply}>
+          <button
+            className="primary-button"
+            disabled={live && (threadStatus !== 'ready' || !isRealThreadItem(openItem))}
+            onClick={() => onReply(isRealThreadItem(openItem) ? openItem : undefined)}
+          >
             <MailIcon size={15} />
             Reply
           </button>
-          <button className="secondary-button" onClick={onReplyAll}>
+          <button
+            className="secondary-button"
+            disabled={live && (threadStatus !== 'ready' || !isRealThreadItem(openItem))}
+            onClick={() => onReplyAll(isRealThreadItem(openItem) ? openItem : undefined)}
+          >
             <MailIcon size={15} />
             Reply all
           </button>
