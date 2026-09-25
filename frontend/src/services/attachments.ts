@@ -1,4 +1,4 @@
-import { ApiError, refreshSession, tokenStore } from '../lib/api'
+import { ApiError, mailboxContextStore, refreshSession, tokenStore } from '../lib/api'
 import type { DraftAttachment } from '../types'
 
 const localBlobs = new Map<string, Blob>()
@@ -22,14 +22,23 @@ const parseError = async (response: Response) => {
   throw new ApiError(response.status, message, code, response.headers.get('x-request-id'))
 }
 
+const attachmentHeaders = (contentType?: string): Headers => {
+  const headers = new Headers()
+  if (contentType) headers.set('Content-Type', contentType)
+  const access = tokenStore.getAccess()
+  if (access) headers.set('Authorization', `Bearer ${access}`)
+  const organizationId = mailboxContextStore.getOrganizationId()
+  const mailboxId = mailboxContextStore.getMailboxId()
+  if (organizationId) headers.set('X-CS-Organization-ID', organizationId)
+  if (mailboxId) headers.set('X-CS-Mailbox-ID', mailboxId)
+  return headers
+}
+
 async function remoteUpload(file: File): Promise<DraftAttachment> {
   const send = async () => {
-    const access = tokenStore.getAccess()
-    const headers = new Headers({ 'Content-Type': file.type || 'application/octet-stream' })
-    if (access) headers.set('Authorization', `Bearer ${access}`)
     return fetch(`/api/attachments?filename=${encodeURIComponent(file.name)}`, {
       method: 'POST',
-      headers,
+      headers: attachmentHeaders(file.type || 'application/octet-stream'),
       body: file,
       credentials: 'include',
     })
@@ -70,10 +79,8 @@ export function getLocalAttachment(idOrName: string): Promise<Blob | null> {
 /** Fetch a received-message Stalwart blob over the authenticated mailbox API. */
 export async function getRemoteAttachment(blobId: string): Promise<Blob | null> {
   try {
-    const access = tokenStore.getAccess()
-    const headers = access ? { Authorization: `Bearer ${access}` } : undefined
     const response = await fetch(`/api/mail/attachment/${encodeURIComponent(blobId)}`, {
-      headers,
+      headers: attachmentHeaders(),
       credentials: 'include',
     })
     return response.ok ? await response.blob() : null
@@ -86,10 +93,8 @@ export async function getRemoteAttachment(blobId: string): Promise<Blob | null> 
 export async function getStagedAttachment(id: string): Promise<Blob | null> {
   if (id.startsWith('local-')) return getLocalAttachment(id)
   try {
-    const access = tokenStore.getAccess()
-    const headers = access ? { Authorization: `Bearer ${access}` } : undefined
     const response = await fetch(`/api/attachments/${encodeURIComponent(id)}`, {
-      headers,
+      headers: attachmentHeaders(),
       credentials: 'include',
     })
     return response.ok ? await response.blob() : null
@@ -108,11 +113,9 @@ export async function deleteStagedAttachment(id: string): Promise<void> {
   }
 
   const send = async () => {
-    const access = tokenStore.getAccess()
-    const headers = access ? { Authorization: `Bearer ${access}` } : undefined
     return fetch(`/api/attachments/${encodeURIComponent(id)}`, {
       method: 'DELETE',
-      headers,
+      headers: attachmentHeaders(),
       credentials: 'include',
     })
   }

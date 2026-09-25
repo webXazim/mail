@@ -12,7 +12,7 @@ import { MailRow } from '../components/MailRow'
 import { Reader } from '../components/Reader'
 import { useMail } from '../state/mail/MailContext'
 import { calendarApi } from '../services/calendar'
-import { fetchThreadFor, isRemoteMail } from '../services/remote-mail'
+import { fetchMailPage, fetchThreadFor, isRemoteMail } from '../services/remote-mail'
 import { localIdentity } from '../services/profile'
 import type { Mail, ReaderThreadItem } from '../types'
 import type { RealtimeEvent } from '../services/ws'
@@ -45,6 +45,11 @@ export function ThreadPage() {
     mailId: string
     status: 'ready' | 'error'
     items: ReaderThreadItem[]
+  } | null>(null)
+  const [folderResult, setFolderResult] = useState<{
+    folder: string
+    rows: Mail[]
+    total: number
   } | null>(null)
   const [retry, setRetry] = useState(0)
   const threadItems = threadResult?.mailId === mailId && threadResult?.status === 'ready'
@@ -89,6 +94,18 @@ export function ThreadPage() {
     }
   }, [mailId, retry])
   useEffect(() => {
+    if (!isRemoteMail() || !folder) return
+    let cancelled = false
+    void fetchMailPage(folder, { limit: 50 })
+      .then((page) => {
+        if (!cancelled) setFolderResult({ folder, rows: page.mails, total: page.total })
+      })
+      .catch(() => {
+        if (!cancelled) setFolderResult(null)
+      })
+    return () => { cancelled = true }
+  }, [folder, retry])
+  useEffect(() => {
     if (!isRemoteMail()) return
     const refresh = () => setRetry((value) => value + 1)
     const onRealtime = (incoming: Event) => {
@@ -104,12 +121,16 @@ export function ThreadPage() {
   }, [])
   const rows = useMemo(() => {
     if (!mail) return []
-    const all = filterMails(mailbox, folder).slice(0, 30)
+    const all = folderResult?.folder === folder
+      ? folderResult.rows
+      : filterMails(mailbox, folder).slice(0, 50)
     return all.some((item) => item.id === mail.id) ? all : [mail, ...all.slice(0, 29)]
-  }, [mailbox, folder, mail])
+  }, [mailbox, folder, folderResult, mail])
   const total = useMemo(
-    () => (mail ? Math.max(1, filterMails(mailbox, folder).length) : 0),
-    [mailbox, folder, mail],
+    () => (mail ? Math.max(1, folderResult?.folder === folder
+      ? folderResult.total
+      : filterMails(mailbox, folder).length) : 0),
+    [mailbox, folder, folderResult, mail],
   )
   const index = rows.findIndex((item) => item.id === mailId)
   const previous = index > 0 ? rows[index - 1] : undefined
