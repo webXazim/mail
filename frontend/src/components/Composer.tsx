@@ -90,6 +90,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const [showCopies, setShowCopies] = useState(Boolean(draft.cc || draft.bcc))
   const [status, setStatus] = useState(remote ? 'Ready' : 'Saved to Drafts')
   const [uploading, setUploading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)
   const [dragging, setDragging] = useState(false)
@@ -223,20 +224,27 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     setStatus('Saving...')
   }
   const addFiles = async (files: File[] | null) => {
-    if (!files?.length) return
+    if (!files?.length || uploading) return
     setUploading(true)
+    setAttachmentError(null)
     setStatus('Uploading attachment...')
     try {
-      const uploaded: DraftAttachment[] = []
-      for (const file of files) uploaded.push(await uploadAttachment(file))
-      setDraft((current) => ({
-        ...current,
-        attachments: [...current.attachments, ...uploaded],
-        sendKey: freshKey(),
-      }))
+      for (const file of files) {
+        try {
+          const uploaded = await uploadAttachment(file)
+          setDraft((current) => ({
+            ...current,
+            attachments: [...current.attachments, uploaded],
+            sendKey: freshKey(),
+          }))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Upload failed'
+          setAttachmentError(`${file.name}: ${message}`)
+          setStatus('Attachment upload failed')
+          return
+        }
+      }
       setStatus('Saved to Drafts')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Upload failed')
     } finally {
       setUploading(false)
     }
@@ -281,6 +289,10 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const send = async (event: FormEvent) => {
     event.preventDefault()
     if (uploading || sendingRef.current) return
+    if (attachmentError) {
+      setStatus('Retry the attachment or choose to send without it')
+      return
+    }
     if (remote && (!fromIdentityId || !identityById.has(fromIdentityId))) {
       setStatus('A verified mailbox sender is required before sending')
       return
@@ -539,13 +551,30 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
               </div>
             )}
           </div>
+          {attachmentError && (
+            <div className="composer-error" role="alert">
+              Attachment not added — {attachmentError}. Select the file again to retry, or{' '}
+              <button type="button" className="text-button" onClick={() => {
+                setAttachmentError(null)
+                setStatus('Attachment omitted — review before sending')
+              }}>
+                send without it
+              </button>
+              .
+            </div>
+          )}
           <footer>
             <label className="attach-control">
               <Paperclip size={17} />
               <input
                 type="file"
                 multiple
-                onChange={(event) => void addFiles(Array.from(event.target.files ?? []))}
+                disabled={uploading || sending}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? [])
+                  event.target.value = ''
+                  void addFiles(files)
+                }}
                 aria-label="Attach a file"
               />
             </label>
@@ -561,7 +590,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
             <button
               className="primary-button compose-send"
               type="submit"
-              disabled={uploading || sending}
+              disabled={uploading || sending || Boolean(attachmentError)}
               aria-busy={sending}
             >
               <Send size={15} />

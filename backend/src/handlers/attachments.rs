@@ -251,6 +251,25 @@ async fn active_mailbox_id(state: &AppState, auth: &AuthUser) -> Result<Uuid, Ap
     .ok_or_else(|| ApiError::conflict("Select a business mailbox before using attachments"))
 }
 
+async fn attachment_entitlements(
+    state: &AppState,
+    mailbox_id: Uuid,
+) -> Result<entitlements::UserEntitlements, ApiError> {
+    let organization_id: Uuid = sqlx::query_scalar(
+        "SELECT organization_id FROM mailboxes WHERE id=$1 AND deleted_at IS NULL AND status='active'",
+    )
+    .bind(mailbox_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .ok_or_else(|| ApiError::forbidden("The selected business mailbox is not active"))?;
+    let ent = entitlements::for_organization(state, organization_id).await?;
+    if !ent.allows("attachments") {
+        return Err(ApiError::forbidden("Attachments are not enabled for this business subscription"));
+    }
+    Ok(ent)
+}
+
 async fn reserve_upload(
     state: &AppState,
     user_id: Uuid,
@@ -335,8 +354,8 @@ pub async fn upload(
     headers: HeaderMap,
     body: Body,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let ent = entitlements::require_feature(&state, auth.user_id, "attachments").await?;
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
+    let ent = attachment_entitlements(&state, mailbox_id).await?;
     let plan_max = ent.plan.max_attachment_bytes.min(MAX_ATTACHMENT_BYTES);
     let pooled_used: i64 = sqlx::query_scalar(
         "SELECT COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$1),0) +
@@ -504,8 +523,8 @@ pub async fn download(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
-    entitlements::require_feature(&state, auth.user_id, "attachments").await?;
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
+    attachment_entitlements(&state, mailbox_id).await?;
     let item = own_attachment(&state, mailbox_id, id).await?;
     let path = checked_path(&state, &item.storage_key)?;
     let file = tokio::fs::File::open(path)
@@ -851,7 +870,7 @@ async fn stage_legacy_bytes(
     mailbox_id: Uuid,
     legacy: LegacyAttachment,
 ) -> Result<AttachmentMeta, ApiError> {
-    let ent = entitlements::for_user(state, user_id).await?;
+    let ent = attachment_entitlements(state, mailbox_id).await?;
     let bytes = B64
         .decode(legacy.data_base64.as_bytes())
         .map_err(|_| ApiError::bad_request("Legacy attachment data is not valid base64"))?;
