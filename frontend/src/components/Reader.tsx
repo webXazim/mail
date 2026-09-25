@@ -22,11 +22,14 @@ import { buildThread, snoozeAt, snoozeOptions } from '../lib/mail'
 import { getLocalAttachment, getRemoteAttachment } from '../services/attachments'
 import { foldersApi } from '../services/folders'
 import { useSettings } from '../services/settings'
+import { isRemoteMail } from '../services/remote-mail'
 import type { Mail, ReaderThreadItem, SecurityVerdicts } from '../types'
 
 type ReaderProps = {
   mail: Mail
   thread?: ReaderThreadItem[]
+  threadStatus?: 'loading' | 'ready' | 'error' | 'demo'
+  onRetryThread?: () => void
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void
@@ -169,6 +172,8 @@ const saveEmailAsFile = (mail: Mail, thread: { sender: string; email: string; co
 export function Reader({
   mail,
   thread: friendThread,
+  threadStatus = 'demo',
+  onRetryThread,
   onReply,
   onReplyAll,
   onForward,
@@ -188,7 +193,7 @@ export function Reader({
   canPrevious,
   canNext,
 }: ReaderProps) {
-  const [openMessage, setOpenMessage] = useState(2)
+  const [openMessage, setOpenMessage] = useState(-2)
   const recipientDisplay = mail.to && mail.to.length > 0 ? mail.to.join(', ') : 'Recipient unavailable'
   const [moveOpen, setMoveOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
@@ -201,8 +206,14 @@ export function Reader({
     if (action === 'archive') onArchive?.()
     else onDelete?.()
   }
-  const thread = friendThread ?? buildThread(mail)
-  const conversation = conversations ? thread : [thread[0]]
+  // A live mailbox must never display a fabricated conversation while its
+  // provider request is pending or has failed.
+  const live = isRemoteMail()
+  const thread = live ? (friendThread ?? []) : (friendThread ?? buildThread(mail))
+  const conversation = conversations ? thread : thread.slice(0, 1)
+  const openIndex = openMessage === -2 || openMessage >= conversation.length
+    ? conversation.length - 1
+    : openMessage
   const currentFolder = mail.folder || 'Inbox'
   const moveChoicesAll = [
     ...moveChoices,
@@ -253,10 +264,10 @@ export function Reader({
     if (blob) downloadBlob(blob, name)
   }
 
-  const isRealThreadItem = (item: (typeof thread)[number]): item is ReaderThreadItem =>
-    Boolean((item as ReaderThreadItem).threadId)
+  const isRealThreadItem = (item: (typeof thread)[number] | undefined): item is ReaderThreadItem =>
+    Boolean(item && 'threadId' in item && item.threadId)
 
-  const openItem = conversation[Math.max(0, Math.min(openMessage, conversation.length - 1))]
+  const openItem = conversation[Math.max(0, openIndex)]
   const security = isRealThreadItem(openItem) ? openItem.security : undefined
   const allowRemoteImages = remoteImagesForMessage === mail.id
   const hasRemoteImages = conversation.some(
@@ -422,12 +433,13 @@ export function Reader({
             </div>
           )}
         </div>
-        <button className="icon-button" aria-label="Print" onClick={onPrint}>
+        <button className="icon-button" aria-label="Print" onClick={onPrint} disabled={live && threadStatus !== 'ready'}>
           <Printer size={17} />
         </button>
         <button
           className="icon-button"
           aria-label="Save email as file"
+          disabled={live && (threadStatus !== 'ready' || thread.length === 0)}
           onClick={() => {
             if (onSave) onSave()
             else saveEmailAsFile(mail, thread)
@@ -507,10 +519,23 @@ export function Reader({
             </button>
           </div>
         )}
+        {live && threadStatus === 'loading' && (
+          <div className="list-state" role="status">Loading the message from your mailbox…</div>
+        )}
+        {live && threadStatus === 'error' && (
+          <div className="list-state" role="alert">
+            <strong>Could not load this conversation</strong>
+            <span>Your message is still in the inbox. Try loading it again.</span>
+            <button type="button" className="secondary-button" onClick={onRetryThread}>Retry</button>
+          </div>
+        )}
+        {live && threadStatus === 'ready' && thread.length === 0 && (
+          <div className="list-state" role="status">No messages were returned for this conversation.</div>
+        )}
         <div className="thread-stack">
           {conversation.map((item, index) => (
             <article
-              className={`thread-message ${openMessage === index ? 'thread-message--open' : ''}`}
+              className={`thread-message ${openIndex === index ? 'thread-message--open' : ''}`}
               key={`${'id' in item && item.id ? item.id : item.sender}-${index}`}
             >
               <header>
@@ -518,20 +543,20 @@ export function Reader({
                 <span>
                   <strong>{item.sender}</strong>
                   <small>
-                    {item.email} · to {recipientDisplay}
+                    {item.email} · to {isRealThreadItem(item) && item.to?.length ? item.to.join(', ') : recipientDisplay}
                   </small>
                 </span>
                 <time>{item.time}</time>
                 <button
                   className="icon-button"
-                  aria-label={`${openMessage === index ? 'Collapse' : 'Expand'} message`}
+                  aria-label={`${openIndex === index ? 'Collapse' : 'Expand'} message`}
                   onClick={() => setOpenMessage((current) => (current === index ? -1 : index))}
                 >
                   <ChevronDown size={15} />
                 </button>
               </header>
-              {openMessage === index && <div className="reader-copy">{renderCopy(item)}</div>}
-              {openMessage === index &&
+              {openIndex === index && <div className="reader-copy">{renderCopy(item)}</div>}
+              {openIndex === index &&
                 isRealThreadItem(item) &&
                 item.attachments &&
                 item.attachments.length > 0 && (
@@ -541,7 +566,7 @@ export function Reader({
                         <Paperclip size={16} />
                         <span>
                           <strong>{file.name}</strong>
-                          <small>Scanned and safe</small>
+                          <small>{file.type}</small>
                         </span>
                         <button
                           className="secondary-button"
@@ -557,7 +582,7 @@ export function Reader({
             </article>
           ))}
         </div>
-        {mail.attachment && (
+        {!live && mail.attachment && (
           <div className="attachment">
             <Paperclip size={16} />
             <span>

@@ -38,28 +38,31 @@ export function ThreadPage() {
     notify,
   } = useMail()
   const mail = mailbox.find((message) => message.id === mailId)
-  const [threadItems, setThreadItems] = useState<ReaderThreadItem[] | null>(null)
+  const selectedMailId = mail?.id
+  const [threadResult, setThreadResult] = useState<{
+    mailId: string
+    status: 'ready' | 'error'
+    items: ReaderThreadItem[]
+  } | null>(null)
+  const [retry, setRetry] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      if (!mail || !isRemoteMail()) {
-        setThreadItems(null)
-        return
-      }
+      if (!selectedMailId || !isRemoteMail()) return
       try {
-        const items = await fetchThreadFor(mail.id)
+        const items = await fetchThreadFor(selectedMailId)
         if (cancelled) return
-        setThreadItems(items)
+        setThreadResult({ mailId: selectedMailId, status: 'ready', items })
       } catch {
         if (cancelled) return
-        setThreadItems(null)
+        setThreadResult({ mailId: selectedMailId, status: 'error', items: [] })
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [mail])
+  }, [selectedMailId, retry])
   const rows = useMemo(() => {
     if (!mail) return []
     const all = filterMails(mailbox, folder).slice(0, 30)
@@ -184,8 +187,14 @@ export function ThreadPage() {
         </div>
       </aside>
       <Reader
+        key={mail.id}
         mail={mail}
-        thread={threadItems ? (threadItems as ReaderThreadItem[]) : undefined}
+        thread={isRemoteMail() ? (threadResult?.mailId === mail.id ? threadResult.items : []) : undefined}
+        threadStatus={isRemoteMail() ? (threadResult?.mailId === mail.id ? threadResult.status : 'loading') : 'demo'}
+        onRetryThread={() => {
+          setThreadResult(null)
+          setRetry((value) => value + 1)
+        }}
         onReply={() => openCompose(buildReplyDraft(mail))}
         onReplyAll={() => openCompose(buildReplyAllDraft(mail, localIdentity().email))}
         onForward={() => openCompose(buildForwardDraft(mail))}

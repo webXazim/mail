@@ -376,9 +376,17 @@ export async function searchMail(
   }
 }
 
-type RawThreadEmail = RemoteRow & {
-  from: RemoteRecipient
-  to: RemoteRecipient[]
+export type RawThreadEmail = {
+  id: string
+  thread_id?: string
+  threadId?: string
+  subject?: string | null
+  date?: string
+  received_at?: string
+  receivedAt?: string
+  preview?: string
+  from?: RemoteRecipient | RemoteRecipient[]
+  to?: RemoteRecipient[]
   cc?: RemoteRecipient[]
   body_text?: string
   body_html?: string
@@ -389,36 +397,40 @@ type RawThreadEmail = RemoteRow & {
   security?: SecurityVerdicts
 }
 
+/** The thread endpoint returns JMAP Email/get objects, unlike list-row DTOs. */
+export function rawThreadToItem(email: RawThreadEmail): ReaderThreadItem {
+  const from = Array.isArray(email.from) ? email.from[0] : email.from
+  const sender = from?.name?.trim() || from?.email?.split('@')[0] || 'Unknown'
+  const fromEmail = from?.email ?? ''
+  return {
+    id: email.id,
+    threadId: email.threadId || email.thread_id || email.id,
+    sender,
+    email: fromEmail,
+    initials: initialsOf(sender, fromEmail),
+    color: colorOf(fromEmail),
+    copy: email.body_text?.trim() || email.preview || '',
+    clearBody: email.body_text?.trim() || email.preview || '',
+    subject: email.subject?.trim() || '(no subject)',
+    bodyHtml: email.body_html || '',
+    time: formatTime(email.receivedAt || email.received_at || email.date),
+    to: email.to?.map(formatAddress),
+    cc: email.cc?.map(formatAddress),
+    attachments: email.attachments?.map((part) => ({
+      name: part.name ?? 'attachment', blobId: part.blobId ?? '', type: part.type ?? 'application/octet-stream',
+    })),
+    messageId: email['header:Message-ID'],
+    security: email.security,
+  }
+}
+
 export async function fetchThreadFor(mailId: string): Promise<ReaderThreadItem[]> {
   await fetchMailboxes()
   const threadId = emailThread.get(mailId) ?? mailId
   const data = await apiFetch<{ thread_id: string; count: number; emails: RawThreadEmail[] }>(
     `/api/mail/thread/${encodeURIComponent(threadId)}`,
   )
-  return (data.emails ?? []).map((email) => {
-    const sender = email.from?.name?.trim() || email.from?.email.split('@')[0] || 'Unknown'
-    const fromEmail = email.from?.email ?? ''
-    return {
-      id: email.id,
-      threadId: email.thread_id,
-      sender,
-      email: fromEmail,
-      initials: initialsOf(sender, fromEmail),
-      color: colorOf(fromEmail),
-      copy: email.body_text?.trim() || email.preview || '',
-      clearBody: email.body_text?.trim() || email.preview || '',
-      subject: email.subject?.trim() || '(no subject)',
-      bodyHtml: email.body_html || '',
-      time: formatTime(email.received_at || email.date),
-      to: email.to?.map(formatAddress),
-      cc: email.cc?.map(formatAddress),
-      attachments: email.attachments?.map((part) => ({
-        name: part.name ?? 'attachment', blobId: part.blobId ?? '', type: part.type ?? 'application/octet-stream',
-      })),
-      messageId: email['header:Message-ID'],
-      security: email.security,
-    }
-  })
+  return (data.emails ?? []).map(rawThreadToItem)
 }
 
 export const attachmentBlobUrl = (blobId: string) => `/api/mail/attachment/${encodeURIComponent(blobId)}`
