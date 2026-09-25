@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENV_FILE=${1:-/opt/cs-mail/.env.production}
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 fail(){ echo "PRECHECK FAIL: $*" >&2; exit 1; }
 ok(){ echo "ok: $*"; }
@@ -16,7 +16,7 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 plugin is requ
 perm=$(stat -c '%a' "$ENV_FILE")
 (( 10#$perm <= 600 )) || fail "$ENV_FILE must be mode 600 or stricter (got $perm)"
 [[ $(stat -c '%u:%g' "$ENV_FILE") == 0:0 ]] || fail "$ENV_FILE must be owned by root:root"
-"$ROOT/deploy/production/validate-env.py" "$ENV_FILE" || fail "production environment validation failed"
+python3 "$ROOT/deploy/production/validate-env.py" "$ENV_FILE" || fail "production environment validation failed"
 set -a; source "$ENV_FILE"; set +a
 
 [[ ${CS_MAIL_PROVIDER_NAMESPACE:-} == cs-mail ]] || fail "CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail"

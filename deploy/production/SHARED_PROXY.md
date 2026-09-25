@@ -140,9 +140,9 @@ starts the two private CS Mail web containers instead of host Nginx:
 
 ```bash
 cd /opt/sites/cs-mail
-sudo ./deploy/production/preflight.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/deploy-from-git.sh main
-sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/preflight.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/deploy-from-git.sh main
+sudo bash ./deploy/production/status.sh /opt/cs-mail/.env.production
 ```
 
 Keep public signup disabled throughout acceptance and keep

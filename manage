@@ -65,27 +65,27 @@ case "$command" in
         ;;
     deploy)
         [ "$#" -le 2 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/deploy-from-git.sh" "${2:-main}"
+        run_root bash "$PROJECT_ROOT/deploy/production/deploy-from-git.sh" "${2:-main}"
         ;;
     deploy-current)
         [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/deploy.sh" "$CS_MAIL_ENV_FILE"
+        run_root bash "$PROJECT_ROOT/deploy/production/deploy.sh" "$CS_MAIL_ENV_FILE"
         ;;
     preflight|status|backup|restore-drill|show-config)
         [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/$command.sh" "$CS_MAIL_ENV_FILE"
+        run_root bash "$PROJECT_ROOT/deploy/production/$command.sh" "$CS_MAIL_ENV_FILE"
         ;;
     record-backup-proof)
         [ "$#" -eq 3 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/record-backup-proof.sh" "$2" "$3" "$CS_MAIL_ENV_FILE"
+        run_root bash "$PROJECT_ROOT/deploy/production/record-backup-proof.sh" "$2" "$3" "$CS_MAIL_ENV_FILE"
         ;;
     launch-freeze)
         [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/freeze-launch.sh" "$CS_MAIL_ENV_FILE" "$CS_MAIL_CERT_ENV_FILE"
+        run_root bash "$PROJECT_ROOT/deploy/production/freeze-launch.sh" "$CS_MAIL_ENV_FILE" "$CS_MAIL_CERT_ENV_FILE"
         ;;
     bootstrap-admin)
         [ "$#" -eq 2 ] || { usage >&2; exit 2; }
-        run_root "$PROJECT_ROOT/deploy/production/bootstrap-first-admin.sh" "$2"
+        run_root bash "$PROJECT_ROOT/deploy/production/bootstrap-first-admin.sh" "$2"
         ;;
     *)
         usage >&2

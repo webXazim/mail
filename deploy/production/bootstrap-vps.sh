@@ -2,7 +2,7 @@
 set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 ENV_FILE=${CS_MAIL_ENV_FILE:-$STATE/.env.production}
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -29,12 +29,9 @@ install -d -o root -g root -m 0700 "$STATE/secrets" "$STATE/runtime" "$STATE/run
 install -d -m 0755 "$STATE/www" "$STATE/www/releases" /var/www/letsencrypt
 install -d -m 0700 /opt/backups/cs-mail /var/log/cs-mail
 
-"$SCRIPT_DIR/init-env.sh" "$ENV_FILE"
+bash "$SCRIPT_DIR/init-env.sh" "$ENV_FILE"
 
-install -m 0644 "$SCRIPT_DIR/systemd/cs-mail-backup.service" /etc/systemd/system/cs-mail-backup.service
-install -m 0644 "$SCRIPT_DIR/systemd/cs-mail-backup.timer" /etc/systemd/system/cs-mail-backup.timer
-systemctl daemon-reload
-systemctl enable --now cs-mail-backup.timer
+bash "$SCRIPT_DIR/install-backup-timer.sh" "$ENV_FILE"
 
 echo "CS Mail VPS bootstrap PASS"
 echo "1) Edit: sudoedit $ENV_FILE"

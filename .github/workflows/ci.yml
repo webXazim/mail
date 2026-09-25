@@ -150,7 +150,7 @@ jobs:
       - name: Boot CI API + database
         run: docker compose -f deploy/development/ci-compose.yml up -d --build
       - name: Run smoke test
-        run: ./deploy/production/smoke-test.sh http://127.0.0.1:8080
+        run: bash ./deploy/production/smoke-test.sh http://127.0.0.1:8080
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f deploy/development/ci-compose.yml logs --tail=200
@@ -163,7 +163,7 @@ jobs:
       - name: Shell syntax
         run: find deploy/production -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: Verify clean production release
-        run: ./deploy/production/verify-release.sh
+        run: bash ./deploy/production/verify-release.sh
 
   launch-cert-static:
     name: Public launch freeze certification (static)

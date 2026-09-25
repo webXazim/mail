@@ -504,7 +504,7 @@ def check_env_file(env_file: Path, env: dict[str, str]) -> str:
 
 
 def check_subprocess_script(root: Path, env_file: Path, script: str, timeout: int) -> str:
-    out = run_cmd([str(root / "deploy/production" / script), str(env_file)], cwd=root, timeout=timeout)
+    out = run_cmd(["bash", str(root / "deploy/production" / script), str(env_file)], cwd=root, timeout=timeout)
     return out.strip().splitlines()[-1] if out.strip() else f"{script} passed"
 
 

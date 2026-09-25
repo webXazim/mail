@@ -62,10 +62,10 @@ Node.js and Rust do **not** need to be installed on the VPS host; Docker perform
 Useful commands:
 
 ```bash
-sudo ./deploy/production/status.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/backup.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
-sudo ./deploy/production/certify-launch.sh /opt/cs-mail/.env.production /opt/cs-mail/.env.certification
+sudo bash ./deploy/production/status.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/backup.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/certify-launch.sh /opt/cs-mail/.env.production /opt/cs-mail/.env.certification
 sh manage record-backup-proof cs-mail /absolute/path/to/cs-mail-offsite.manifest
 sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manifest
 sh manage launch-freeze
@@ -74,7 +74,7 @@ sh manage launch-freeze
 Rollback is intentionally explicit because database migrations are forward-only:
 
 ```bash
-sudo ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
+sudo bash ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
 ```
 
 See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/PRODUCTION.md` and `docs/LAUNCH.md`.

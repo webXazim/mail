@@ -33,10 +33,10 @@ sudo install -d -m 0755 /opt/sites
 if [ ! -e /opt/sites/cs-mail ]; then sudo ln -s /srv/apps/mail /opt/sites/cs-mail; fi
 test "$(readlink -f /opt/sites/cs-mail)" = /srv/apps/mail
 cd /opt/sites/cs-mail
-sudo ./deploy/production/bootstrap-vps.sh
+sudo bash ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
-sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Follow ../edge/README.md to issue the web certificate with DNS-01,
 # stage the independent edge, and move 80/443 from Messenger to the edge.
 sh manage preflight

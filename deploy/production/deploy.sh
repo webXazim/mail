@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 ENV_FILE=${1:-$STATE/.env.production}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
@@ -58,8 +58,11 @@ case "$WEB_PROXY_MODE" in host|messenger|edge) ;; *) echo "CS_MAIL_WEB_PROXY_MOD
 [[ ${CS_MAIL_API_HOST_PORT:-18080} == 18080 ]] || { echo "CS_MAIL_API_HOST_PORT must remain 18080" >&2; exit 1; }
 [[ ${CS_MAIL_ADMIN_HOST_PORT:-18081} == 18081 ]] || { echo "CS_MAIL_ADMIN_HOST_PORT must remain 18081" >&2; exit 1; }
 
-"$ROOT/deploy/production/verify-release.sh"
-"$ROOT/deploy/production/preflight.sh" "$ENV_FILE"
+bash "$ROOT/deploy/production/verify-release.sh"
+bash "$ROOT/deploy/production/preflight.sh" "$ENV_FILE"
+# Keep the scheduled backup service bound to this checkout, even when the repo
+# lives outside the historical /opt/sites/cs-mail path.
+bash "$ROOT/deploy/production/install-backup-timer.sh" "$ENV_FILE"
 
 if [[ -d "$ROOT/.git" ]]; then
   cd "$ROOT"
@@ -145,7 +148,7 @@ if docker volume inspect cs-mail-prod_pgdata >/dev/null 2>&1; then
     [[ "$db_health" == healthy || "$db_health" == running ]] && break
     sleep 2
   done
-  CS_MAIL_BACKUP_REASON=predeploy "$ROOT/deploy/production/backup.sh" "$ENV_FILE"
+  CS_MAIL_BACKUP_REASON=predeploy bash "$ROOT/deploy/production/backup.sh" "$ENV_FILE"
 else
   echo "No existing production PostgreSQL volume; pre-deploy backup skipped for first deployment."
 fi
@@ -165,7 +168,7 @@ done
 [[ $ready -eq 1 ]] || { echo "new API failed readiness" >&2; exit 1; }
 
 echo "[5/8] Starting monitoring stack..."
-"$ROOT/deploy/production/render-alertmanager.py"
+python3 "$ROOT/deploy/production/render-alertmanager.py"
 docker compose --profile monitoring --env-file "$ENV_FILE" -f "$COMPOSE" up -d --force-recreate alertmanager prometheus
 alertmanager_ready=0
 for _ in $(seq 1 30); do
@@ -278,7 +281,7 @@ for repo in cs-mail-api cs-mail-frontend-build; do
 done
 docker image prune -f --filter 'until=168h' >/dev/null || true
 docker builder prune -f --filter 'until=168h' >/dev/null || true
-"$ROOT/deploy/production/clean-worktree.sh" >/dev/null
+bash "$ROOT/deploy/production/clean-worktree.sh" >/dev/null
 
 trap - ERR
 printf '\nCS Mail production deploy PASS\n'

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "run as root" >&2; exit 1; }
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 ENV_FILE=${1:-$STATE/.env.production}
 CERT_ENV=${2:-$STATE/.env.certification}
@@ -18,8 +18,8 @@ set -a; source "$ENV_FILE"; source "$RUNTIME"; set +a
 [[ ${CS_MAIL_RELEASE_SHA256:-} =~ ^[0-9a-f]{64}$ ]] || fail "deployed release SHA-256 is missing"
 
 cd "$ROOT"
-"$ROOT/deploy/production/verify-release.sh"
-"$ROOT/deploy/production/preflight.sh" "$ENV_FILE"
+bash "$ROOT/deploy/production/verify-release.sh"
+bash "$ROOT/deploy/production/preflight.sh" "$ENV_FILE"
 
 # Freeze is performed while public mutation switches are still closed. The
 # certification uses pre-created disposable businesses/mailboxes, so opening
@@ -33,7 +33,7 @@ systemctl is-active --quiet cs-mail-backup.timer || fail "cs-mail-backup.timer i
 
 # The live certifier creates a fresh local backup and runs the isolated restore
 # drill before recording a certification row for this exact release.
-"$ROOT/deploy/production/certify-launch.sh" "$ENV_FILE" "$CERT_ENV"
+bash "$ROOT/deploy/production/certify-launch.sh" "$ENV_FILE" "$CERT_ENV"
 
 psql_scalar() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \

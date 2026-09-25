@@ -14,13 +14,25 @@ for shared_file in nginx-inner.conf nginx-admin-inner.conf nginx-shared-edge.boo
   [[ -f "$ROOT/deploy/production/$shared_file" ]] || fail "shared Messenger proxy file is missing: $shared_file"
 done
 [[ -f "$ROOT/deploy/production/CREDENTIALS.md" ]] || fail "production credential checklist is missing"
-for script in deploy.sh deploy-from-git.sh bootstrap-vps.sh bootstrap-first-admin.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh record-backup-proof.sh freeze-launch.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh validate-env.py render-alertmanager.py; do
-  [[ -x "$ROOT/deploy/production/$script" ]] || fail "production script is missing/not executable: $script"
+bash_scripts=(deploy.sh deploy-from-git.sh bootstrap-vps.sh bootstrap-first-admin.sh init-env.sh setup-web-tls.sh preflight.sh backup.sh restore-drill.sh record-backup-proof.sh freeze-launch.sh rollback.sh status.sh certify-launch.sh clean-worktree.sh smoke-test.sh show-config.sh install-backup-timer.sh)
+for script in "${bash_scripts[@]}"; do
+  path="$ROOT/deploy/production/$script"
+  [[ -f "$path" && -r "$path" ]] || fail "production script is missing/unreadable: $script"
+  bash -n "$path" || fail "production script has invalid Bash syntax: $script"
+done
+python_scripts=(validate-env.py render-alertmanager.py certify_launch.py)
+for script in "${python_scripts[@]}"; do
+  path="$ROOT/deploy/production/$script"
+  [[ -f "$path" && -r "$path" ]] || fail "production Python helper is missing/unreadable: $script"
+  python3 - "$path" <<'PY' || fail "production Python helper has invalid syntax: $script"
+import ast, pathlib, sys
+ast.parse(pathlib.Path(sys.argv[1]).read_text(), filename=sys.argv[1])
+PY
 done
 for edge_file in .env.example docker-compose.yml haproxy.cfg nginx-mail.conf reload-on-renew.sh README.md; do
   [[ -f "$ROOT/deploy/edge/$edge_file" ]] || fail "independent platform edge file is missing: $edge_file"
 done
-ok "production deployment scripts are present and executable"
+ok "production deployment helpers are present, readable and syntax-valid"
 
 [[ -f "$ROOT/deploy/production/CONFIGURATION.md" ]] || fail "production configuration guide is missing"
 nginx_file="$ROOT/deploy/production/nginx-mail.crescentsphere.com.conf"

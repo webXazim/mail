@@ -59,7 +59,7 @@ managed by CS Mail; the preflight verifies that it is publicly trusted.
 ## Safe inspection
 
 ```bash
-sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 ```
 
 Known credential values are redacted. Preflight also checks root ownership,

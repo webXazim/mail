@@ -1,3 +1,5 @@
+# Template/reference only. Production installs a rendered unit through
+# deploy/production/install-backup-timer.sh so the checkout may live anywhere.
 [Unit]
 Description=CS Mail production backup
 After=docker.service
@@ -5,8 +7,10 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-Environment=CS_MAIL_ROOT=/opt/sites/cs-mail
-ExecStart=/opt/sites/cs-mail/deploy/production/backup.sh /opt/cs-mail/.env.production
+Environment="CS_MAIL_ROOT=@CS_MAIL_ROOT@"
+Environment="CS_MAIL_STATE_ROOT=@CS_MAIL_STATE_ROOT@"
+Environment="CS_MAIL_ENV_FILE=@CS_MAIL_ENV_FILE@"
+ExecStart=/usr/bin/env bash @CS_MAIL_ROOT@/deploy/production/backup.sh @CS_MAIL_ENV_FILE@
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

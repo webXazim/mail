@@ -2,7 +2,7 @@
 set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 ENV_FILE=${CS_MAIL_ENV_FILE:-/opt/cs-mail/.env.production}
 REMOTE=${CS_MAIL_GIT_REMOTE:-origin}
 BRANCH=${CS_MAIL_GIT_BRANCH:-main}
@@ -26,6 +26,6 @@ else
   git checkout --detach "$TARGET"
 fi
 
-"$ROOT/deploy/production/clean-worktree.sh"
-"$ROOT/deploy/production/verify-release.sh"
-exec "$ROOT/deploy/production/deploy.sh" "$ENV_FILE"
+bash "$ROOT/deploy/production/clean-worktree.sh"
+bash "$ROOT/deploy/production/verify-release.sh"
+exec bash "$ROOT/deploy/production/deploy.sh" "$ENV_FILE"

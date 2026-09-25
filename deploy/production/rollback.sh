@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "run as root" >&2; exit 1; }
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 ENV_FILE=${1:-$STATE/.env.production}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"

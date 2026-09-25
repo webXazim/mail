@@ -45,7 +45,7 @@ If this is a new checkout, use the clone sequence below instead.
 sudo install -d -m 0755 /opt/sites
 sudo git clone <YOUR_PRIVATE_GITHUB_REPO> /opt/sites/cs-mail
 cd /opt/sites/cs-mail
-sudo ./deploy/production/bootstrap-vps.sh
+sudo bash ./deploy/production/bootstrap-vps.sh
 ```
 
 Then follow `CREDENTIALS.md`. In short:
@@ -53,7 +53,7 @@ Then follow `CREDENTIALS.md`. In short:
 ```bash
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
-sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Complete ../edge/README.md first: DNS-01 certificate and edge cutover.
 sh manage preflight
 sh manage deploy
@@ -139,7 +139,7 @@ Platform Admin has no separate password in `.env.production`. After the first
 CS Mail account has verified its email, promote that exact account once:
 
 ```bash
-sudo ./deploy/production/bootstrap-first-admin.sh you@example.com
+sudo bash ./deploy/production/bootstrap-first-admin.sh you@example.com
 ```
 
 The command refuses to run if an active platform admin already exists. Sign in
@@ -152,7 +152,7 @@ its own host/provider backup because it is a platform-wide service.
 
 ```bash
 systemctl status cs-mail-backup.timer
-sudo ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/restore-drill.sh /opt/cs-mail/.env.production
 ```
 
 After the independent encrypted offsite jobs succeed, record their root-owned proof manifests:
@@ -167,7 +167,7 @@ The proof command does not copy data. It writes append-only evidence used by lau
 Database migrations are forward-only. Review compatibility before:
 
 ```bash
-sudo ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
+sudo bash ./deploy/production/rollback.sh /opt/cs-mail/.env.production --acknowledge-forward-migrations
 ```
 
 ## Launch certification
@@ -176,7 +176,7 @@ Use disposable certification accounts in `/opt/cs-mail/.env.certification`
 (`root:root 0600`) and run:
 
 ```bash
-sudo ./deploy/production/certify-launch.sh \
+sudo bash ./deploy/production/certify-launch.sh \
   /opt/cs-mail/.env.production \
   /opt/cs-mail/.env.certification
 ```

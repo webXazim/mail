@@ -5,7 +5,7 @@ set -euo pipefail
 TYPE=${1:-}
 PROOF=${2:-}
 ENV_FILE=${3:-/opt/cs-mail/.env.production}
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 

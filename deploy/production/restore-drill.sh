@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ENV_FILE=${1:-/opt/cs-mail/.env.production}
-ROOT=${CS_MAIL_ROOT:-/opt/sites/cs-mail}
+ROOT=${CS_MAIL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)}
 STATE=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
 COMPOSE="$ROOT/deploy/production/docker-compose.yml"
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }

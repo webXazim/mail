@@ -184,10 +184,10 @@ Cloudflare proxy trust configuration.
 
 ```bash
 cd /opt/sites/cs-mail
-sudo ./deploy/production/bootstrap-vps.sh
+sudo bash ./deploy/production/bootstrap-vps.sh
 sudoedit /opt/cs-mail/.env.production
 sudoedit /opt/cs-mail/.env.production  # set CS_MAIL_ALERT_EMAIL_TO/FROM
-sudo ./deploy/production/show-config.sh /opt/cs-mail/.env.production
+sudo bash ./deploy/production/show-config.sh /opt/cs-mail/.env.production
 # Follow deploy/edge/README.md for the DNS-01 certificate and edge cutover.
 sh manage preflight
 sh manage deploy
