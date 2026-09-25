@@ -357,9 +357,11 @@ pub async fn upload(
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
     let ent = attachment_entitlements(&state, mailbox_id).await?;
     let plan_max = ent.plan.max_attachment_bytes.min(MAX_ATTACHMENT_BYTES);
+    // PostgreSQL SUM(bigint) yields NUMERIC, so cast the aggregate before
+    // SQLx decodes the scalar into i64.
     let pooled_used: i64 = sqlx::query_scalar(
         "SELECT COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$1),0) +
-                COALESCE((SELECT SUM(sa.reserved_bytes) FROM staged_attachments sa JOIN mailboxes m ON m.id=sa.mailbox_id WHERE m.organization_id=$1),0)"
+                COALESCE((SELECT SUM(sa.reserved_bytes) FROM staged_attachments sa JOIN mailboxes m ON m.id=sa.mailbox_id WHERE m.organization_id=$1),0)::bigint"
     ).bind(ent.organization_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let pool_limit=ent.storage_pool_bytes.min(i64::MAX as u64) as i64;
     if pooled_used.saturating_add(plan_max as i64) > pool_limit {
