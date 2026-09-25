@@ -651,19 +651,40 @@ pub async fn deliver(
     {
         state.metrics.record_send_failed();
         let public = error.public_message();
-        let _ = sqlx::query(
-            "UPDATE mail_send_requests SET status = 'uncertain', last_error = $2, updated_at = now()
+        if error.delivery_uncertain() {
+            sqlx::query(
+                "UPDATE mail_send_requests SET status = 'uncertain', last_error = $2, updated_at = now()
+                 WHERE id = $1",
+            )
+            .bind(request.id)
+            .bind(&public)
+            .execute(&state.db)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+            tracing::warn!(request_id = %request.id, error = %error, "mail submission outcome uncertain");
+            return Err(ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "send_uncertain",
+                "The mail server did not return a conclusive result. CS Mail is reconciling this send; do not submit a duplicate.",
+            ));
+        }
+
+        // The message body was never handed to SMTP. Keep the same ledger key
+        // retryable and show a definite failure instead of a false uncertainty.
+        sqlx::query(
+            "UPDATE mail_send_requests SET status = 'prepared', last_error = $2, updated_at = now()
              WHERE id = $1",
         )
         .bind(request.id)
         .bind(&public)
         .execute(&state.db)
-        .await;
-        tracing::warn!(request_id = %request.id, error = %error, "mail submission outcome uncertain");
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        tracing::warn!(request_id = %request.id, error = %error, "mail submission failed before DATA");
         return Err(ApiError::new(
             StatusCode::BAD_GATEWAY,
-            "send_uncertain",
-            "The mail server did not return a conclusive result. CS Mail is reconciling this send; do not submit a duplicate.",
+            "send_failed",
+            format!("{public}. You can safely retry this send."),
         ));
     }
     state.metrics.record_send_ok();

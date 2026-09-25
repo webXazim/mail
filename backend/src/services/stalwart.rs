@@ -80,10 +80,14 @@ pub enum StalwartError {
         description: String,
     },
     #[error("SMTP submission failed: {0}")]
-    Submission(String),
+    Submission(smtp::SmtpError),
 }
 
 impl StalwartError {
+    pub fn delivery_uncertain(&self) -> bool {
+        matches!(self, Self::Submission(error) if error.delivery_uncertain())
+    }
+
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Transport { .. } | Self::Submission(_) => true,
@@ -101,6 +105,7 @@ impl StalwartError {
             Self::InvalidAddress(_) => "Invalid mail address",
             Self::UnsupportedDomain(_) => "Mail domain is not available",
             Self::Rejected { .. } => "Mail service rejected the operation",
+            Self::Submission(error) => error.public_message(),
             _ => "Mail service is temporarily unavailable",
         }
     }

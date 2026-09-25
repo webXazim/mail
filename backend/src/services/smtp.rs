@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::{pki_types::ServerName, ClientConfig, RootCertStore};
@@ -14,6 +15,43 @@ use tokio_rustls::TlsConnector;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_PORT: u16 = 25;
+
+#[derive(Debug, Error)]
+pub enum SmtpError {
+    #[error("{0}")]
+    Definite(String),
+    #[error("{0}")]
+    Uncertain(String),
+}
+
+impl SmtpError {
+    pub fn delivery_uncertain(&self) -> bool {
+        matches!(self, Self::Uncertain(_))
+    }
+
+    pub fn public_message(&self) -> &'static str {
+        match self {
+            Self::Definite(detail) if detail.starts_with("AUTH") => {
+                "Mail server authentication failed"
+            }
+            Self::Definite(detail) if detail.starts_with("relay advertises no AUTH") => {
+                "Mail server authentication is unavailable"
+            }
+            Self::Definite(detail) if detail.starts_with("MAIL FROM") => {
+                "Mail server rejected the sender address"
+            }
+            Self::Definite(detail) if detail.starts_with("RCPT TO") => {
+                "Mail server rejected a recipient address"
+            }
+            Self::Definite(detail)
+                if detail.starts_with("SMTP connect") || detail.starts_with("SMTP TLS") =>
+            {
+                "Could not connect securely to the mail server"
+            }
+            _ => "Mail service is temporarily unavailable",
+        }
+    }
+}
 
 /// Immutable SMTP endpoint config. Port 465 is implicit TLS. Empty credentials
 /// permit an unauthenticated relay only when the server policy allows it.
@@ -73,19 +111,19 @@ pub async fn send(
     from: &str,
     to: &[String],
     message: &[u8],
-) -> Result<String, String> {
+) -> Result<String, SmtpError> {
     if to.is_empty() {
-        return Err("no recipients".into());
+        return Err(SmtpError::Definite("no recipients".into()));
     }
     if from.is_empty() || !from.contains('@') {
-        return Err(format!("invalid envelope sender {from:?}"));
+        return Err(SmtpError::Definite(format!("invalid envelope sender {from:?}")));
     }
 
     if config.username.is_empty() != config.password.is_empty() {
-        return Err("SMTP username and password must be set together".into());
+        return Err(SmtpError::Definite("SMTP username and password must be set together".into()));
     }
     if !config.username.is_empty() && config.port != 465 {
-        return Err("SMTP credentials require verified implicit TLS on port 465".into());
+        return Err(SmtpError::Definite("SMTP credentials require verified implicit TLS on port 465".into()));
     }
 
     let tcp = tokio::time::timeout(
@@ -93,12 +131,12 @@ pub async fn send(
         TcpStream::connect((config.host.as_str(), config.port)),
     )
     .await
-    .map_err(|_| format!("SMTP connect to {}:{} timed out", config.host, config.port))?
+    .map_err(|_| SmtpError::Definite(format!("SMTP connect to {}:{} timed out", config.host, config.port)))?
     .map_err(|e| {
-        format!(
+        SmtpError::Definite(format!(
             "SMTP connect to {}:{} failed: {e}",
             config.host, config.port
-        )
+        ))
     })?;
     let stream: Box<dyn SmtpStream> = if config.port == 465 {
         let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -106,14 +144,14 @@ pub async fn send(
             .with_root_certificates(roots)
             .with_no_client_auth();
         let server_name = ServerName::try_from(config.host.clone())
-            .map_err(|_| "SMTP TLS hostname is invalid".to_string())?;
+            .map_err(|_| SmtpError::Definite("SMTP TLS hostname is invalid".to_string()))?;
         let encrypted = tokio::time::timeout(
             config.timeout,
             TlsConnector::from(std::sync::Arc::new(tls)).connect(server_name, tcp),
         )
         .await
-        .map_err(|_| "SMTP TLS handshake timed out".to_string())?
-        .map_err(|e| format!("SMTP TLS certificate/handshake failed: {e}"))?;
+            .map_err(|_| SmtpError::Definite("SMTP TLS handshake timed out".to_string()))?
+            .map_err(|e| SmtpError::Definite(format!("SMTP TLS certificate/handshake failed: {e}")))?;
         Box::new(encrypted)
     } else {
         Box::new(tcp)
@@ -124,8 +162,8 @@ pub async fn send(
         writer: write,
     };
 
-    let banner = conn.reply(config.timeout).await?;
-    require_code(&banner, 2, "greeting")?;
+    let banner = conn.reply(config.timeout).await.map_err(SmtpError::Definite)?;
+    require_code(&banner, 2, "greeting").map_err(SmtpError::Definite)?;
 
     // RFC 5321: the EHLO argument should be the client's FQDN. Some servers
     // (Stalwart) reject bare single-label names, so qualify hosts like `mail`.
@@ -134,30 +172,30 @@ pub async fn send(
     } else {
         format!("{}.local", config.host)
     };
-    let ehlo = conn.cmd(&format!("EHLO {ehlo}"), config.timeout).await?;
-    require_code(&ehlo, 2, "EHLO")?;
+    let ehlo = conn.cmd(&format!("EHLO {ehlo}"), config.timeout).await.map_err(SmtpError::Definite)?;
+    require_code(&ehlo, 2, "EHLO").map_err(SmtpError::Definite)?;
     let features = ehlo_features(&ehlo);
 
     if !config.username.is_empty() {
         if !features.contains("auth") {
-            return Err("relay advertises no AUTH but credentials were configured".into());
+            return Err(SmtpError::Definite("relay advertises no AUTH but credentials were configured".into()));
         }
-        let first = conn.cmd("AUTH LOGIN", config.timeout).await?;
-        require_code(&first, 3, "AUTH LOGIN")?;
+        let first = conn.cmd("AUTH LOGIN", config.timeout).await.map_err(SmtpError::Definite)?;
+        require_code(&first, 3, "AUTH LOGIN").map_err(SmtpError::Definite)?;
         let user = conn
             .cmd(&B64.encode(config.username.as_bytes()), config.timeout)
-            .await?;
-        require_code(&user, 3, "AUTH username")?;
+            .await.map_err(SmtpError::Definite)?;
+        require_code(&user, 3, "AUTH username").map_err(SmtpError::Definite)?;
         let pass = conn
             .cmd(&B64.encode(config.password.as_bytes()), config.timeout)
-            .await?;
-        require_code(&pass, 2, "AUTH")?;
+            .await.map_err(SmtpError::Definite)?;
+        require_code(&pass, 2, "AUTH").map_err(SmtpError::Definite)?;
     }
 
     let mail = conn
         .cmd(&format!("MAIL FROM:<{from}>"), config.timeout)
-        .await?;
-    require_code(&mail, 2, "MAIL FROM")?;
+        .await.map_err(SmtpError::Definite)?;
+    require_code(&mail, 2, "MAIL FROM").map_err(SmtpError::Definite)?;
 
     for recipient in to {
         if recipient.is_empty() {
@@ -165,15 +203,15 @@ pub async fn send(
         }
         let rcpt = conn
             .cmd(&format!("RCPT TO:<{recipient}>"), config.timeout)
-            .await?;
-        require_code(&rcpt, 2, "RCPT TO")?;
+            .await.map_err(SmtpError::Definite)?;
+        require_code(&rcpt, 2, "RCPT TO").map_err(SmtpError::Definite)?;
     }
     if to.iter().all(|r| r.is_empty()) {
-        return Err("no valid recipients".into());
+        return Err(SmtpError::Definite("no valid recipients".into()));
     }
 
-    let data = conn.cmd("DATA", config.timeout).await?;
-    require_code(&data, 3, "DATA")?;
+    let data = conn.cmd("DATA", config.timeout).await.map_err(SmtpError::Definite)?;
+    require_code(&data, 3, "DATA").map_err(SmtpError::Definite)?;
 
     let mut payload = dot_stuff(message);
     if !payload.ends_with(b"\n") {
@@ -183,14 +221,14 @@ pub async fn send(
     conn.writer
         .write_all(&payload)
         .await
-        .map_err(|e| format!("SMTP DATA write failed: {e}"))?;
+        .map_err(|e| SmtpError::Uncertain(format!("SMTP DATA write failed: {e}")))?;
     conn.writer
         .flush()
         .await
-        .map_err(|e| format!("SMTP DATA flush failed: {e}"))?;
+        .map_err(|e| SmtpError::Uncertain(format!("SMTP DATA flush failed: {e}")))?;
 
-    let done = conn.reply(config.timeout).await?;
-    require_code(&done, 2, "DATA completion")?;
+    let done = conn.reply(config.timeout).await.map_err(SmtpError::Uncertain)?;
+    require_code(&done, 2, "DATA completion").map_err(SmtpError::Definite)?;
 
     let _ = conn.cmd("QUIT", config.timeout).await; // best effort
     Ok(done.lines.join(" ").trim().to_string())
@@ -303,6 +341,7 @@ fn ehlo_features(reply: &Reply) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
 
     #[test]
     fn dot_stuffs_leading_dots_only() {
@@ -390,6 +429,112 @@ mod tests {
         .await;
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("require verified implicit TLS"));
+    }
+
+    #[tokio::test]
+    async fn rejection_before_data_is_safe_to_retry() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read, mut write) = tokio::io::split(socket);
+            let mut lines = BufReader::new(read).lines();
+            write.write_all(b"220 ready\r\n").await.unwrap();
+            assert!(lines.next_line().await.unwrap().unwrap().starts_with("EHLO "));
+            write.write_all(b"250 hello\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "MAIL FROM:<sender@example.com>");
+            write.write_all(b"550 sender denied\r\n").await.unwrap();
+        });
+        let config = SmtpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            username: String::new(),
+            password: String::new(),
+            timeout: Duration::from_secs(2),
+        };
+        let error = send(&config, "sender@example.com", &["to@example.com".into()], b"test")
+            .await
+            .unwrap_err();
+        assert!(!error.delivery_uncertain());
+        assert!(error.to_string().contains("MAIL FROM"));
+        assert_eq!(error.public_message(), "Mail server rejected the sender address");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lost_data_completion_is_uncertain() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read, mut write) = tokio::io::split(socket);
+            let mut lines = BufReader::new(read).lines();
+            write.write_all(b"220 ready\r\n").await.unwrap();
+            assert!(lines.next_line().await.unwrap().unwrap().starts_with("EHLO "));
+            write.write_all(b"250 hello\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "MAIL FROM:<sender@example.com>");
+            write.write_all(b"250 sender ok\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "RCPT TO:<to@example.com>");
+            write.write_all(b"250 recipient ok\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "DATA");
+            write.write_all(b"354 continue\r\n").await.unwrap();
+            while let Some(line) = lines.next_line().await.unwrap() {
+                if line == "." { break; }
+            }
+            // Close without the final SMTP reply. The server may have accepted
+            // DATA, so the client must preserve the idempotency key.
+        });
+        let config = SmtpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            username: String::new(),
+            password: String::new(),
+            timeout: Duration::from_secs(2),
+        };
+        let error = send(&config, "sender@example.com", &["to@example.com".into()], b"test")
+            .await
+            .unwrap_err();
+        assert!(error.delivery_uncertain());
+        assert_eq!(error.public_message(), "Mail service is temporarily unavailable");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_data_rejection_is_safe_to_retry() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read, mut write) = tokio::io::split(socket);
+            let mut lines = BufReader::new(read).lines();
+            write.write_all(b"220 ready\r\n").await.unwrap();
+            assert!(lines.next_line().await.unwrap().unwrap().starts_with("EHLO "));
+            write.write_all(b"250 hello\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "MAIL FROM:<sender@example.com>");
+            write.write_all(b"250 sender ok\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "RCPT TO:<to@example.com>");
+            write.write_all(b"250 recipient ok\r\n").await.unwrap();
+            assert_eq!(lines.next_line().await.unwrap().unwrap(), "DATA");
+            write.write_all(b"354 continue\r\n").await.unwrap();
+            while let Some(line) = lines.next_line().await.unwrap() {
+                if line == "." { break; }
+            }
+            write.write_all(b"554 message rejected\r\n").await.unwrap();
+        });
+        let config = SmtpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            username: String::new(),
+            password: String::new(),
+            timeout: Duration::from_secs(2),
+        };
+        let error = send(&config, "sender@example.com", &["to@example.com".into()], b"test")
+            .await
+            .unwrap_err();
+        assert!(!error.delivery_uncertain());
+        assert!(error.to_string().contains("DATA completion"));
+        server.await.unwrap();
     }
 }
