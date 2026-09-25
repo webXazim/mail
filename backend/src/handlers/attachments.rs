@@ -102,6 +102,7 @@ struct StoredAttachment {
 #[derive(Deserialize)]
 pub struct UploadQuery {
     filename: String,
+    size: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -274,6 +275,10 @@ async fn reserve_upload(
     state: &AppState,
     user_id: Uuid,
     mailbox_id: Uuid,
+    organization_id: Uuid,
+    pool_limit: i64,
+    mailbox_limit: i64,
+    provider_used: i64,
     id: Uuid,
     filename: &str,
     content_type: &str,
@@ -286,23 +291,37 @@ async fn reserve_upload(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
+    // Serialize reservations across every mailbox in the organization.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(mailbox_id.to_string())
+        .bind(organization_id.to_string())
         .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(reserved_bytes), 0)::bigint
-         FROM staged_attachments WHERE mailbox_id = $1",
+    let (staged_mailbox, staged_org, mailbox_used, org_used): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT
+           COALESCE((SELECT SUM(reserved_bytes) FROM staged_attachments WHERE mailbox_id=$1),0)::bigint,
+           COALESCE((SELECT SUM(sa.reserved_bytes) FROM staged_attachments sa JOIN mailboxes m ON m.id=sa.mailbox_id WHERE m.organization_id=$2),0)::bigint,
+           COALESCE((SELECT quota_used FROM realtime_mailbox_state WHERE mailbox_id=$1),0)::bigint,
+           COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$2),0)::bigint",
     )
     .bind(mailbox_id)
+    .bind(organization_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
+    if org_used.saturating_add(staged_org).saturating_add(reserve_bytes) > pool_limit {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "organization_storage_quota",
+            "This business does not have enough remaining storage for this attachment"));
+    }
+    if mailbox_used.max(provider_used).saturating_add(staged_mailbox).saturating_add(reserve_bytes) > mailbox_limit {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "mailbox_storage_quota",
+            "This mailbox does not have enough remaining storage for this attachment"));
+    }
+
     let limit = state.attachment_staging_quota_bytes.min(i64::MAX as u64) as i64;
-    if used.saturating_add(reserve_bytes) > limit {
+    if staged_mailbox.saturating_add(reserve_bytes) > limit {
         return Err(ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "attachment_staging_quota",
@@ -357,34 +376,29 @@ pub async fn upload(
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
     let ent = attachment_entitlements(&state, mailbox_id).await?;
     let plan_max = ent.plan.max_attachment_bytes.min(MAX_ATTACHMENT_BYTES);
-    // PostgreSQL SUM(bigint) yields NUMERIC, so cast the aggregate before
-    // SQLx decodes the scalar into i64.
-    let pooled_used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id=$1),0) +
-                COALESCE((SELECT SUM(sa.reserved_bytes) FROM staged_attachments sa JOIN mailboxes m ON m.id=sa.mailbox_id WHERE m.organization_id=$1),0)::bigint"
-    ).bind(ent.organization_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let pool_limit=ent.storage_pool_bytes.min(i64::MAX as u64) as i64;
-    if pooled_used.saturating_add(plan_max as i64) > pool_limit {
-        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE,"organization_storage_quota",
-            format!("This business has reached its storage allowance ({} MiB)",pool_limit/(1024*1024))));
-    }
     if plan_max == 0 {
         return Err(ApiError::forbidden("Attachments are disabled for this plan"));
     }
-
-    if let Some(value) = headers.get(header::CONTENT_LENGTH) {
-        if let Ok(text) = value.to_str() {
-            if let Ok(length) = text.parse::<usize>() {
-                if length > plan_max {
-                    return Err(ApiError::new(
-                        StatusCode::PAYLOAD_TOO_LARGE,
-                        "attachment_too_large",
-                        format!("Attachments may be at most {} MiB on your plan", plan_max / (1024 * 1024)),
-                    ));
-                }
-            }
-        }
+    let header_size = headers.get(header::CONTENT_LENGTH).and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    if header_size.is_some() && query.size.is_some() && header_size != query.size {
+        return Err(ApiError::bad_request("Attachment size does not match Content-Length"));
     }
+    let declared_size = query.size.or(header_size);
+    let reserve_bytes = declared_size.unwrap_or(plan_max as u64);
+    if reserve_bytes > plan_max as u64 {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "attachment_too_large",
+            format!("Attachments may be at most {} MiB on your plan", plan_max / (1024 * 1024))));
+    }
+    let mailbox_limit: i64 = sqlx::query_scalar("SELECT COALESCE(quota_bytes,$2) FROM mailboxes WHERE id=$1")
+        .bind(mailbox_id).bind(ent.quota_bytes.min(i64::MAX as u64) as i64)
+        .fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let provider_account: Option<String> = sqlx::query_scalar("SELECT provider_account_id FROM mailboxes WHERE id=$1")
+        .bind(mailbox_id).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let provider_used = if let Some(account) = provider_account.as_deref().filter(|value| !value.is_empty()) {
+        state.stalwart.account_quota(account).await.ok().flatten()
+            .map(|(used, _)| used.min(i64::MAX as u64) as i64).unwrap_or(0)
+    } else { 0 };
 
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -394,17 +408,20 @@ pub async fn upload(
 
     let id = Uuid::new_v4();
     let key = storage_key(mailbox_id, id);
-    // Reserve the whole per-file entitlement before reading a byte. This is
-    // conservative, but it prevents chunked/misreported concurrent uploads
-    // from bypassing the per-user staging disk budget.
+    // Unknown-length clients reserve the full file allowance; declared-length
+    // clients reserve exactly their bytes. The stream is bounded below.
     reserve_upload(
         &state,
         auth.user_id,
         mailbox_id,
+        ent.organization_id,
+        ent.storage_pool_bytes.min(i64::MAX as u64) as i64,
+        mailbox_limit.max(0),
+        provider_used,
         id,
         &filename,
         &content_type,
-        plan_max as i64,
+        reserve_bytes as i64,
         &key,
     )
     .await?;
@@ -435,7 +452,7 @@ pub async fn upload(
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| ApiError::bad_request(format!("Upload stream failed: {e}")))?;
             size = size.saturating_add(chunk.len());
-            if size > plan_max {
+            if size > reserve_bytes as usize {
                 return Err(ApiError::new(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     "attachment_too_large",
@@ -454,6 +471,9 @@ pub async fn upload(
         file.flush()
             .await
             .map_err(|e| ApiError::internal(format!("Attachment flush failed: {e}")))?;
+        if declared_size.is_some_and(|declared| declared != size as u64) {
+            return Err(ApiError::bad_request("Attachment size differs from the declared size"));
+        }
         if looks_executable(&probe) {
             return Err(ApiError::new(
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,

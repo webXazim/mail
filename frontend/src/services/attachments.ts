@@ -34,9 +34,25 @@ const attachmentHeaders = (contentType?: string): Headers => {
   return headers
 }
 
-async function remoteUpload(file: File): Promise<DraftAttachment> {
+async function remoteUpload(file: File, onProgress?: (percent: number) => void): Promise<DraftAttachment> {
+  const url = `/api/attachments?filename=${encodeURIComponent(file.name)}&size=${file.size}`
   const send = async () => {
-    return fetch(`/api/attachments?filename=${encodeURIComponent(file.name)}`, {
+    if (onProgress) {
+      return new Promise<Response>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', url)
+        xhr.withCredentials = true
+        attachmentHeaders(file.type || 'application/octet-stream').forEach((value, name) => xhr.setRequestHeader(name, value))
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.total > 0) onProgress(Math.min(99, Math.round(event.loaded / event.total * 100)))
+        }
+        xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status, headers: { 'x-request-id': xhr.getResponseHeader('x-request-id') || '' } }))
+        xhr.onerror = () => reject(new Error('Connection lost while uploading attachment'))
+        xhr.onabort = () => reject(new Error('Attachment upload cancelled'))
+        xhr.send(file)
+      })
+    }
+    return fetch(url, {
       method: 'POST',
       headers: attachmentHeaders(file.type || 'application/octet-stream'),
       body: file,
@@ -48,6 +64,7 @@ async function remoteUpload(file: File): Promise<DraftAttachment> {
   if (response.status === 401 && (await refreshSession())) response = await send()
   if (!response.ok) return parseError(response)
   const data = (await response.json()) as { attachment: DraftAttachment }
+  onProgress?.(100)
   return data.attachment
 }
 
@@ -55,12 +72,13 @@ async function remoteUpload(file: File): Promise<DraftAttachment> {
  * Upload a compose attachment. Authenticated sessions stream bytes directly to
  * the API staging volume; demo mode keeps the Blob only in memory.
  */
-export async function uploadAttachment(file: File): Promise<DraftAttachment> {
-  if (tokenStore.getAccess()) return remoteUpload(file)
+export async function uploadAttachment(file: File, onProgress?: (percent: number) => void): Promise<DraftAttachment> {
+  if (tokenStore.getAccess()) return remoteUpload(file, onProgress)
 
   const id = localId()
   localBlobs.set(id, file)
   localNames.set(file.name, id)
+  onProgress?.(100)
   return {
     id,
     filename: file.name,

@@ -367,6 +367,20 @@
 .attachment-chip button:hover {
   color: var(--cs-mail-accent);
 }
+.attachment-chip--pending {
+  flex-wrap: wrap;
+  max-width: min(100%, 380px);
+}
+.attachment-chip--pending span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-chip--pending progress {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--cs-mail-accent);
+}
 
 button.compose-send {
   align-self: flex-end;

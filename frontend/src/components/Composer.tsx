@@ -16,6 +16,7 @@ import { identitiesApi, type Identity } from '../services/identities'
 import { parseAddresses } from '../lib/mail'
 import { isRemoteMail, parseRecipients, remoteDraftApi } from '../services/remote-mail'
 import { settingsApi } from '../services/settings'
+import { currentProfile, profileApi } from '../services/profile'
 import type { Draft, DraftAttachment } from '../types'
 
 type ComposerProps = {
@@ -24,6 +25,8 @@ type ComposerProps = {
   initialDraft?: Partial<Draft>
 }
 const freshKey = () => crypto.randomUUID()
+const formatBytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+type PendingAttachment = { id: string; filename: string; size: number; progress: number; state: 'waiting' | 'uploading' | 'failed' }
 const emptyDraft: Draft = {
   to: '',
   cc: '',
@@ -90,6 +93,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
   const [showCopies, setShowCopies] = useState(Boolean(draft.cc || draft.bcc))
   const [status, setStatus] = useState(remote ? 'Ready' : 'Saved to Drafts')
   const [uploading, setUploading] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)
@@ -227,24 +231,55 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
     if (!files?.length || uploading) return
     setUploading(true)
     setAttachmentError(null)
-    setStatus('Uploading attachment...')
+    setPendingAttachments([])
+    const pending = files.map((file) => ({ id: freshKey(), filename: file.name, size: file.size, progress: 0, state: 'waiting' as const }))
+    setPendingAttachments(pending)
+    setStatus('Checking attachment storage...')
     try {
-      for (const file of files) {
+      const profile = remote ? await profileApi.refresh() : currentProfile()
+      const fileLimit = Math.min(profile?.limits?.max_attachment_bytes ?? 100 * 1024 * 1024, 100 * 1024 * 1024)
+      const remaining = profile ? Math.max(0, profile.storage.total_bytes - profile.storage.used_bytes) : Infinity
+      let batchBytes = draft.attachments.reduce((sum, item) => sum + item.size, 0)
+      for (const [index, file] of files.entries()) {
+        const item = pending[index]
+        const messageRemaining = (profile?.limits?.max_total_attachment_bytes ?? Infinity) - batchBytes
+        if (file.size > fileLimit || file.size > remaining - batchBytes || file.size > messageRemaining) {
+          const reason = file.size > fileLimit
+            ? `File is ${formatBytes(file.size)}; the per-file limit is ${formatBytes(fileLimit)}`
+            : file.size > messageRemaining
+              ? `File exceeds the remaining per-message attachment limit (${formatBytes(Math.max(0, messageRemaining))})`
+              : `File is ${formatBytes(file.size)}; only ${formatBytes(Math.max(0, remaining - batchBytes))} remains in this mailbox`
+          setPendingAttachments((current) => current.map((entry) => entry.id === item.id ? { ...entry, state: 'failed' } : entry))
+          setAttachmentError(`${file.name}: ${reason}`)
+          setStatus('Attachment exceeds storage limit')
+          return
+        }
+        setPendingAttachments((current) => current.map((entry) => entry.id === item.id ? { ...entry, state: 'uploading' } : entry))
+        setStatus(`Uploading ${file.name}...`)
         try {
-          const uploaded = await uploadAttachment(file)
+          const uploaded = await uploadAttachment(file, (progress) => {
+            setPendingAttachments((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress } : entry))
+          })
+          setPendingAttachments((current) => current.filter((entry) => entry.id !== item.id))
           setDraft((current) => ({
             ...current,
             attachments: [...current.attachments, uploaded],
             sendKey: freshKey(),
           }))
+          batchBytes += file.size
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Upload failed'
+          setPendingAttachments((current) => current.map((entry) => entry.id === item.id ? { ...entry, state: 'failed' } : entry))
           setAttachmentError(`${file.name}: ${message}`)
           setStatus('Attachment upload failed')
           return
         }
       }
       setStatus('Saved to Drafts')
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : 'Could not check storage allowance')
+      setPendingAttachments((current) => current.map((entry) => ({ ...entry, state: 'failed' })))
+      setStatus('Attachment check failed')
     } finally {
       setUploading(false)
     }
@@ -533,8 +568,15 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
               onPaste={onPaste}
               suppressContentEditableWarning
             />
-            {draft.attachments.length > 0 && (
+            {(draft.attachments.length > 0 || pendingAttachments.length > 0) && (
               <div className="chips">
+                {pendingAttachments.map((item) => (
+                  <small className="attachment-chip attachment-chip--pending" key={item.id}>
+                    <Paperclip size={13} />
+                    <span>{item.filename} · {formatBytes(item.size)} · {item.state === 'uploading' ? `${item.progress}%` : item.state}</span>
+                    {item.state === 'uploading' && <progress value={item.progress} max="100" aria-label={`Upload ${item.filename}`} />}
+                  </small>
+                ))}
                 {draft.attachments.map((attachment) => (
                   <small className="attachment-chip" key={attachment.id}>
                     <Paperclip size={13} />
@@ -556,6 +598,7 @@ export function Composer({ close, onSent, initialDraft }: ComposerProps) {
               Attachment not added — {attachmentError}. Select the file again to retry, or{' '}
               <button type="button" className="text-button" onClick={() => {
                 setAttachmentError(null)
+                setPendingAttachments([])
                 setStatus('Attachment omitted — review before sending')
               }}>
                 send without it
