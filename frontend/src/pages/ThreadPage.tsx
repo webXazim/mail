@@ -4,6 +4,7 @@ import {
   buildForwardDraft,
   buildReplyAllDraft,
   buildReplyDraft,
+  conversationReplyRecipients,
   filterMails,
   folderFromPath,
   folderPath,
@@ -14,6 +15,7 @@ import { useMail } from '../state/mail/MailContext'
 import { calendarApi } from '../services/calendar'
 import { fetchMailPage, fetchThreadFor, isRemoteMail } from '../services/remote-mail'
 import { localIdentity } from '../services/profile'
+import { identitiesApi } from '../services/identities'
 import type { Mail, ReaderThreadItem } from '../types'
 import type { RealtimeEvent } from '../services/ws'
 
@@ -143,15 +145,27 @@ export function ThreadPage() {
     const replyMail = source
       ? { ...mail, email: source.email, sender: source.sender, subject: source.subject, to: source.to, cc: source.cc }
       : mail
-    openCompose(buildReplyDraft(replyMail, source))
-  }, [mail, openCompose])
+    const draft = buildReplyDraft(replyMail, source)
+    if (source) {
+      const ownAddresses = [localIdentity().email, ...identitiesApi.list().map((identity) => identity.email)]
+      draft.to = conversationReplyRecipients(source, threadItems, ownAddresses).to.join(', ')
+    }
+    openCompose(draft)
+  }, [mail, openCompose, threadItems])
   const openReplyAll = useCallback((source?: ReaderThreadItem) => {
     if (!mail) return
     const replyMail = source
       ? { ...mail, email: source.email, sender: source.sender, subject: source.subject, to: source.to, cc: source.cc }
       : mail
-    openCompose(buildReplyAllDraft(replyMail, localIdentity().email, source))
-  }, [mail, openCompose])
+    const draft = buildReplyAllDraft(replyMail, localIdentity().email, source)
+    if (source) {
+      const ownAddresses = [localIdentity().email, ...identitiesApi.list().map((identity) => identity.email)]
+      const recipients = conversationReplyRecipients(source, threadItems, ownAddresses, true)
+      draft.to = recipients.to.join(', ')
+      draft.cc = recipients.cc.join(', ')
+    }
+    openCompose(draft)
+  }, [mail, openCompose, threadItems])
 
   useEffect(() => {
     if (!mail) return

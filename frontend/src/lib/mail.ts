@@ -292,6 +292,43 @@ export const parseAddresses = (value: string): string[] =>
     .map((part) => part.trim())
     .filter(Boolean)
 
+const bareAddress = (value: string): string =>
+  (value.match(/<([^<>]+)>/)?.[1] ?? value).trim().toLowerCase()
+
+/** Replies to a sent message target its recipients, never its From address.
+ * A self-addressed sent copy can still belong to a conversation with an
+ * external correspondent, so use the most recent incoming sender as fallback. */
+export const conversationReplyRecipients = (
+  source: ReaderThreadItem,
+  thread: ReaderThreadItem[],
+  ownAddresses: string[],
+  replyAll = false,
+): { to: string[]; cc: string[] } => {
+  const own = new Set(ownAddresses.map(bareAddress))
+  const to: string[] = []
+  const cc: string[] = []
+  const seen = new Set<string>()
+  const add = (list: string[], value: string) => {
+    const address = bareAddress(value)
+    if (!address || own.has(address) || seen.has(address)) return
+    seen.add(address)
+    list.push(value.trim())
+  }
+  if (own.has(bareAddress(source.email))) {
+    for (const recipient of source.to ?? []) add(to, recipient)
+  } else {
+    add(to, source.email)
+    if (replyAll) for (const recipient of source.to ?? []) add(to, recipient)
+  }
+  if (replyAll) for (const recipient of source.cc ?? []) add(cc, recipient)
+  if (!to.length) {
+    const correspondent = [...thread].reverse().find((item) =>
+      item.email && !own.has(bareAddress(item.email)))
+    if (correspondent) add(to, correspondent.email)
+  }
+  return { to: replyAll ? to : to.slice(0, 1), cc: replyAll ? cc : [] }
+}
+
 const replyHeaders = (source?: ReaderThreadItem): Pick<Draft, 'inReplyTo' | 'references'> => {
   const messageId = source?.messageId?.trim()
   if (!messageId) return {}

@@ -325,11 +325,19 @@ async fn reconcile_sent_copy(
     else {
         return Ok(None);
     };
+    let self_address: String = sqlx::query_scalar(
+        "SELECT m.address::text FROM mail_send_requests r
+         JOIN mailboxes m ON m.id = r.mailbox_id WHERE r.id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
     if let Some(sent_mailbox) = imap::sent_mailbox_id(&state.stalwart, account)
         .await
         .map_err(bridge_err)?
     {
-        if let Err(error) = imap::move_to_sent(&state.stalwart, account, &id, &sent_mailbox).await {
+        if let Err(error) = imap::move_to_sent(&state.stalwart, account, &id, &sent_mailbox, &self_address).await {
             tracing::warn!(%request_id, %message_id, "sent-copy move failed during reconciliation: {error}");
             return Ok(None);
         }

@@ -1175,18 +1175,50 @@ pub async fn find_by_message_id(
     Ok(None)
 }
 
-/// File the sender's self-copy into `sent_mailbox` and mark it read. Full-map
-/// replacement (Stalwart 0.16 semantics) drops whatever Inbox/Junk produced.
+/// File the sender's self-copy into `sent_mailbox` and mark it read. When the
+/// sender explicitly addressed their own mailbox, keep the Inbox delivery too.
+fn sent_copy_mailbox_ids(email: &Value, sent_mailbox: &str, self_address: &str) -> Value {
+    let addressed_to_self = ["to", "cc"].iter().any(|field| {
+        email.get(*field)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|recipient| recipient.get("email").and_then(Value::as_str))
+            .any(|address| address.eq_ignore_ascii_case(self_address))
+    });
+    let mut mailbox_ids = if addressed_to_self {
+        email.get("mailboxIds")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        serde_json::Map::new()
+    };
+    mailbox_ids.insert(sent_mailbox.to_string(), json!(true));
+    Value::Object(mailbox_ids)
+}
+
 pub async fn move_to_sent(
     bridge: &StalwartService,
     account: &str,
     email_id: &str,
     sent_mailbox: &str,
+    self_address: &str,
 ) -> Result<(), String> {
+    let fetched = bridge.mail_read("Email/get", json!({
+        "accountId": account,
+        "ids": [email_id],
+        "properties": ["id", "to", "cc", "mailboxIds"]
+    })).await?;
+    let email = fetched.get("list")
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .ok_or_else(|| format!("sent copy {email_id} not found"))?;
+    let mailbox_ids = sent_copy_mailbox_ids(email, sent_mailbox, self_address);
     let update = serde_json::Map::from_iter([(
         email_id.to_string(),
         json!({
-            "mailboxIds": { sent_mailbox: true },
+            "mailboxIds": mailbox_ids,
             "keywords": { "$seen": true }
         }),
     )]);
@@ -1572,6 +1604,30 @@ mod tests {
     fn mailbox_scope_requires_id() {
         assert!(query_filter("mailbox", None, None).is_err());
         assert_eq!(query_filter("mailbox", Some("m1"), None).unwrap().unwrap()["inMailbox"], "m1");
+    }
+
+    #[test]
+    fn self_addressed_sent_copy_remains_in_inbox() {
+        let email = json!({
+            "to": [{"email": "HELLO@example.com"}],
+            "mailboxIds": {"inbox": true}
+        });
+        assert_eq!(
+            sent_copy_mailbox_ids(&email, "sent", "hello@example.com"),
+            json!({"inbox": true, "sent": true})
+        );
+    }
+
+    #[test]
+    fn ordinary_sent_copy_leaves_inbox() {
+        let email = json!({
+            "to": [{"email": "friend@example.com"}],
+            "mailboxIds": {"inbox": true}
+        });
+        assert_eq!(
+            sent_copy_mailbox_ids(&email, "sent", "hello@example.com"),
+            json!({"sent": true})
+        );
     }
 
     #[test]
