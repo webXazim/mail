@@ -26,6 +26,7 @@ import {
   remoteDraftApi,
   resetMailCache,
   sendCompose,
+  sendStatus,
   setRead,
   setStarred,
   type RemoteMailbox,
@@ -647,10 +648,33 @@ export function MailProvider({ children }: { children: ReactNode }) {
             error instanceof TypeError ||
             (error instanceof ApiError &&
               (error.code === 'send_uncertain' || error.code === 'send_in_progress'))
+          if (uncertain && draft.sendKey) {
+            dispatch({
+              type: 'notice',
+              message: 'Checking whether the mail server accepted this message…',
+            })
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+              await new Promise((resolve) => window.setTimeout(resolve, 1500))
+              try {
+                const status = await sendStatus(draft.sendKey)
+                if (status.status === 'sent') {
+                  remoteDraftApi.clearActive()
+                  chime()
+                  dispatch({ type: 'notice', message: 'Message sent' })
+                  void loadMailbox()
+                  return true
+                }
+                if (status.status === 'failed') break
+              } catch {
+                // A response-loss check can briefly race creation of the send
+                // ledger; keep checking within the bounded window.
+              }
+            }
+          }
           dispatch({
             type: 'notice',
             message: uncertain
-              ? 'Send status is being reconciled — do not create a duplicate. Press Send again to safely check the same attempt.'
+              ? 'Delivery is still unconfirmed. Check Sent before starting a new attempt.'
               : `Send failed — ${error instanceof Error ? error.message : 'please try again'}`,
           })
           return false

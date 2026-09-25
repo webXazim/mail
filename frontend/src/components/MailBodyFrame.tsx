@@ -26,6 +26,9 @@ export function MailBodyFrame({ html, subject, allowRemoteImages = false }: Mail
   const safeHtml = sanitizeHtml(html)
   const imagePolicy = allowRemoteImages ? 'data: https: http:' : 'data:'
   const csp = `default-src 'none'; img-src ${imagePolicy}; style-src 'unsafe-inline'; font-src 'none'; connect-src 'none'; frame-src 'none';`
+  const lightTheme = document.documentElement.dataset.theme === 'light'
+  const frameBackground = lightTheme ? '#fbfcf8' : '#111817'
+  const frameColor = lightTheme ? '#4b5650' : '#d9e0dc'
 
   const fitContent = useCallback(() => {
     const document = frameRef.current?.contentDocument
@@ -60,13 +63,13 @@ export function MailBodyFrame({ html, subject, allowRemoteImages = false }: Mail
       referrerPolicy="no-referrer"
       scrolling="no"
       onLoad={onLoad}
-      srcDoc={`<!doctype html><html><head><meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="${csp}" /><style>html,body{margin:0;background:transparent!important}body{color:#d9e0dc;font-family:system-ui,sans-serif;font-size:13.5px;line-height:1.7;padding:12px 0;overflow-wrap:anywhere}img{max-width:100%;height:auto}@media(prefers-color-scheme:light){body{color:#4b5650}}</style></head><body>${safeHtml}</body></html>`}
+      srcDoc={`<!doctype html><html><head><meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="${csp}" /><style>html,body{margin:0;background:${frameBackground}!important}body{color:${frameColor};font-family:system-ui,sans-serif;font-size:13.5px;line-height:1.7;padding:12px 0;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style></head><body>${safeHtml}</body></html>`}
       style={{
         width: '100%',
         border: 'none',
         height,
         overflow: 'hidden',
-        background: 'transparent',
+        background: frameBackground,
       }}
     />
   )

@@ -226,8 +226,15 @@ impl Connection {
                 return Err(format!("SMTP protocol error: {raw:?}"));
             }
             let code: Result<u16, _> = raw[..3].parse();
-            let is_last = raw.as_bytes().get(3) == Some(&b' ');
-            lines.push(raw[3..].trim().to_string());
+            let separator = raw.as_bytes().get(3).copied();
+            if !matches!(separator, Some(b' ' | b'-')) {
+                return Err(format!("SMTP protocol error: {raw:?}"));
+            }
+            let is_last = separator == Some(b' ');
+            // The fourth byte is the SMTP reply separator, not reply text.
+            // Keeping the '-' from `250-AUTH` made capability detection see
+            // "-auth" and reject valid authenticated Stalwart sessions.
+            lines.push(raw.get(4..).unwrap_or_default().trim().to_string());
             if let (Ok(code), true) = (code, is_last) {
                 return Ok(Reply { code, lines });
             }
@@ -288,7 +295,7 @@ fn ehlo_features(reply: &Reply) -> HashSet<String> {
     reply
         .lines
         .iter()
-        .flat_map(|l| l.split_whitespace())
+        .flat_map(|l| l.trim_start_matches(['-', ' ']).split_whitespace())
         .map(|t| t.to_lowercase())
         .collect()
 }
@@ -328,6 +335,27 @@ mod tests {
         assert!(features.contains("104857600"));
         assert!(features.contains("8bitmime"));
         assert!(!features.contains("auth"));
+    }
+
+    #[tokio::test]
+    async fn reply_removes_smtp_continuation_markers() {
+        let (client, mut server) = tokio::io::duplex(256);
+        tokio::spawn(async move {
+            server
+                .write_all(b"250-mail.example\r\n250-AUTH PLAIN LOGIN\r\n250 SIZE 1024\r\n")
+                .await
+                .unwrap();
+        });
+        let stream: Box<dyn SmtpStream> = Box::new(client);
+        let (read, write) = tokio::io::split(stream);
+        let mut connection = Connection {
+            reader: BufReader::new(read),
+            writer: write,
+        };
+
+        let reply = connection.reply(Duration::from_secs(1)).await.unwrap();
+        assert_eq!(reply.lines, vec!["mail.example", "AUTH PLAIN LOGIN", "SIZE 1024"]);
+        assert!(ehlo_features(&reply).contains("auth"));
     }
 
     #[test]
