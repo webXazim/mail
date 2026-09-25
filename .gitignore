@@ -1,0 +1,55 @@
+# Dependencies / build output
+node_modules/
+dist/
+dist-ssr/
+coverage/
+target/
+.cs-mail-target/
+.cache/
+*.tsbuildinfo
+
+# Runtime / local environment
+.env
+.env.*
+!**/.env.example
+!**/.env.*.example
+*.local
+
+# Logs / temp
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Generated Vite config artifacts
+vite.config.js
+vite.config.d.ts
+
+# Never commit production secrets / keys / backups
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.tgz
+*.backup
+
+# Infrastructure/application secrets never belong in Git
+secrets/

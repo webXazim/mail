@@ -1,164 +1,94 @@
-import type { Mail } from '../types'
-import { apiFetch } from '../lib/api'
-import { isRemoteMail } from './remote-mail'
+#!/bin/sh
+set -eu
 
-export type ReadReceipt = {
-  id: string
-  mailId: string
-  sender: string
-  email: string
-  subject: string
-  at: string
+# Resolve the checkout from this file instead of assuming /opt/sites/cs-mail.
+# This keeps the production entrypoint valid when the Git checkout lives at
+# /srv/apps/mail (or any other operator-selected path).
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+CS_MAIL_ROOT=${CS_MAIL_ROOT:-$PROJECT_ROOT}
+CS_MAIL_STATE_ROOT=${CS_MAIL_STATE_ROOT:-/opt/cs-mail}
+CS_MAIL_ENV_FILE=${CS_MAIL_ENV_FILE:-$CS_MAIL_STATE_ROOT/.env.production}
+CS_MAIL_CERT_ENV_FILE=${CS_MAIL_CERT_ENV_FILE:-$CS_MAIL_STATE_ROOT/.env.certification}
+export CS_MAIL_ROOT CS_MAIL_STATE_ROOT CS_MAIL_ENV_FILE CS_MAIL_CERT_ENV_FILE
+
+usage() {
+    cat <<'USAGE'
+Usage: sh manage COMMAND [ARGUMENT]
+
+Production commands (run from the CS Mail checkout):
+  deploy [REF]          Pull and deploy REF from origin (default: main)
+  deploy-current        Deploy the checked-out commit without pulling
+  preflight             Validate production environment and dependencies
+  status                Show release, containers, and health checks
+  backup                Back up the database and attachments
+  restore-drill         Verify and restore the latest backup in a test database
+  record-backup-proof TYPE FILE
+                        Record fresh offsite proof for TYPE=cs-mail|stalwart
+  launch-freeze         Run the final closed-controls public-launch freeze gate
+  show-config           Show production configuration with secrets redacted
+  bootstrap-admin EMAIL Promote the first verified CS Mail account
+
+The checkout path is detected from this manage file. Runtime state/secrets remain
+under /opt/cs-mail by default. Override CS_MAIL_STATE_ROOT, CS_MAIL_ENV_FILE, or
+CS_MAIL_CERT_ENV_FILE only when intentionally using different production paths.
+USAGE
 }
 
-type ReceiptRow = {
-  id: string
-  mailId: string
-  sender: string
-  email: string
-  subject: string
-  at: string
-}
-
-const receiptsKey = 'cs-mail:read-receipts'
-
-const readReceipts = (): ReadReceipt[] => {
-  try {
-    const raw = localStorage.getItem(receiptsKey)
-    return raw ? (JSON.parse(raw) as ReadReceipt[]) : []
-  } catch {
-    return []
-  }
-}
-
-const writeReceipts = (items: ReadReceipt[]) => {
-  try {
-    localStorage.setItem(receiptsKey, JSON.stringify(items))
-  } catch {
-    /* quota exceeded — the in-memory list still renders this session */
-  }
-}
-
-export const receiptsApi = {
-  list(): ReadReceipt[] {
-    return readReceipts()
-  },
-  save(items: ReadReceipt[]) {
-    writeReceipts(items)
-  },
-  /** API-first refresh; falls back to the local cache when offline or in demo mode. */
-  async refresh(): Promise<ReadReceipt[]> {
-    if (!isRemoteMail()) return this.list()
-    try {
-      const result = await apiFetch<{ receipts: ReceiptRow[] }>('/api/receipts')
-      const next = (result.receipts ?? []).map((row) => ({ ...row }))
-      writeReceipts(next)
-      return next
-    } catch {
-      return this.list()
+run_root() {
+    root_resolved=$(CDPATH= cd -- "$CS_MAIL_ROOT" && pwd -P) || {
+        echo "CS_MAIL_ROOT is missing: $CS_MAIL_ROOT" >&2
+        exit 1
     }
-  },
-  has(mailId: string): boolean {
-    return this.list().some((receipt) => receipt.mailId === mailId)
-  },
-  async record(mail: Mail): Promise<ReadReceipt> {
-    const receipt: ReadReceipt = {
-      id: `receipt-${Date.now()}`,
-      mailId: mail.id,
-      sender: mail.sender,
-      email: mail.email,
-      subject: mail.subject,
-      at: new Date().toISOString(),
-    }
-    if (isRemoteMail()) {
-      try {
-        const row = await apiFetch<ReceiptRow>('/api/receipts', {
-          method: 'POST',
-          body: JSON.stringify({
-            mailId: mail.id,
-            sender: mail.sender,
-            email: mail.email,
-            subject: mail.subject,
-          }),
-        })
-        const next = [row, ...this.list().filter((item) => item.mailId !== mail.id)]
-        writeReceipts(next)
-        return row
-      } catch {
-        // Offline: keep the local receipt so the UI still reflects it.
-      }
-    }
-    writeReceipts([receipt, ...this.list()])
-    return receipt
-  },
+    if [ "$root_resolved" != "$PROJECT_ROOT" ]; then
+        echo "CS_MAIL_ROOT points to a different checkout." >&2
+        echo "  manage checkout: $PROJECT_ROOT" >&2
+        echo "  CS_MAIL_ROOT:     $root_resolved" >&2
+        echo "Unset CS_MAIL_ROOT or point it at this checkout." >&2
+        exit 1
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo env \
+          CS_MAIL_ROOT="$CS_MAIL_ROOT" \
+          CS_MAIL_STATE_ROOT="$CS_MAIL_STATE_ROOT" \
+          CS_MAIL_ENV_FILE="$CS_MAIL_ENV_FILE" \
+          CS_MAIL_CERT_ENV_FILE="$CS_MAIL_CERT_ENV_FILE" \
+          "$@"
+    fi
 }
 
-export type ReceiptRequest = { id: string; mailId: string; recipient: string; at: string }
-
-type RequestRow = { id: string; mailId: string; recipient: string; at: string }
-
-const requestsKey = 'cs-mail:receipt-requests'
-
-const readRequests = (): ReceiptRequest[] => {
-  try {
-    const raw = localStorage.getItem(requestsKey)
-    return raw ? (JSON.parse(raw) as ReceiptRequest[]) : []
-  } catch {
-    return []
-  }
-}
-
-const writeRequests = (items: ReceiptRequest[]) => {
-  try {
-    localStorage.setItem(requestsKey, JSON.stringify(items))
-  } catch {
-    /* quota exceeded — the in-memory list still renders this session */
-  }
-}
-
-export const receiptRequestsApi = {
-  list(): ReceiptRequest[] {
-    return readRequests()
-  },
-  save(items: ReceiptRequest[]) {
-    writeRequests(items)
-  },
-  /** API-first refresh; falls back to the local cache when offline or in demo mode. */
-  async refresh(): Promise<ReceiptRequest[]> {
-    if (!isRemoteMail()) return this.list()
-    try {
-      const result = await apiFetch<{ requests: RequestRow[] }>('/api/receipt-requests')
-      const next = (result.requests ?? []).map((row) => ({ ...row }))
-      writeRequests(next)
-      return next
-    } catch {
-      return this.list()
-    }
-  },
-  wasRequested(mailId: string): boolean {
-    return this.list().some((request) => request.mailId === mailId)
-  },
-  async request(mailId: string, recipient: string): Promise<ReceiptRequest> {
-    const record: ReceiptRequest = {
-      id: `request-${Date.now()}`,
-      mailId,
-      recipient,
-      at: new Date().toISOString(),
-    }
-    if (isRemoteMail()) {
-      try {
-        const row = await apiFetch<RequestRow>('/api/receipt-requests', {
-          method: 'POST',
-          body: JSON.stringify({ mailId, recipient }),
-        })
-        const next = [row, ...this.list().filter((item) => item.mailId !== mailId)]
-        writeRequests(next)
-        return row
-      } catch {
-        // Offline: keep the local request so the UI still reflects it.
-      }
-    }
-    writeRequests([record, ...this.list()])
-    return record
-  },
-}
+command=${1:-help}
+case "$command" in
+    help|-h|--help)
+        usage
+        ;;
+    deploy)
+        [ "$#" -le 2 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/deploy-from-git.sh" "${2:-main}"
+        ;;
+    deploy-current)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/deploy.sh" "$CS_MAIL_ENV_FILE"
+        ;;
+    preflight|status|backup|restore-drill|show-config)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/$command.sh" "$CS_MAIL_ENV_FILE"
+        ;;
+    record-backup-proof)
+        [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/record-backup-proof.sh" "$2" "$3" "$CS_MAIL_ENV_FILE"
+        ;;
+    launch-freeze)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/freeze-launch.sh" "$CS_MAIL_ENV_FILE" "$CS_MAIL_CERT_ENV_FILE"
+        ;;
+    bootstrap-admin)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        run_root "$PROJECT_ROOT/deploy/production/bootstrap-first-admin.sh" "$2"
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
