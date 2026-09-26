@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use crate::metrics::Metrics;
 use crate::middleware::rate_limit::RateLimiter;
 use crate::services::provisioning::ProvisioningService;
+use crate::services::object_storage::ObjectStore;
 use crate::services::stalwart::StalwartService;
 use crate::services::mailer::MailerClient;
 use crate::ws::EventHub;
@@ -15,6 +16,7 @@ use crate::ws::EventHub;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub db_capacity_bytes: u64,
     pub environment: String,
     pub release_sha256: String,
     pub jwt_secret: String,
@@ -50,6 +52,7 @@ pub struct AppState {
     pub schedule_max_attempts: i32,
     pub schedule_batch_size: i64,
     pub attachment_store_dir: PathBuf,
+    pub object_store: ObjectStore,
     pub attachment_staging_quota_bytes: u64,
     pub attachment_upload_ttl_secs: u64,
     pub attachment_draft_ttl_secs: u64,

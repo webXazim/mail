@@ -21,6 +21,7 @@ use cs_mail_api::metrics::Metrics;
 use cs_mail_api::middleware::rate_limit::RateLimiter;
 use cs_mail_api::router::build_router;
 use cs_mail_api::services::provisioning::ProvisioningService;
+use cs_mail_api::services::object_storage::ObjectStore;
 use cs_mail_api::services::smtp::SmtpConfig;
 use cs_mail_api::services::stalwart::{StalwartConfig, StalwartService};
 use cs_mail_api::state::AppState;
@@ -50,8 +51,12 @@ async fn test_app() -> Option<TestApp> {
     sqlx::query("UPDATE platform_controls SET public_signup_enabled=TRUE, business_creation_enabled=TRUE, plan_ordering_enabled=TRUE, domain_onboarding_enabled=TRUE, mailbox_provisioning_enabled=TRUE, outbound_sending_enabled=TRUE WHERE singleton=TRUE")
         .execute(&db).await.expect("enable isolated test lifecycle");
 
+    let attachment_store_dir = std::env::temp_dir().join(format!("cs-mail-api-flows-{}", Uuid::new_v4()));
+    let object_store = ObjectStore::new(attachment_store_dir.clone(), "local", None).expect("build local object store");
+
     let state = AppState {
         db: db.clone(),
+        db_capacity_bytes: 20 * 1024 * 1024 * 1024,
         environment: "test".into(),
         release_sha256: "test".into(),
         jwt_secret: "integration-test-secret".into(),
@@ -110,10 +115,8 @@ async fn test_app() -> Option<TestApp> {
         schedule_retry_base_secs: 1,
         schedule_max_attempts: 3,
         schedule_batch_size: 10,
-        attachment_store_dir: std::env::temp_dir().join(format!(
-            "cs-mail-api-flows-{}",
-            Uuid::new_v4()
-        )),
+        attachment_store_dir,
+        object_store,
         attachment_staging_quota_bytes: 1024 * 1024 * 1024,
         attachment_upload_ttl_secs: 86_400,
         attachment_draft_ttl_secs: 2_592_000,

@@ -486,10 +486,17 @@ pub async fn delete(
         "SELECT user_id FROM mailboxes WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL FOR UPDATE",
     ).bind(mailbox_id).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     let (user_id,)=row.ok_or_else(|| ApiError::not_found("Mailbox not found"))?;
-    let used_by_address: bool=sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM business_address_members WHERE mailbox_id=$1)",
-    ).bind(mailbox_id).fetch_one(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    if used_by_address { return Err(ApiError::conflict("Remove this mailbox from aliases/groups before deleting it")); }
+    let affected_addresses: Vec<Uuid> = sqlx::query_scalar("SELECT business_address_id FROM business_address_members WHERE mailbox_id=$1 FOR UPDATE")
+        .bind(mailbox_id).fetch_all(&mut *tx).await.map_err(|e|ApiError::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM business_address_members WHERE mailbox_id=$1").bind(mailbox_id).execute(&mut *tx).await.map_err(|e|ApiError::internal(e.to_string()))?;
+    for address_id in &affected_addresses {
+        let remaining:i64=sqlx::query_scalar("SELECT count(*)::bigint FROM business_address_members WHERE business_address_id=$1").bind(address_id).fetch_one(&mut *tx).await.map_err(|e|ApiError::internal(e.to_string()))?;
+        if remaining==0 {
+            sqlx::query("UPDATE business_addresses SET deleted_at=COALESCE(deleted_at,now()),enabled=FALSE,sync_status='pending',sync_error='',next_attempt_at=now(),updated_at=now() WHERE id=$1").bind(address_id).execute(&mut *tx).await.map_err(|e|ApiError::internal(e.to_string()))?;
+        } else {
+            sqlx::query("UPDATE business_addresses SET sync_status='pending',sync_error='',next_attempt_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL").bind(address_id).execute(&mut *tx).await.map_err(|e|ApiError::internal(e.to_string()))?;
+        }
+    }
     sqlx::query("UPDATE mailbox_invitations SET status='revoked',revoked_at=now(),updated_at=now() WHERE mailbox_id=$1 AND status='pending'")
         .bind(mailbox_id).execute(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
     sqlx::query("UPDATE mailboxes SET status='deleting',updated_at=now() WHERE id=$1")
@@ -497,6 +504,9 @@ pub async fn delete(
     if let Some(user_id)=user_id {
         sqlx::query(
             "UPDATE users SET
+               mail_account_id=CASE WHEN primary_mailbox_id=$2 THEN '' ELSE mail_account_id END,
+               mail_sync_status=CASE WHEN primary_mailbox_id=$2 THEN 'none' ELSE mail_sync_status END,
+               mail_sync_error=CASE WHEN primary_mailbox_id=$2 THEN '' ELSE mail_sync_error END,
                primary_mailbox_id=CASE WHEN primary_mailbox_id=$2 THEN NULL ELSE primary_mailbox_id END,
                active_mailbox_id=CASE WHEN active_mailbox_id=$2 THEN NULL ELSE active_mailbox_id END,
                updated_at=now()

@@ -8,6 +8,7 @@ use cs_mail_api::router::build_router;
 use cs_mail_api::services::provisioning::{self, ProvisioningService};
 use cs_mail_api::services::stalwart::{StalwartConfig, StalwartService};
 use cs_mail_api::services::mailer::MailerClient;
+use cs_mail_api::services::object_storage::{ObjectStore, R2Config};
 use cs_mail_api::state::AppState;
 use cs_mail_api::ws::{spawn_realtime, EventHub};
 use sqlx::postgres::PgPoolOptions;
@@ -62,8 +63,23 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::fs::create_dir_all(&config.attachment_store_dir).await?;
 
+    let object_store = ObjectStore::new(
+        config.attachment_store_dir.clone(),
+        &config.object_storage_backend,
+        (config.object_storage_backend == "r2").then(|| R2Config {
+            account_id: config.r2_account_id.clone(), bucket: config.r2_bucket.clone(),
+            access_key_id: config.r2_access_key_id.clone(), secret_access_key: config.r2_secret_access_key.clone(),
+            endpoint: config.r2_endpoint.clone(), region: config.r2_region.clone(), prefix: config.r2_prefix.clone(),
+            request_timeout_secs: config.r2_request_timeout_secs,
+            max_concurrent_transfers: config.r2_max_concurrent_transfers,
+        }),
+    ).map_err(anyhow::Error::msg)?;
+    object_store.healthcheck().await.map_err(anyhow::Error::msg)?;
+    tracing::info!(backend = object_store.active_backend(), "attachment object storage ready");
+
     let state = AppState {
         db: pool.clone(),
+        db_capacity_bytes: config.db_capacity_bytes,
         environment: config.environment.clone(),
         release_sha256: config.release_sha256.clone(),
         jwt_secret: config.jwt_secret.clone(),
@@ -121,6 +137,7 @@ async fn main() -> anyhow::Result<()> {
         schedule_max_attempts: config.schedule_max_attempts,
         schedule_batch_size: config.schedule_batch_size,
         attachment_store_dir: config.attachment_store_dir.clone(),
+        object_store,
         attachment_staging_quota_bytes: config.attachment_staging_quota_bytes,
         attachment_upload_ttl_secs: config.attachment_upload_ttl_secs,
         attachment_draft_ttl_secs: config.attachment_draft_ttl_secs,
@@ -254,6 +271,68 @@ fn spawn_maintenance(state: AppState) {
             .await
             {
                 tracing::warn!("sender-identity verification clean-up failed: {e}");
+            }
+
+            // Operational rate-limit rows are useful for short-term diagnostics,
+            // not permanent history. Bound them so a busy SaaS cannot grow one
+            // database row per mailbox/domain/hour forever.
+            for (label, query) in [
+                ("legacy daily send counters", "DELETE FROM send_counters WHERE day < current_date - 90"),
+                ("domain daily send counters", "DELETE FROM send_domain_counters WHERE day < current_date - 90"),
+                ("mailbox daily send counters", "DELETE FROM mailbox_send_counters WHERE day < current_date - 90"),
+                ("organization daily send counters", "DELETE FROM organization_send_counters WHERE day < current_date - 90"),
+                ("mailbox hourly send counters", "DELETE FROM mailbox_send_hourly_counters WHERE hour_start < now() - interval '30 days'"),
+                ("organization hourly send counters", "DELETE FROM organization_send_hourly_counters WHERE hour_start < now() - interval '30 days'"),
+                ("domain hourly send counters", "DELETE FROM domain_send_hourly_counters WHERE hour_start < now() - interval '30 days'"),
+            ] {
+                if let Err(e) = sqlx::query(query).execute(&state.db).await {
+                    tracing::warn!(cleanup = label, "operational counter clean-up failed: {e}");
+                }
+            }
+
+            // Dismissed notifications are UI history, while read notifications
+            // older than one year no longer need to consume the primary DB.
+            if let Err(e) = sqlx::query(
+                "DELETE FROM user_notifications
+                 WHERE (dismissed_at IS NOT NULL AND dismissed_at < now() - interval '90 days')
+                    OR (dismissed_at IS NULL AND read_at IS NOT NULL AND read_at < now() - interval '365 days')",
+            )
+            .execute(&state.db)
+            .await
+            {
+                tracing::warn!("notification history clean-up failed: {e}");
+            }
+
+            // MBOX import ledgers can contain one row per imported message. Once
+            // an import is long finished, the provider mailbox is authoritative;
+            // keeping the crash-recovery ledger forever would dominate Postgres.
+            let old_imports: Vec<(uuid::Uuid, String)> = sqlx::query_as(
+                "SELECT id,storage_key FROM mailbox_imports
+                 WHERE (status='completed' AND completed_at < now() - interval '30 days')
+                    OR (status IN ('failed','cancelled') AND completed_at < now() - interval '90 days')
+                 ORDER BY completed_at NULLS LAST LIMIT 500",
+            )
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+            for (import_id, storage_key) in old_imports {
+                if let Ok(path) = state.object_store.local_path(&storage_key) {
+                    match tokio::fs::remove_file(path).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => {
+                            tracing::warn!(%import_id, %error, "mail import archive clean-up deferred");
+                            continue;
+                        }
+                    }
+                }
+                if let Err(e) = sqlx::query("DELETE FROM mailbox_imports WHERE id=$1")
+                    .bind(import_id)
+                    .execute(&state.db)
+                    .await
+                {
+                    tracing::warn!(%import_id, "mail import ledger clean-up failed: {e}");
+                }
             }
         }
     });

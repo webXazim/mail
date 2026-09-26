@@ -19,6 +19,8 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     pub database_url: String,
     pub db_max_connections: u32,
+    /// Operator-declared PostgreSQL planning capacity for monitoring/headroom alerts (minimum 1 GiB).
+    pub db_capacity_bytes: u64,
     pub jwt_secret: String,
     pub jwt_access_ttl_secs: u64,
     pub jwt_refresh_ttl_secs: u64,
@@ -99,9 +101,19 @@ pub struct Config {
     pub schedule_retry_base_secs: u64,
     pub schedule_max_attempts: i32,
     pub schedule_batch_size: i64,
-    /// Persistent staged-attachment storage. Bytes live here; PostgreSQL stores
-    /// ownership/integrity/reference metadata only.
+    /// Local attachment/import spool. Attachment blobs may be committed to R2.
     pub attachment_store_dir: PathBuf,
+    pub object_storage_backend: String,
+    pub r2_account_id: String,
+    pub r2_bucket: String,
+    pub r2_access_key_id: String,
+    pub r2_secret_access_key: String,
+    pub r2_endpoint: String,
+    pub r2_region: String,
+    pub r2_prefix: String,
+    pub r2_request_timeout_secs: u64,
+    /// Bounds concurrent R2 uploads/downloads so large attachments cannot exhaust API memory.
+    pub r2_max_concurrent_transfers: usize,
     /// Per-user on-disk staging budget across uploads/drafts/scheduled mail.
     pub attachment_staging_quota_bytes: u64,
     /// Lifetime of an unattached upload before cleanup.
@@ -254,6 +266,7 @@ impl Config {
             cors_origins,
             database_url,
             db_max_connections: env_or("CS_MAIL_DB_MAX_CONNECTIONS", "10").parse()?,
+            db_capacity_bytes: env_or("CS_MAIL_DB_CAPACITY_BYTES", "21474836480").parse()?,
             jwt_secret,
             jwt_access_ttl_secs: env_or("CS_MAIL_JWT_ACCESS_TTL_SECS", "900").parse()?,
             jwt_refresh_ttl_secs: env_or("CS_MAIL_JWT_REFRESH_TTL_SECS", "2592000").parse()?,
@@ -351,6 +364,16 @@ impl Config {
                 "CS_MAIL_ATTACHMENT_STORE_DIR",
                 "/srv/attachments",
             )),
+            object_storage_backend: env_non_empty_or("CS_MAIL_OBJECT_STORAGE_BACKEND", "local").to_ascii_lowercase(),
+            r2_account_id: env_or("CS_MAIL_R2_ACCOUNT_ID", "").trim().to_string(),
+            r2_bucket: env_or("CS_MAIL_R2_BUCKET", "").trim().to_string(),
+            r2_access_key_id: env_or("CS_MAIL_R2_ACCESS_KEY_ID", "").trim().to_string(),
+            r2_secret_access_key: env_or("CS_MAIL_R2_SECRET_ACCESS_KEY", "").trim().to_string(),
+            r2_endpoint: env_or("CS_MAIL_R2_ENDPOINT", "").trim().trim_end_matches('/').to_string(),
+            r2_region: env_non_empty_or("CS_MAIL_R2_REGION", "auto"),
+            r2_prefix: env_non_empty_or("CS_MAIL_R2_PREFIX", "cs-mail/attachments").trim_matches('/').to_string(),
+            r2_request_timeout_secs: env_or("CS_MAIL_R2_REQUEST_TIMEOUT_SECS", "30").parse().unwrap_or(30),
+            r2_max_concurrent_transfers: env_or("CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS", "4").parse()?,
             attachment_staging_quota_bytes: env_or(
                 "CS_MAIL_ATTACHMENT_STAGING_QUOTA_BYTES",
                 "1073741824",
@@ -385,9 +408,25 @@ impl Config {
     }
 
     fn validate_runtime_profile(&self) -> anyhow::Result<()> {
-        if self.environment != "production" {
-            return Ok(());
+        if self.db_capacity_bytes < 1024 * 1024 * 1024 {
+            return Err(anyhow::anyhow!("CS_MAIL_DB_CAPACITY_BYTES must be at least 1 GiB"));
         }
+        if !matches!(self.object_storage_backend.as_str(), "local" | "r2") {
+            return Err(anyhow::anyhow!("CS_MAIL_OBJECT_STORAGE_BACKEND must be local or r2"));
+        }
+        if self.object_storage_backend == "r2" {
+            if self.r2_account_id.trim().is_empty() || self.r2_bucket.trim().is_empty()
+                || self.r2_access_key_id.trim().is_empty() || self.r2_secret_access_key.trim().is_empty() {
+                return Err(anyhow::anyhow!("R2 storage requires account id, bucket, access key id and secret access key"));
+            }
+            if !self.r2_endpoint.is_empty() && !self.r2_endpoint.starts_with("https://") {
+                return Err(anyhow::anyhow!("CS_MAIL_R2_ENDPOINT must use HTTPS"));
+            }
+            if !(1..=16).contains(&self.r2_max_concurrent_transfers) {
+                return Err(anyhow::anyhow!("CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS must be between 1 and 16"));
+            }
+        }
+        if self.environment != "production" { return Ok(()); }
 
         if self.release_sha256.len() != 64 || !self.release_sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(anyhow::anyhow!(

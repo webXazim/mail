@@ -11,7 +11,7 @@
 .business-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: calc(100vh - 150px); border-top: 1px solid var(--cs-mail-line); }
 .business-list { padding: 18px 14px; border-right: 1px solid var(--cs-mail-line); background: var(--cs-mail-panel); }
 .business-list__item { width: 100%; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 0; background: transparent; color: var(--cs-mail-copy); text-align: left; cursor: pointer; }
-.business-list__item:hover, .business-list__item--active { background: var(--cs-mail-ink-2); }
+.business-list__item:hover, .business-list__item--active { background: var(--cs-mail-panel-soft); }
 .business-list__item span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
 .business-list__item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .business-list__item small, .business-row small { color: var(--cs-mail-muted); }
@@ -152,4 +152,202 @@
   .business-storage-editor { justify-self: stretch; }
   .business-storage-editor > div { flex-wrap: wrap; }
   .business-storage-pool > div:first-child { display: grid; gap: 4px; }
+}
+
+/* Upgrade 36 — production business form system */
+.business-page input:not([type='checkbox']):not([type='radio']),
+.business-page select,
+.business-page textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--cs-mail-line-strong, var(--cs-mail-line));
+  border-radius: var(--cs-mail-radius);
+  background: var(--cs-mail-panel-soft);
+  color: var(--cs-mail-copy);
+  caret-color: var(--cs-mail-accent);
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+.business-page textarea {
+  min-height: 96px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  resize: vertical;
+}
+.business-page input:not([type='checkbox']):not([type='radio'])::placeholder,
+.business-page textarea::placeholder { color: var(--cs-mail-muted); opacity: .68; }
+.business-page input:not([type='checkbox']):not([type='radio']):hover,
+.business-page select:hover,
+.business-page textarea:hover { border-color: var(--cs-mail-muted); }
+.business-page input:not([type='checkbox']):not([type='radio']):focus,
+.business-page select:focus,
+.business-page textarea:focus {
+  border-color: var(--cs-mail-accent);
+  background: var(--cs-mail-panel-raised);
+}
+.business-page input:not([type='checkbox']):not([type='radio']):disabled,
+.business-page select:disabled,
+.business-page textarea:disabled { opacity: .55; cursor: not-allowed; }
+.business-page select { padding-right: 34px; font: inherit; }
+.business-page select[multiple] { min-height: 104px; padding: 7px 8px; }
+.business-page select[multiple] option { padding: 7px 8px; }
+
+.business-form-panel {
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--cs-mail-line);
+  background: var(--cs-mail-panel);
+}
+.business-field { min-width: 0; display: grid; align-content: start; gap: 7px; }
+.business-field > label,
+.business-form-panel label {
+  margin: 0;
+  color: var(--cs-mail-copy);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.business-field__hint {
+  min-height: 16px;
+  color: var(--cs-mail-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.business-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.business-form-actions .primary-button,
+.business-form-actions .secondary-button { min-height: 42px; }
+
+.business-address-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, max-content);
+  align-items: stretch;
+}
+.business-address-control > input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.business-address-control > select {
+  width: auto;
+  max-width: 260px;
+  border-left-color: var(--cs-mail-line);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.business-address-control:focus-within > input,
+.business-address-control:focus-within > select { border-color: var(--cs-mail-accent); }
+
+.business-input-suffix {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+.business-input-suffix > input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.business-input-suffix > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0 10px;
+  border: 1px solid var(--cs-mail-line-strong, var(--cs-mail-line));
+  border-left: 0;
+  border-radius: 0 var(--cs-mail-radius) var(--cs-mail-radius) 0;
+  background: var(--cs-mail-panel-raised, var(--cs-mail-panel));
+  color: var(--cs-mail-muted);
+  font-family: var(--cs-mail-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.business-input-suffix:focus-within > input,
+.business-input-suffix:focus-within > span { border-color: var(--cs-mail-accent); }
+.business-input-suffix--compact { width: 116px; flex: 0 0 116px; }
+.business-input-suffix--compact > input { width: 100%; }
+
+.business-mailbox-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(250px, .9fr);
+  gap: 14px 18px;
+  align-items: start;
+}
+.business-mailbox-form__actions { grid-column: 1 / -1; padding-top: 2px; }
+
+.business-address-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(150px, .55fr);
+  gap: 14px 18px;
+  align-items: start;
+}
+.business-address-form__destinations { grid-column: 1 / -1; }
+.business-address-form__actions { grid-column: 1 / -1; }
+.business-multi-select { overflow-y: auto; }
+
+.business-team-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.35fr) minmax(180px, .65fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+.business-team-form > .business-form-actions { align-self: end; padding-bottom: 22px; }
+
+.business-domain-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+}
+.business-domain-form > .business-form-actions { align-self: end; padding-bottom: 22px; }
+
+.business-create label { color: var(--cs-mail-copy); font-weight: 650; }
+.business-create > div { grid-template-columns: minmax(0,1fr) 42px; gap: 8px; }
+.business-create .icon-button { width: 42px; height: 42px; border-color: var(--cs-mail-line); background: var(--cs-mail-panel-soft); }
+.business-create .icon-button:hover { border-color: var(--cs-mail-accent); color: var(--cs-mail-accent); }
+
+.business-storage-editor { min-width: 0; }
+.business-storage-editor > label { color: var(--cs-mail-copy); font-size: 10px; font-weight: 650; }
+.business-storage-editor > div { justify-content: flex-end; }
+.business-storage-editor input { width: 100%; min-height: 36px; }
+.business-storage-editor .business-input-suffix > span { min-width: 38px; padding-inline: 7px; }
+.business-storage-editor .secondary-button { min-height: 36px; }
+
+.business-mailbox-help {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--cs-mail-line-strong, var(--cs-mail-line));
+  background: var(--cs-mail-panel);
+}
+.business-mailbox-notice {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--cs-mail-line-strong, var(--cs-mail-line));
+  background: var(--cs-mail-panel);
+}
+
+@media (max-width: 900px) {
+  .business-mailbox-form,
+  .business-address-form { grid-template-columns: 1fr; }
+  .business-mailbox-form__actions,
+  .business-address-form__destinations,
+  .business-address-form__actions { grid-column: auto; }
+  .business-team-form { grid-template-columns: 1fr 180px; }
+  .business-team-form > .business-form-actions { grid-column: 1 / -1; padding-bottom: 0; }
+}
+
+@media (max-width: 640px) {
+  .business-form-panel { padding: 13px; }
+  .business-address-control { grid-template-columns: minmax(0, 1fr) minmax(130px, 42%); }
+  .business-address-control > select { max-width: none; }
+  .business-team-form,
+  .business-domain-form { grid-template-columns: 1fr; }
+  .business-team-form > .business-form-actions,
+  .business-domain-form > .business-form-actions { grid-column: auto; padding-bottom: 0; }
+  .business-form-actions { justify-content: stretch; }
+  .business-form-actions .primary-button,
+  .business-form-actions .secondary-button { width: 100%; }
+  .business-storage-editor > div { justify-content: flex-start; }
 }

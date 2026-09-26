@@ -20,6 +20,7 @@ Production commands (run from the CS Mail checkout):
   deploy-current        Deploy the checked-out commit without pulling
   preflight             Validate production environment and dependencies
   status                Show release, containers, and health checks
+  capacity              Show PostgreSQL, tenant, spool, and disk capacity
   backup                Back up the database and attachments
   restore-drill         Verify and restore the latest backup in a test database
   record-backup-proof TYPE FILE
@@ -71,7 +72,7 @@ case "$command" in
         [ "$#" -eq 1 ] || { usage >&2; exit 2; }
         run_root bash "$PROJECT_ROOT/deploy/production/deploy.sh" "$CS_MAIL_ENV_FILE"
         ;;
-    preflight|status|backup|restore-drill|show-config)
+    preflight|status|capacity|backup|restore-drill|show-config)
         [ "$#" -eq 1 ] || { usage >&2; exit 2; }
         run_root bash "$PROJECT_ROOT/deploy/production/$command.sh" "$CS_MAIL_ENV_FILE"
         ;;

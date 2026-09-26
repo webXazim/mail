@@ -82,7 +82,7 @@ See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/P
 ## Platform state
 
 API contract: **v32**  
-Migration head: **0049_provisioning_operation_constraint_repair.sql**
+Migration head: **0050_r2_attachment_storage.sql**
 
 The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. The public Nginx vhost returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI only through an SSH tunnel to `127.0.0.1:18081`.
 
@@ -107,3 +107,7 @@ Upgrade 03 adds an operator-visible billing lifecycle health surface, durable re
 ## Latest production hardening
 
 See `UPGRADE_05_PUBLIC_LAUNCH_FREEZE.md` for the final public-launch freeze: exact-release runtime identity, strict production configuration, append-only backup/restore/offsite evidence, blocking quality gates and the closed-controls opening sequence. `UPGRADE_04_PRODUCTION_LAUNCH_VERIFICATION.md` documents the preceding readiness/monitoring layer.
+
+## Capacity and storage
+
+Production separates PostgreSQL metadata from object/mail blobs. Use `sh manage capacity` to report PostgreSQL utilization, largest relations, tenant/mailbox counts, local spool use and host disk headroom. A 20 GiB PostgreSQL planning capacity should normally stay below ~14 GiB (70%); 85% is critical. Cloudflare R2 for CS Mail attachments does not move Stalwart message bodies—configure Stalwart's S3-compatible Blob Store separately for R2 before selling multi-gigabyte mailbox quotas from a small VPS. See `docs/CAPACITY.md` and `docs/R2_STORAGE.md`.

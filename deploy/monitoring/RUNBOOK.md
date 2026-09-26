@@ -55,3 +55,7 @@ locally fabricated manifest as a substitute for confirming the remote backup
 object/snapshot. During an actual restore incident, preserve the evidence and
 restore into an isolated target first unless the incident runbook explicitly
 requires an in-place recovery.
+
+## Database capacity
+
+`CSMailDatabaseCapacityWarning` fires at 70% of the operator-declared `CS_MAIL_DB_CAPACITY_BYTES`; `CSMailDatabaseCapacityCritical` fires at 85%. Run `sh manage capacity` and inspect the largest relations. Do not raise the declared capacity merely to silence the alert unless the underlying PostgreSQL volume actually has that durable space. Keep normal utilization below roughly 70% so VACUUM, indexes, migrations, WAL/temp work and recovery have headroom. If growth is legitimate, expand/migrate PostgreSQL before increasing tenant/mailbox limits.

@@ -35,7 +35,8 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
+EXPECTED_MIGRATION = "0050_r2_attachment_storage.sql"
+PROVISIONING_REPAIR_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
 LAUNCH_FREEZE_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
 DEFAULT_PUBLIC_ORIGIN = "https://mail.crescentsphere.com"
@@ -130,6 +131,7 @@ def dig(name: str, record: str) -> list[str]:
 def check_static(root: Path) -> str:
     required = [
         root / "backend/migrations" / EXPECTED_MIGRATION,
+        root / "backend/migrations" / PROVISIONING_REPAIR_MIGRATION,
         root / "backend/migrations" / SAFETY_MIGRATION,
         root / "deploy/production/docker-compose.yml",
         root / "deploy/production/nginx-mail.crescentsphere.com.conf",
@@ -141,6 +143,9 @@ def check_static(root: Path) -> str:
         root / "deploy/production/deploy-from-git.sh",
         root / "deploy/production/bootstrap-vps.sh",
         root / "deploy/production/verify-release.sh",
+        root / "deploy/production/capacity-report.sh",
+        root / "docs/CAPACITY.md",
+        root / "docs/R2_STORAGE.md",
         root / "deploy/production/CONFIGURATION.md",
                 root / "deploy/production/validate-env.py",
         root / "deploy/production/setup-web-tls.sh",
@@ -293,7 +298,7 @@ def check_static(root: Path) -> str:
         raise GateError("subscription expiration/grace lifecycle worker is incomplete")
     recovery_migration = (root / "backend/migrations/0047_billing_recovery_operations.sql").read_text()
     launch_freeze_migration = (root / "backend/migrations" / LAUNCH_FREEZE_MIGRATION).read_text()
-    provisioning_repair_migration = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    provisioning_repair_migration = (root / "backend/migrations" / PROVISIONING_REPAIR_MIGRATION).read_text()
     if ("set_access" not in provisioning_repair_migration
             or "provisioning_jobs_operation_check" not in provisioning_repair_migration
             or "set_quota" not in provisioning_repair_migration
@@ -452,8 +457,11 @@ def check_static(root: Path) -> str:
             or "CSMailProviderReconciliationStale" not in monitoring_rules
             or "CSMailLocalBackupStale" not in monitoring_rules
             or "CSMailRestoreDrillStale" not in monitoring_rules
-            or "CSMailOffsiteBackupStale" not in monitoring_rules):
-        raise GateError("durable billing/provider/recoverability metrics and alerts are required")
+            or "CSMailOffsiteBackupStale" not in monitoring_rules
+            or "CSMailDatabaseCapacityWarning" not in monitoring_rules
+            or "CSMailDatabaseCapacityCritical" not in monitoring_rules
+            or "cs_mail_database_capacity_ratio" not in metrics_handler):
+        raise GateError("durable billing/provider/recoverability/capacity metrics and alerts are required")
     config_rs = (root / "backend/src/config.rs").read_text()
     env_example = (root / "deploy/production/.env.production.example").read_text()
     backup_script = (root / "deploy/production/backup.sh").read_text()
@@ -485,6 +493,10 @@ def check_static(root: Path) -> str:
         raise GateError("production environment example must pin production profile and payment-approved activation")
     if "operational_evidence" not in backup_script or "operational_evidence" not in restore_script:
         raise GateError("backup and restore drill must write durable operational evidence")
+    if ("object_storage_backend=" not in backup_script
+            or "r2_objects_in_local_archive=false" not in backup_script
+            or "r2_recovery_scope=external-offsite-proof-required" not in backup_script):
+        raise GateError("local backup manifest must make external R2 recovery scope explicit")
     if "cs_mail_offsite_backup" not in proof_script or "stalwart_offsite_backup" not in proof_script:
         raise GateError("offsite backup proof recorder must cover CS Mail and shared Stalwart data")
     for freeze_token in ("certify-launch.sh", "public_signup_enabled", "cs_mail_offsite_backup", "stalwart_offsite_backup", "instant billing activation must be false", "PUBLIC LAUNCH FREEZE PASS"):
@@ -500,7 +512,40 @@ def check_static(root: Path) -> str:
     main_rs = (root / "backend/src/main.rs").read_text()
     if "reconcile_test_instant_orders(&state).await?" not in main_rs:
         raise GateError("API startup must repair eligible pre-fix open invoices when acceptance-test instant activation is enabled")
-    return "contract v34, migration 0049, acceptance-test suspended-service reactivation and legacy invoice repair, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+
+    # Upgrade 36: a small control-plane VPS must have bounded object-transfer
+    # concurrency, bounded high-churn metadata, and operator-visible DB headroom.
+    object_storage_rs = (root / "backend/src/services/object_storage.rs").read_text()
+    capacity_script = (root / "deploy/production/capacity-report.sh").read_text()
+    manage_script = (root / "manage").read_text()
+    capacity_doc = (root / "docs/CAPACITY.md").read_text()
+    if ("CS_MAIL_DB_CAPACITY_BYTES" not in config_rs
+            or "CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS" not in config_rs
+            or "CS_MAIL_DB_CAPACITY_BYTES" not in compose
+            or "CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS" not in compose
+            or "CS_MAIL_DB_CAPACITY_BYTES=21474836480" not in env_example
+            or "CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS=4" not in env_example):
+        raise GateError("production capacity/R2 concurrency settings are not wired end-to-end")
+    if ("Semaphore" not in object_storage_rs
+            or "max_concurrent_transfers" not in object_storage_rs
+            or "transfer_limit.acquire()" not in object_storage_rs
+            or "put_file" not in object_storage_rs):
+        raise GateError("R2 object transfers must remain concurrency-bounded and upload staged files through the bounded path")
+    for retention_token in (
+        "mailbox daily send counters",
+        "mailbox hourly send counters",
+        "notification history clean-up failed",
+        "mail import ledger clean-up failed",
+    ):
+        if retention_token not in main_rs:
+            raise GateError(f"bounded metadata housekeeping is missing: {retention_token}")
+    if ("pg_database_size(current_database())" not in capacity_script
+            or "Largest PostgreSQL tables/indexes" not in capacity_script
+            or "capacity|backup" not in manage_script
+            or "20 GiB PostgreSQL operating envelope" not in capacity_doc
+            or "Stalwart mailbox storage" not in capacity_doc):
+        raise GateError("capacity reporting/documentation is incomplete")
+    return "contract v36, migration 0050, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

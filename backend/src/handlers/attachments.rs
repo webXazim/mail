@@ -93,6 +93,7 @@ struct StoredAttachment {
     byte_size: i64,
     sha256_hex: String,
     storage_key: String,
+    storage_backend: String,
     #[allow(dead_code)]
     status: String,
     #[allow(dead_code)]
@@ -335,9 +336,9 @@ async fn reserve_upload(
     sqlx::query(
         "INSERT INTO staged_attachments
            (id, user_id, mailbox_id, filename, content_type, byte_size, reserved_bytes,
-            storage_key, status, expires_at)
-         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'uploading',
-                 now() + ($8 * interval '1 second'))",
+            storage_key, storage_backend, status, expires_at)
+         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'uploading',
+                 now() + ($9 * interval '1 second'))",
     )
     .bind(id)
     .bind(user_id)
@@ -346,6 +347,7 @@ async fn reserve_upload(
     .bind(content_type)
     .bind(reserve_bytes)
     .bind(key)
+    .bind(state.object_store.active_backend())
     .bind(state.attachment_upload_ttl_secs as i64)
     .execute(&mut *tx)
     .await
@@ -499,12 +501,20 @@ pub async fn upload(
         return Err(ApiError::internal(format!("Attachment finalize failed: {e}")));
     }
 
+    let storage_backend = match state.object_store.commit_local_file(&key, &final_path, &content_type).await {
+        Ok(backend) => backend,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&final_path).await;
+            remove_upload_row(&state, id, mailbox_id).await;
+            return Err(ApiError::internal(format!("Attachment object storage failed: {error}")));
+        }
+    };
     let sha256_hex = format!("{:x}", digest.finalize());
     let meta: AttachmentMeta = sqlx::query_as(
         "UPDATE staged_attachments
-            SET byte_size = $3, reserved_bytes = $3, sha256_hex = $4,
+            SET byte_size = $3, reserved_bytes = $3, sha256_hex = $4, storage_backend=$5,
                 status = 'ready', updated_at = now(),
-                expires_at = now() + ($5 * interval '1 second')
+                expires_at = now() + ($6 * interval '1 second')
           WHERE id = $1 AND mailbox_id = $2
           RETURNING id, filename, content_type, byte_size, sha256_hex, status, expires_at",
     )
@@ -512,6 +522,7 @@ pub async fn upload(
     .bind(mailbox_id)
     .bind(size as i64)
     .bind(sha256_hex)
+    .bind(storage_backend)
     .bind(state.attachment_upload_ttl_secs as i64)
     .fetch_one(&state.db)
     .await
@@ -528,7 +539,7 @@ pub async fn upload(
 
 async fn own_attachment(state: &AppState, mailbox_id: Uuid, id: Uuid) -> Result<StoredAttachment, ApiError> {
     sqlx::query_as::<_, StoredAttachment>(
-        "SELECT id, filename, content_type, byte_size, sha256_hex, storage_key, status, expires_at
+        "SELECT id, filename, content_type, byte_size, sha256_hex, storage_key, storage_backend, status, expires_at
          FROM staged_attachments WHERE id = $1 AND mailbox_id = $2 AND status IN ('ready','consumed')",
     )
     .bind(id)
@@ -548,22 +559,15 @@ pub async fn download(
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
     attachment_entitlements(&state, mailbox_id).await?;
     let item = own_attachment(&state, mailbox_id, id).await?;
-    let path = checked_path(&state, &item.storage_key)?;
-    let file = tokio::fs::File::open(path)
-        .await
-        .map_err(|_| ApiError::not_found("Attachment bytes are unavailable"))?;
-
-    let stream = stream::unfold(file, |mut file| async move {
-        let mut buffer = vec![0u8; IO_CHUNK_BYTES];
-        match file.read(&mut buffer).await {
-            Ok(0) => None,
-            Ok(n) => {
-                buffer.truncate(n);
-                Some((Ok::<Bytes, std::io::Error>(Bytes::from(buffer)), file))
-            }
-            Err(error) => Some((Err(error), file)),
-        }
-    });
+    let bytes = state.object_store.get_bytes(&item.storage_key, &item.storage_backend).await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("Attachment bytes are unavailable"))?;
+    if bytes.len() as i64 != item.byte_size {
+        return Err(ApiError::internal("Attachment size no longer matches stored metadata"));
+    }
+    if format!("{:x}", Sha256::digest(&bytes)) != item.sha256_hex {
+        return Err(ApiError::internal("Attachment integrity verification failed"));
+    }
 
     let ascii_name: String = item
         .filename
@@ -578,52 +582,23 @@ pub async fn download(
         .header(header::CONTENT_LENGTH, item.byte_size.to_string())
         .header(header::CONTENT_DISPOSITION, HeaderValue::from_str(&disposition).unwrap_or_else(|_| HeaderValue::from_static("attachment")))
         .header("x-content-type-options", "nosniff")
-        .body(Body::from_stream(stream))
+        .body(Body::from(bytes))
         .map_err(|e| ApiError::internal(e.to_string()))
 }
 
 pub async fn delete(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    Path(id): Path<Uuid>,
+    State(state): State<AppState>, auth: AuthUser, Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
     let mailbox_id = active_mailbox_id(&state, &auth).await?;
-    let row: Option<(String,)> = sqlx::query_as(
-        "DELETE FROM staged_attachments a
-         WHERE a.id = $1 AND a.mailbox_id = $2
-           AND NOT EXISTS (SELECT 1 FROM attachment_refs r WHERE r.attachment_id = a.id)
-         RETURNING a.storage_key",
-    )
-    .bind(id)
-    .bind(mailbox_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let Some((key,)) = row else {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM staged_attachments WHERE id = $1 AND mailbox_id = $2)",
-        )
-        .bind(id)
-        .bind(mailbox_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-        if exists {
-            return Err(ApiError::new(
-                StatusCode::CONFLICT,
-                "attachment_in_use",
-                "This attachment is still referenced by a draft or scheduled message",
-            ));
-        }
-        return Err(ApiError::not_found("Attachment not found"));
-    };
-
-    if let Ok(path) = checked_path(&state, &key) {
-        let _ = tokio::fs::remove_file(&path).await;
-        let _ = tokio::fs::remove_file(partial_path(&path)).await;
-    }
-    Ok(Json(json!({ "ok": true })))
+    let row: Option<(String,String,bool)> = sqlx::query_as(
+        "SELECT a.storage_key,a.storage_backend,EXISTS(SELECT 1 FROM attachment_refs r WHERE r.attachment_id=a.id) FROM staged_attachments a WHERE a.id=$1 AND a.mailbox_id=$2"
+    ).bind(id).bind(mailbox_id).fetch_optional(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let Some((key, backend, in_use)) = row else { return Err(ApiError::not_found("Attachment not found")); };
+    if in_use { return Err(ApiError::conflict("This attachment is still referenced by a draft or scheduled message")); }
+    state.object_store.delete(&key,&backend).await.map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM staged_attachments WHERE id=$1 AND mailbox_id=$2 AND NOT EXISTS(SELECT 1 FROM attachment_refs r WHERE r.attachment_id=$1)")
+        .bind(id).bind(mailbox_id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(json!({"ok":true})))
 }
 
 pub async fn resolve_refs(
@@ -719,7 +694,7 @@ pub async fn load_for_message(
 
     let ids = meta.iter().map(|item| item.id).collect::<Vec<_>>();
     let rows: Vec<StoredAttachment> = sqlx::query_as(
-        "SELECT id, filename, content_type, byte_size, sha256_hex, storage_key, status, expires_at
+        "SELECT id, filename, content_type, byte_size, sha256_hex, storage_key, storage_backend, status, expires_at
          FROM staged_attachments WHERE mailbox_id = $1 AND id = ANY($2)",
     )
     .bind(mailbox_id)
@@ -732,10 +707,9 @@ pub async fn load_for_message(
     let mut out = Vec::with_capacity(ids.len());
     for id in &ids {
         let item = by_id.get(id).ok_or_else(|| ApiError::bad_request("Attachment is unavailable"))?;
-        let path = checked_path(state, &item.storage_key)?;
-        let bytes = tokio::fs::read(path)
-            .await
-            .map_err(|_| ApiError::bad_request("Attachment bytes are unavailable; re-add the file"))?;
+        let bytes = state.object_store.get_bytes(&item.storage_key, &item.storage_backend).await
+            .map_err(ApiError::internal)?
+            .ok_or_else(|| ApiError::bad_request("Attachment bytes are unavailable; re-add the file"))?;
         if bytes.len() as i64 != item.byte_size {
             return Err(ApiError::internal("Attachment size no longer matches stored metadata"));
         }
@@ -841,33 +815,17 @@ pub async fn mark_consumed(state: &AppState, mailbox_id: Uuid, ids: &[Uuid]) {
 }
 
 async fn cleanup_once(state: &AppState) -> Result<usize, ApiError> {
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
-        "WITH doomed AS (
-           SELECT a.id
-           FROM staged_attachments a
-           WHERE a.expires_at <= now()
-             AND NOT EXISTS (SELECT 1 FROM attachment_refs r WHERE r.attachment_id = a.id)
-           ORDER BY a.expires_at
-           FOR UPDATE SKIP LOCKED
-           LIMIT $1
-         )
-         DELETE FROM staged_attachments a
-         USING doomed d
-         WHERE a.id = d.id
-         RETURNING a.id, a.storage_key",
-    )
-    .bind(CLEANUP_BATCH)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    for (_, key) in &rows {
-        if let Ok(path) = checked_path(state, key) {
-            let _ = tokio::fs::remove_file(&path).await;
-            let _ = tokio::fs::remove_file(partial_path(&path)).await;
-        }
+    let rows: Vec<(Uuid,String,String)> = sqlx::query_as(
+        "SELECT a.id,a.storage_key,a.storage_backend FROM staged_attachments a WHERE a.expires_at<=now() AND NOT EXISTS(SELECT 1 FROM attachment_refs r WHERE r.attachment_id=a.id) ORDER BY a.expires_at LIMIT $1"
+    ).bind(CLEANUP_BATCH).fetch_all(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let mut removed=0usize;
+    for (id,key,backend) in rows {
+        if let Err(error)=state.object_store.delete(&key,&backend).await { tracing::warn!(attachment_id=%id,%error,"attachment object cleanup deferred"); continue; }
+        let result=sqlx::query("DELETE FROM staged_attachments WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM attachment_refs r WHERE r.attachment_id=$1)")
+            .bind(id).execute(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        removed += result.rows_affected() as usize;
     }
-    Ok(rows.len())
+    Ok(removed)
 }
 
 pub fn spawn_cleanup_worker(state: AppState) {
@@ -904,21 +862,13 @@ async fn stage_legacy_bytes(
     )?;
     let id = Uuid::new_v4();
     let key = storage_key(mailbox_id, id);
-    let path = checked_path(state, &key)?;
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let storage_backend = state.object_store.put_bytes(&key, &bytes, &content_type).await.map_err(ApiError::internal)?;
     let sha256_hex = format!("{:x}", Sha256::digest(&bytes));
     let inserted = sqlx::query_as(
         "INSERT INTO staged_attachments
            (id, user_id, mailbox_id, filename, content_type, byte_size, reserved_bytes,
-            sha256_hex, storage_key, status, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,'ready',now() + ($9 * interval '1 second'))
+            sha256_hex, storage_key, storage_backend, status, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,'ready',now() + ($10 * interval '1 second'))
          RETURNING id, filename, content_type, byte_size, sha256_hex, status, expires_at",
     )
     .bind(id)
@@ -928,7 +878,8 @@ async fn stage_legacy_bytes(
     .bind(content_type)
     .bind(bytes.len() as i64)
     .bind(sha256_hex)
-    .bind(key)
+    .bind(&key)
+    .bind(storage_backend)
     .bind(state.attachment_upload_ttl_secs as i64)
     .fetch_one(&state.db)
     .await;
@@ -936,7 +887,7 @@ async fn stage_legacy_bytes(
     match inserted {
         Ok(meta) => Ok(meta),
         Err(error) => {
-            let _ = tokio::fs::remove_file(&path).await;
+            let _ = state.object_store.delete(&key, storage_backend).await;
             Err(ApiError::internal(error.to_string()))
         }
     }

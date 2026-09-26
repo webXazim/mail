@@ -329,6 +329,8 @@ impl ProvisioningService {
         ).bind(user_id).bind(organization_id).bind(mailbox_id).bind(OP_DELETE).bind(&address)
          .bind(account_id.as_deref().unwrap_or("")).bind(self.inner.max_attempts).bind(dedupe)
          .execute(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        sqlx::query("UPDATE mailboxes SET status='deleting',sync_status='pending',sync_error='',updated_at=now() WHERE id=$1 AND deleted_at IS NULL")
+            .bind(mailbox_id).execute(&mut **tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
         Ok(())
     }
 
@@ -1150,50 +1152,34 @@ async fn process_access(state: &AppState, job: &JobRow) -> Result<(), JobFailure
 }
 
 async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure> {
-    if !state.stalwart.enabled() {
-        return Err(JobFailure::transient("Mail provider is disabled"));
+    if !state.stalwart.enabled() { return Err(JobFailure::transient("Mail provider is disabled")); }
+    let mailbox_id=job.mailbox_id.ok_or_else(|| JobFailure::permanent("Deletion job is not bound to a hosted mailbox"))?;
+    let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM mailboxes WHERE id=$1 AND deleted_at IS NULL)")
+        .bind(mailbox_id).fetch_one(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    if !exists { return Ok(()); }
+    let mailbox=resolve_job_mailbox(state,job).await?;
+    if mailbox.mailbox_status!="deleting" { return Err(JobFailure::permanent("Hosted mailbox is no longer marked for deletion")); }
+    if mailbox.domain_is_system { return Err(JobFailure::permanent("Automatic deletion of protected system-domain provider accounts is disabled on the shared mail server")); }
+    let provider_domain_id=mailbox.provider_domain_id.as_deref().filter(|v|!v.trim().is_empty())
+        .ok_or_else(||JobFailure::permanent("Hosted mailbox provider domain binding is missing"))?;
+    let found=state.stalwart.find_customer_account(provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
+    if let Some(account)=found {
+        let expected=mailbox.provider_account_id.clone().filter(|v|!v.is_empty()).or_else(||job.account_id.clone().filter(|v|!v.is_empty()));
+        if expected.is_some_and(|candidate|candidate!=account){return Err(JobFailure::permanent("Stored provider account id no longer matches the mailbox ownership binding"));}
+        state.stalwart.destroy_customer_account(&account,provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
     }
-    let mailbox = resolve_job_mailbox(state, job).await?;
-    if mailbox.domain_is_system {
-        return Err(JobFailure::permanent(
-            "Automatic deletion of protected system-domain provider accounts is disabled on the shared mail server",
-        ));
-    }
-    let provider_domain_id = mailbox.provider_domain_id.as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| JobFailure::permanent("Hosted mailbox provider domain binding is missing"))?;
-
-    // Deletion must be idempotent. If Stalwart already has no account for the
-    // exact tenant/domain/local-part ownership marker, the provider side is
-    // already in the desired state and we may safely finish the local tombstone.
-    // When an account does exist, still compare the stored id before deleting
-    // so a stale job can never destroy a different provider account.
-    let found = state.stalwart
-        .find_customer_account(provider_domain_id, &mailbox.local_part, &mailbox.provider_marker)
-        .await
-        .map_err(JobFailure::provider)?;
-    if let Some(account) = found {
-        let expected = mailbox.provider_account_id.clone().filter(|value| !value.is_empty())
-            .or_else(|| job.account_id.clone().filter(|value| !value.is_empty()));
-        if expected.is_some_and(|candidate| candidate != account) {
-            return Err(JobFailure::permanent(
-                "Stored provider account id no longer matches the mailbox ownership binding",
-            ));
-        }
-        state
-            .stalwart
-            .destroy_customer_account(&account, provider_domain_id, &mailbox.local_part, &mailbox.provider_marker)
-            .await
-            .map_err(JobFailure::provider)?;
-    }
-    sqlx::query(
-        "UPDATE mailboxes SET provider_account_id=NULL, sync_status='none', sync_error='',
-         deleted_at=COALESCE(deleted_at, now()), updated_at=now() WHERE id=$1",
-    )
-    .bind(mailbox.mailbox_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| JobFailure::transient(e.to_string()))?;
+    let objects:Vec<(String,String)>=sqlx::query_as("SELECT storage_key,storage_backend FROM staged_attachments WHERE mailbox_id=$1")
+        .bind(mailbox.mailbox_id).fetch_all(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    for (key,backend) in objects { state.object_store.delete(&key,&backend).await.map_err(JobFailure::transient)?; }
+    let imports:Vec<(String,)>=sqlx::query_as("SELECT storage_key FROM mailbox_imports WHERE mailbox_id=$1")
+        .bind(mailbox.mailbox_id).fetch_all(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    for (key,) in imports { state.object_store.delete_local(&key).await.map_err(JobFailure::transient)?; }
+    state.object_store.delete_local_mailbox_dirs(mailbox.mailbox_id).await.map_err(JobFailure::transient)?;
+    sqlx::query("UPDATE provisioning_jobs SET target_email='deleted-mailbox@invalid',account_id=NULL,secret_ciphertext=NULL,updated_at=now() WHERE mailbox_id=$1")
+        .bind(mailbox.mailbox_id).execute(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    let deleted=sqlx::query("DELETE FROM mailboxes WHERE id=$1 AND status='deleting' AND deleted_at IS NULL")
+        .bind(mailbox.mailbox_id).execute(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    if deleted.rows_affected()!=1 { return Err(JobFailure::transient("Mailbox deletion state changed before final database purge")); }
     Ok(())
 }
 

@@ -37,6 +37,14 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE" run --rm --no-deps -T \
   echo "git_sha=${CS_MAIL_DEPLOYED_GIT_SHA:-unknown}"
   echo "db_sha256=$(sha256sum "$dump" | awk '{print $1}')"
   echo "attachments_sha256=$(sha256sum "$attachments" | awk '{print $1}')"
+  echo "object_storage_backend=${CS_MAIL_OBJECT_STORAGE_BACKEND:-local}"
+  if [[ "${CS_MAIL_OBJECT_STORAGE_BACKEND:-local}" == "r2" ]]; then
+    echo "r2_bucket=${CS_MAIL_R2_BUCKET:-unknown}"
+    echo "r2_objects_in_local_archive=false"
+    echo "r2_recovery_scope=external-offsite-proof-required"
+  else
+    echo "r2_objects_in_local_archive=not-applicable"
+  fi
   echo "provider_namespace=cs-mail"
   echo "shared_stalwart_backup=external-responsibility"
   echo "note=Stalwart is shared with other CrescentSphere products and is intentionally not snapshotted by the CS Mail stack."

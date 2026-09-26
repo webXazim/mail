@@ -26,3 +26,5 @@ pub mod domain_onboarding;
 pub mod business_addressing;
 
 pub mod platform_control;
+
+pub mod object_storage;

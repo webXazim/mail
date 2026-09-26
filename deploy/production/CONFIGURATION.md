@@ -100,3 +100,32 @@ sh manage record-backup-proof stalwart /absolute/path/to/stalwart-offsite.manife
 Recording a manifest is **not** a backup operation; it only records evidence
 from the external backup system. The final `sh manage launch-freeze` gate fails
 when local backup, restore drill, or either offsite proof is stale/missing.
+
+## Capacity and object storage
+
+For a 20 GiB PostgreSQL planning budget keep:
+
+```dotenv
+CS_MAIL_DB_CAPACITY_BYTES=21474836480
+```
+
+This is an operator-declared **database budget**, not customer mailbox storage. Prometheus warns at 70% and becomes critical at 85%. Run `sh manage capacity` to inspect current DB size, headroom, active tenants/mailboxes, largest relations, local attachment/import spool and underlying filesystem capacity.
+
+Production application attachments should use a private R2 bucket:
+
+```dotenv
+CS_MAIL_OBJECT_STORAGE_BACKEND=r2
+CS_MAIL_R2_ACCOUNT_ID=<account-id>
+CS_MAIL_R2_BUCKET=cs-mail-production
+CS_MAIL_R2_ACCESS_KEY_ID=<access-key-id>
+CS_MAIL_R2_SECRET_ACCESS_KEY=<secret-access-key>
+CS_MAIL_R2_ENDPOINT=
+CS_MAIL_R2_REGION=auto
+CS_MAIL_R2_PREFIX=cs-mail/attachments
+CS_MAIL_R2_REQUEST_TIMEOUT_SECS=30
+CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS=4
+```
+
+The transfer limit bounds memory pressure from large attachment uploads/downloads. CS Mail's R2 bucket does **not** move the shared Stalwart message store; configure Stalwart's S3-compatible Blob Store to a separate private R2 bucket before relying on the advertised multi-gigabyte mailbox quotas from a small VPS. See `../../docs/CAPACITY.md` and `../../docs/R2_STORAGE.md`.
+
+When R2 is active, the local `backup.sh` archive contains PostgreSQL plus local/legacy attachment spool data, not the remote R2 objects. Its manifest records this explicitly; independent offsite recovery proof must cover the R2 object set as well as the database.

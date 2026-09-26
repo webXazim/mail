@@ -83,6 +83,28 @@ groups:
           summary: "DB pool metric absent"
           description: "`cs_mail_db_pool_connections` stopped appearing — api metrics endpoint unreachable or DB layer dead."
 
+      - alert: CSMailDatabaseCapacityWarning
+        expr: cs_mail_database_capacity_ratio >= 0.70 and cs_mail_database_capacity_ratio < 0.85
+        for: 15m
+        labels:
+          severity: warning
+          gate: capacity
+        annotations:
+          summary: "PostgreSQL declared capacity is above 70%"
+          description: "CS Mail PostgreSQL is at {{ $value | humanizePercentage }} of CS_MAIL_DB_CAPACITY_BYTES. Run `sh manage capacity` and plan cleanup/expansion before 85%."
+          runbook: "deploy/monitoring/RUNBOOK.md#database-capacity"
+
+      - alert: CSMailDatabaseCapacityCritical
+        expr: cs_mail_database_capacity_ratio >= 0.85
+        for: 5m
+        labels:
+          severity: critical
+          gate: capacity
+        annotations:
+          summary: "PostgreSQL declared capacity is above 85%"
+          description: "CS Mail PostgreSQL is at {{ $value | humanizePercentage }} of CS_MAIL_DB_CAPACITY_BYTES. Stop capacity growth and expand/migrate the database now."
+          runbook: "deploy/monitoring/RUNBOOK.md#database-capacity"
+
   - name: cs_mail_delivery
     rules:
       - alert: CSMailSmtpFailures

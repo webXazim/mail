@@ -89,6 +89,29 @@ def main() -> int:
         print("CS_MAIL_LISTEN_ADDR must remain 0.0.0.0:8080 inside the API container", file=sys.stderr); return 1
     if values.get("CS_MAIL_ATTACHMENT_STORE_DIR", "/srv/attachments") != "/srv/attachments":
         print("CS_MAIL_ATTACHMENT_STORE_DIR must remain /srv/attachments to match the persistent volume", file=sys.stderr); return 1
+    try:
+        db_capacity = int(values.get("CS_MAIL_DB_CAPACITY_BYTES", "21474836480"))
+    except ValueError:
+        print("CS_MAIL_DB_CAPACITY_BYTES must be an integer byte count", file=sys.stderr); return 1
+    if db_capacity < 1073741824:
+        print("CS_MAIL_DB_CAPACITY_BYTES must be at least 1 GiB", file=sys.stderr); return 1
+
+    object_backend = values.get("CS_MAIL_OBJECT_STORAGE_BACKEND", "local").strip().lower()
+    if object_backend not in {"local", "r2"}:
+        print("CS_MAIL_OBJECT_STORAGE_BACKEND must be local or r2", file=sys.stderr); return 1
+    if object_backend == "r2":
+        for key in ("CS_MAIL_R2_ACCOUNT_ID", "CS_MAIL_R2_BUCKET", "CS_MAIL_R2_ACCESS_KEY_ID", "CS_MAIL_R2_SECRET_ACCESS_KEY"):
+            if not values.get(key, "").strip():
+                print(f"{key} is required when CS_MAIL_OBJECT_STORAGE_BACKEND=r2", file=sys.stderr); return 1
+        endpoint = values.get("CS_MAIL_R2_ENDPOINT", "").strip()
+        if endpoint and not endpoint.startswith("https://"):
+            print("CS_MAIL_R2_ENDPOINT must use HTTPS when set", file=sys.stderr); return 1
+        try:
+            transfers = int(values.get("CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS", "4"))
+        except ValueError:
+            print("CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS must be an integer", file=sys.stderr); return 1
+        if not 1 <= transfers <= 16:
+            print("CS_MAIL_R2_MAX_CONCURRENT_TRANSFERS must be between 1 and 16", file=sys.stderr); return 1
     expected_paths = {
         "CS_MAIL_WEB_TLS_CERT": "/etc/letsencrypt/live/mail.crescentsphere.com/fullchain.pem",
         "CS_MAIL_WEB_TLS_KEY": "/etc/letsencrypt/live/mail.crescentsphere.com/privkey.pem",

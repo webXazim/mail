@@ -304,3 +304,37 @@ tests:
               summary: "Manual payment reviews are aging"
               description: "1 submitted invoice(s) have waited more than 48 hours for operator review."
               runbook: "deploy/monitoring/RUNBOOK.md#billing-lifecycle"
+
+  # Capacity guard: 75% stays in warning range for 15 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'cs_mail_database_capacity_ratio'
+        values: '0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75 0.75'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CSMailDatabaseCapacityWarning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              gate: capacity
+            exp_annotations:
+              summary: "PostgreSQL declared capacity is above 70%"
+              description: "CS Mail PostgreSQL is at 75% of CS_MAIL_DB_CAPACITY_BYTES. Run `sh manage capacity` and plan cleanup/expansion before 85%."
+              runbook: "deploy/monitoring/RUNBOOK.md#database-capacity"
+
+  # Capacity guard: 90% is critical after five minutes.
+  - interval: 1m
+    input_series:
+      - series: 'cs_mail_database_capacity_ratio'
+        values: '0.90 0.90 0.90 0.90 0.90 0.90 0.90'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CSMailDatabaseCapacityCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              gate: capacity
+            exp_annotations:
+              summary: "PostgreSQL declared capacity is above 85%"
+              description: "CS Mail PostgreSQL is at 90% of CS_MAIL_DB_CAPACITY_BYTES. Stop capacity growth and expand/migrate the database now."
+              runbook: "deploy/monitoring/RUNBOOK.md#database-capacity"

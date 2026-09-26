@@ -4,6 +4,7 @@ import { Building2, Check, Copy, Globe2, Mail, Plus, RefreshCw, ShieldCheck, Tra
 import { organizationsApi, type BusinessAddress, type OrganizationDetail, type OrganizationInvitation, type OrganizationMember, type OrganizationRole, type OrganizationSummary } from '../services/organizations'
 import { profileApi, useProfile } from '../services/profile'
 import { beginCloudflareOAuth, clearPendingCloudflareOAuth, readPendingCloudflareOAuth } from '../lib/cloudflare-oauth'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const GIB = 1024 ** 3
 const formatStorage = (bytes: number | null | undefined) => {
@@ -48,6 +49,8 @@ export function BusinessPage() {
   const [addressKind, setAddressKind] = useState<'alias' | 'group'>('alias')
   const [addressDomainId, setAddressDomainId] = useState('')
   const [addressMailboxIds, setAddressMailboxIds] = useState<string[]>([])
+  const [deleteMailboxTarget, setDeleteMailboxTarget] = useState<{ id: string; address: string; status: string } | null>(null)
+  const [deleteDomainTarget, setDeleteDomainTarget] = useState<{ id: string; domain: string } | null>(null)
 
   const active = useMemo(
     () => organizations.find((item) => item.id === activeId) ?? organizations[0] ?? null,
@@ -135,7 +138,7 @@ export function BusinessPage() {
   }, [activeId])
 
   const mailboxSetupInProgress = detail?.mailboxes.some((mailbox) =>
-    mailbox.user_id && (mailbox.sync_status === 'pending' || mailbox.sync_status === 'retrying')) ?? false
+    mailbox.status === 'deleting' || (mailbox.user_id && (mailbox.sync_status === 'pending' || mailbox.sync_status === 'retrying'))) ?? false
   useEffect(() => {
     if (!activeId || !mailboxSetupInProgress) return
     let cancelled = false
@@ -444,15 +447,15 @@ export function BusinessPage() {
     }
   }
 
-  const releaseDomain = async (domainId: string) => {
-    if (!detail) return
-    const domain = detail.domains.find((item) => item.id === domainId)
-    if (!window.confirm(`Delete ${domain?.domain ?? 'this domain'} from this business? Its hosted mailboxes and addresses must be removed first. DNS records at your provider will remain until you remove them there.`)) return
+  const releaseDomain = async () => {
+    if (!detail || !deleteDomainTarget) return
+    const domainId = deleteDomainTarget.id
     if (cloudflareChecking === domainId) stopCloudflareCheck()
     setBusy(true)
     setError('')
     try {
       await organizationsApi.releaseDomain(detail.id, domainId)
+      setDeleteDomainTarget(null)
       setDomainNotice('Domain deleted from this business. Remove any old DNS records at your DNS provider if you no longer need them.')
       await load(detail.id)
     } catch (cause) {
@@ -578,11 +581,13 @@ export function BusinessPage() {
     finally { setBusy(false) }
   }
 
-  const removeMailbox = async (mailboxId: string) => {
-    if (!detail || !window.confirm('Delete this hosted mailbox? Mail-server deletion is queued safely.')) return
+  const removeMailbox = async () => {
+    if (!detail || !deleteMailboxTarget) return
+    const mailboxId = deleteMailboxTarget.id
     setBusy(true); setError('')
     try {
       await organizationsApi.deleteMailbox(detail.id, mailboxId)
+      setDeleteMailboxTarget(null)
       await profileApi.refresh()
       await load(detail.id)
       window.dispatchEvent(new Event('cs-mail-folders-changed'))
@@ -708,9 +713,9 @@ export function BusinessPage() {
                 </header>
 
                 {(detail.role === 'owner' || detail.role === 'admin') && !detail.is_system && (
-                  <form className="business-domain-form" onSubmit={claimDomain}>
-                    <div>
-                      <label htmlFor="business-domain">Add a business domain</label>
+                  <form className="business-form-panel business-domain-form" onSubmit={claimDomain}>
+                    <div className="business-field">
+                      <label htmlFor="business-domain">Business domain</label>
                       <input
                         id="business-domain"
                         value={domainName}
@@ -721,10 +726,13 @@ export function BusinessPage() {
                         spellCheck={false}
                         required
                       />
+                      <small className="business-field__hint">Enter the root domain you want to use for company mail.</small>
                     </div>
-                    <button className="primary-button" type="submit" disabled={busy || !domainName.trim()}>
-                      <Plus size={15} /> Add domain
-                    </button>
+                    <div className="business-form-actions">
+                      <button className="primary-button" type="submit" disabled={busy || !domainName.trim()}>
+                        <Plus size={15} /> Add domain
+                      </button>
+                    </div>
                   </form>
                 )}
 
@@ -741,7 +749,7 @@ export function BusinessPage() {
                         {domain.status.replaceAll('_', ' ')}
                       </span>
                       {(detail.role === 'owner' || detail.role === 'admin') && !domain.is_system && (
-                        <button type="button" className="secondary-button business-delete-domain" disabled={busy} onClick={() => void releaseDomain(domain.id)}>
+                        <button type="button" className="secondary-button business-delete-domain" disabled={busy} onClick={() => setDeleteDomainTarget({ id: domain.id, domain: domain.domain })}>
                           <Trash2 size={14} /> Delete domain
                         </button>
                       )}
@@ -896,13 +904,43 @@ export function BusinessPage() {
                   </div>
                 )}
                 {(detail.role === 'owner' || detail.role === 'admin') && detail.domains.some((domain) => domain.status === 'active') && (
-                  <form className="business-invite-form" onSubmit={createMailbox}>
-                    <div><label>Address</label><input value={mailboxLocal} onChange={(e) => setMailboxLocal(e.target.value)} placeholder="name" required /></div>
-                    <div><label>Domain</label><select value={mailboxDomainId} onChange={(e) => setMailboxDomainId(e.target.value)}>{detail.domains.filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}</select></div>
-                    <div><label>Assign existing member</label><select value={mailboxMemberId} onChange={(e) => setMailboxMemberId(e.target.value)}><option value="">Invite by email instead</option>{members.filter((m) => m.status === 'active').map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name || m.email}</option>)}</select></div>
-                    {!mailboxMemberId && <div><label>Invitation email</label><input type="email" value={mailboxInviteEmail} onChange={(e) => setMailboxInviteEmail(e.target.value)} placeholder="employee@external.com" required /></div>}
-                    <div><label>Initial storage (GB)</label><input type="number" min="0.1" step="0.1" value={mailboxStorageGb} onChange={(e) => setMailboxStorageGb(e.target.value)} placeholder={detail.storage ? quotaDraft(detail.storage.default_mailbox_bytes) : 'Plan default'} /><small>{detail.storage ? `${formatStorage(detail.storage.unallocated_bytes)} currently unreserved. Leave blank for the ${formatStorage(detail.storage.default_mailbox_bytes)} plan default.` : 'Leave blank to use the plan default.'}</small></div>
-                    <button className="primary-button" type="submit" disabled={busy}><Plus size={15}/> Create mailbox</button>
+                  <form className="business-form-panel business-mailbox-form" onSubmit={createMailbox}>
+                    <div className="business-field business-mailbox-form__address">
+                      <label htmlFor="mailbox-local">Mailbox address</label>
+                      <div className="business-address-control">
+                        <input id="mailbox-local" value={mailboxLocal} onChange={(e) => setMailboxLocal(e.target.value)} placeholder="name" autoCapitalize="none" autoCorrect="off" spellCheck={false} required />
+                        <select aria-label="Mailbox domain" value={mailboxDomainId} onChange={(e) => setMailboxDomainId(e.target.value)}>
+                          {detail.domains.filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}
+                        </select>
+                      </div>
+                      <small className="business-field__hint">This is the address the member will send and receive mail from.</small>
+                    </div>
+                    <div className="business-field">
+                      <label htmlFor="mailbox-member">Mailbox owner</label>
+                      <select id="mailbox-member" value={mailboxMemberId} onChange={(e) => setMailboxMemberId(e.target.value)}>
+                        <option value="">Invite a person by email</option>
+                        {members.filter((m) => m.status === 'active').map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name || m.email}</option>)}
+                      </select>
+                      <small className="business-field__hint">Choose an existing business member, or invite someone new.</small>
+                    </div>
+                    {!mailboxMemberId && (
+                      <div className="business-field">
+                        <label htmlFor="mailbox-invite-email">Invitation email</label>
+                        <input id="mailbox-invite-email" type="email" value={mailboxInviteEmail} onChange={(e) => setMailboxInviteEmail(e.target.value)} placeholder="employee@external.com" autoComplete="email" required />
+                        <small className="business-field__hint">The invitation is sent here; it does not need to match the mailbox address.</small>
+                      </div>
+                    )}
+                    <div className="business-field">
+                      <label htmlFor="mailbox-storage">Initial storage</label>
+                      <div className="business-input-suffix">
+                        <input id="mailbox-storage" type="number" min="0.1" step="0.1" value={mailboxStorageGb} onChange={(e) => setMailboxStorageGb(e.target.value)} placeholder={detail.storage ? quotaDraft(detail.storage.default_mailbox_bytes) : 'Plan default'} />
+                        <span>GB</span>
+                      </div>
+                      <small className="business-field__hint">{detail.storage ? `${formatStorage(detail.storage.unallocated_bytes)} unreserved · blank uses the ${formatStorage(detail.storage.default_mailbox_bytes)} plan default.` : 'Leave blank to use the plan default.'}</small>
+                    </div>
+                    <div className="business-form-actions business-mailbox-form__actions">
+                      <button className="primary-button" type="submit" disabled={busy || !mailboxLocal.trim() || !mailboxDomainId || (!mailboxMemberId && !mailboxInviteEmail.trim())}><Plus size={15}/> Create mailbox</button>
+                    </div>
                   </form>
                 )}
                 <p className="business-mailbox-help">A mailbox uses your CS Mail sign-in for webmail. You do not enter your account password when creating an address. For IMAP or SMTP, the mailbox owner creates a separate app password in <Link to="/mail/settings?tab=clients">Mail clients</Link> after setup completes.</p>
@@ -919,7 +957,7 @@ export function BusinessPage() {
                         )}
                         {(detail.role === 'owner' || detail.role === 'admin') && mailbox.user_id && (mailbox.status === 'active' || mailbox.status === 'suspended') && <button type="button" className="text-button" disabled={busy} onClick={() => void setMailboxStatus(mailbox.id, mailbox.status === 'suspended' ? 'active' : 'suspended')}>{mailbox.status === 'suspended' ? 'Reactivate' : 'Suspend'}</button>}
                         {(detail.role === 'owner' || detail.role === 'admin') && mailbox.user_id && mailbox.status === 'error' && <button type="button" className="secondary-button" disabled={busy} onClick={() => void retryMailbox(mailbox.id)}>Retry setup</button>}
-                        {(detail.role === 'owner' || detail.role === 'admin') && <button type="button" className="text-button" disabled={busy} onClick={() => void removeMailbox(mailbox.id)}>Delete</button>}
+                        {(detail.role === 'owner' || detail.role === 'admin') && <button type="button" className="text-button" disabled={busy} onClick={() => setDeleteMailboxTarget({ id: mailbox.id, address: mailbox.address, status: mailbox.status })}>{mailbox.status === 'deleting' ? 'Retry delete' : 'Delete'}</button>}
                       </div>
                     </div>
                     {mailbox.sync_error && <p className="business-mailbox-notice" role="status">{mailbox.sync_error}</p>}
@@ -936,8 +974,10 @@ export function BusinessPage() {
                         <div className="business-storage-editor">
                           <label htmlFor={`quota-${mailbox.id}`}>Allocation</label>
                           <div>
-                            <input id={`quota-${mailbox.id}`} type="number" min="0.1" step="0.1" value={mailboxQuotaDrafts[mailbox.id] ?? ''} onChange={(event) => setMailboxQuotaDrafts((current) => ({ ...current, [mailbox.id]: event.target.value }))} />
-                            <span>GB</span>
+                            <div className="business-input-suffix business-input-suffix--compact">
+                              <input id={`quota-${mailbox.id}`} type="number" min="0.1" step="0.1" value={mailboxQuotaDrafts[mailbox.id] ?? ''} onChange={(event) => setMailboxQuotaDrafts((current) => ({ ...current, [mailbox.id]: event.target.value }))} />
+                              <span>GB</span>
+                            </div>
                             <button type="button" className="secondary-button" disabled={busy} onClick={() => void setMailboxStorage(mailbox.id)}>Save</button>
                             {mailbox.quota_source === 'custom' && <button type="button" className="text-button" disabled={busy} onClick={() => void setMailboxStorage(mailbox.id, true)}>Use default</button>}
                           </div>
@@ -952,12 +992,35 @@ export function BusinessPage() {
               <section className="business-section">
                 <header><div><Mail size={17}/><h3>Aliases & groups</h3></div><span>{addresses.length}</span></header>
                 {(detail.role === 'owner' || detail.role === 'admin') && detail.mailboxes.some((m) => m.status === 'active') && (
-                  <form className="business-invite-form" onSubmit={createBusinessAddress}>
-                    <div><label>Address</label><input value={addressLocal} onChange={(e) => setAddressLocal(e.target.value)} placeholder="sales" required /></div>
-                    <div><label>Type</label><select value={addressKind} onChange={(e) => { setAddressKind(e.target.value as 'alias' | 'group'); setAddressMailboxIds([]) }}><option value="alias">Alias</option><option value="group">Group</option></select></div>
-                    <div><label>Domain</label><select value={addressDomainId} onChange={(e) => setAddressDomainId(e.target.value)}>{detail.domains.filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}</select></div>
-                    <div><label>Destinations</label><select multiple value={addressMailboxIds} onChange={(e) => { const ids = Array.from(e.currentTarget.selectedOptions).map((o) => o.value); setAddressMailboxIds(addressKind === 'alias' ? ids.slice(-1) : ids) }}>{detail.mailboxes.filter((m) => m.status === 'active').map((m) => <option key={m.id} value={m.id}>{m.address}</option>)}</select></div>
-                    <button className="primary-button" type="submit" disabled={busy || addressMailboxIds.length === 0}><Plus size={15}/> Add {addressKind}</button>
+                  <form className="business-form-panel business-address-form" onSubmit={createBusinessAddress}>
+                    <div className="business-field business-address-form__address">
+                      <label htmlFor="address-local">Address</label>
+                      <div className="business-address-control">
+                        <input id="address-local" value={addressLocal} onChange={(e) => setAddressLocal(e.target.value)} placeholder="sales" autoCapitalize="none" autoCorrect="off" spellCheck={false} required />
+                        <select aria-label="Address domain" value={addressDomainId} onChange={(e) => setAddressDomainId(e.target.value)}>
+                          {detail.domains.filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}
+                        </select>
+                      </div>
+                      <small className="business-field__hint">Create a shared address without another mailbox.</small>
+                    </div>
+                    <div className="business-field">
+                      <label htmlFor="address-kind">Type</label>
+                      <select id="address-kind" value={addressKind} onChange={(e) => { setAddressKind(e.target.value as 'alias' | 'group'); setAddressMailboxIds([]) }}>
+                        <option value="alias">Alias</option>
+                        <option value="group">Group</option>
+                      </select>
+                      <small className="business-field__hint">{addressKind === 'alias' ? 'Delivers to one mailbox.' : 'Delivers to multiple mailboxes.'}</small>
+                    </div>
+                    <div className="business-field business-address-form__destinations">
+                      <label htmlFor="address-destinations">Destinations</label>
+                      <select id="address-destinations" className="business-multi-select" multiple value={addressMailboxIds} onChange={(e) => { const ids = Array.from(e.currentTarget.selectedOptions).map((o) => o.value); setAddressMailboxIds(addressKind === 'alias' ? ids.slice(-1) : ids) }}>
+                        {detail.mailboxes.filter((m) => m.status === 'active').map((m) => <option key={m.id} value={m.id}>{m.address}</option>)}
+                      </select>
+                      <small className="business-field__hint">{addressKind === 'alias' ? 'Select the mailbox that receives this alias.' : 'Use Ctrl/Cmd to select more than one mailbox.'}</small>
+                    </div>
+                    <div className="business-form-actions business-address-form__actions">
+                      <button className="primary-button" type="submit" disabled={busy || !addressLocal.trim() || addressMailboxIds.length === 0}><Plus size={15}/> Add {addressKind}</button>
+                    </div>
                   </form>
                 )}
                 {addresses.map((address) => <div className="business-row" key={address.id}><div><strong>{address.address}</strong><small>{address.kind} → {address.mailboxes.map((m) => m.address).join(', ')} · {address.sync_status}</small></div>{(detail.role === 'owner' || detail.role === 'admin') && <button type="button" className="text-button" disabled={busy} onClick={() => void removeBusinessAddress(address.id)}>Delete</button>}</div>)}
@@ -980,19 +1043,21 @@ export function BusinessPage() {
 
                 {(detail.role === 'owner' || detail.role === 'admin') && (
                   <div className="business-team-admin">
-                    <form className="business-invite-form" onSubmit={inviteMember}>
-                      <div>
-                        <label htmlFor="invite-email">Invite team member</label>
+                    <form className="business-form-panel business-team-form" onSubmit={inviteMember}>
+                      <div className="business-field">
+                        <label htmlFor="invite-email">Team member email</label>
                         <input
                           id="invite-email"
                           type="email"
                           value={inviteEmail}
                           onChange={(event) => setInviteEmail(event.target.value)}
                           placeholder="person@example.com"
+                          autoComplete="email"
                           required
                         />
+                        <small className="business-field__hint">They will receive an invitation to join this business.</small>
                       </div>
-                      <div>
+                      <div className="business-field">
                         <label htmlFor="invite-role">Business role</label>
                         <select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as OrganizationRole)}>
                           <option value="member">Member</option>
@@ -1000,10 +1065,13 @@ export function BusinessPage() {
                           <option value="admin">Admin</option>
                           <option value="owner">Owner</option>
                         </select>
+                        <small className="business-field__hint">Controls business-level permissions after acceptance.</small>
                       </div>
-                      <button className="primary-button" type="submit" disabled={busy || !inviteEmail.trim()}>
-                        <UserPlus size={15} /> Invite
-                      </button>
+                      <div className="business-form-actions">
+                        <button className="primary-button" type="submit" disabled={busy || !inviteEmail.trim()}>
+                          <UserPlus size={15} /> Invite
+                        </button>
+                      </div>
                     </form>
 
                     {invitations.filter((invitation) => invitation.status === 'pending').length > 0 && (
@@ -1024,6 +1092,16 @@ export function BusinessPage() {
           )}
         </div>
       </div>
+      {deleteMailboxTarget && <ConfirmDialog key={deleteMailboxTarget.id} open danger busy={busy}
+        title={deleteMailboxTarget.status === 'deleting' ? 'Retry permanent mailbox deletion' : 'Permanently delete mailbox'}
+        description={`Delete ${deleteMailboxTarget.address} and all mailbox-owned data? This cannot be undone.`}
+        details={['The hosted Stalwart account and all messages are permanently removed.','Mailbox-scoped drafts, schedules, contacts, rules, app passwords and database rows are removed.','Attachment objects and mailbox import files are removed from configured storage.','Aliases/groups are detached automatically; empty addresses are removed.','Security/audit history is retained and may contain historical identifiers, but not mailbox message content.']}
+        verificationText={deleteMailboxTarget.address} confirmLabel={deleteMailboxTarget.status === 'deleting' ? 'Retry deletion' : 'Delete mailbox'}
+        onClose={() => setDeleteMailboxTarget(null)} onConfirm={removeMailbox}/>}
+      {deleteDomainTarget && <ConfirmDialog key={deleteDomainTarget.id} open danger busy={busy} title="Delete business domain"
+        description={`Delete ${deleteDomainTarget.domain} from this business? Hosted mailboxes and aliases must already be removed.`}
+        details={['DNS records at your DNS provider are not deleted automatically.']} verificationText={deleteDomainTarget.domain} confirmLabel="Delete domain"
+        onClose={() => setDeleteDomainTarget(null)} onConfirm={releaseDomain}/>}
     </section>
   )
 }

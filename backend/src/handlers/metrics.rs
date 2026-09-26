@@ -43,6 +43,28 @@ pub async fn metrics(State(state): State<AppState>) -> Response {
         }
     }
 
+    if let Ok((database_bytes, users, mailboxes, businesses)) = sqlx::query_as::<_, (i64,i64,i64,i64)>(
+        "SELECT pg_database_size(current_database())::bigint,
+                (SELECT count(*)::bigint FROM users),
+                (SELECT count(*)::bigint FROM mailboxes WHERE deleted_at IS NULL AND status <> 'deleted'),
+                (SELECT count(*)::bigint FROM organizations WHERE is_system=FALSE)"
+    ).fetch_one(&state.db).await {
+        body.push_str("# HELP cs_mail_database_bytes Current PostgreSQL database size in bytes.\n");
+        body.push_str("# TYPE cs_mail_database_bytes gauge\n");
+        body.push_str(&format!("cs_mail_database_bytes {}\n", database_bytes.max(0)));
+        body.push_str("# HELP cs_mail_capacity_entities Current durable tenant entity counts.\n");
+        body.push_str("# TYPE cs_mail_capacity_entities gauge\n");
+        body.push_str(&format!("cs_mail_capacity_entities{{kind=\"users\"}} {}\n", users.max(0)));
+        body.push_str(&format!("cs_mail_capacity_entities{{kind=\"mailboxes\"}} {}\n", mailboxes.max(0)));
+        body.push_str(&format!("cs_mail_capacity_entities{{kind=\"businesses\"}} {}\n", businesses.max(0)));
+        if state.db_capacity_bytes > 0 {
+            let ratio = (database_bytes.max(0) as f64) / (state.db_capacity_bytes as f64);
+            body.push_str("# HELP cs_mail_database_capacity_ratio PostgreSQL bytes divided by the operator-declared capacity.\n");
+            body.push_str("# TYPE cs_mail_database_capacity_ratio gauge\n");
+            body.push_str(&format!("cs_mail_database_capacity_ratio {ratio}\n"));
+        }
+    }
+
     if let Ok(rows) = sqlx::query_as::<_, (String,i64)>(
         "SELECT status,count(*)::bigint FROM organization_subscriptions s
            JOIN organizations o ON o.id=s.organization_id

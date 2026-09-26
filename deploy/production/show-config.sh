@@ -5,7 +5,7 @@ ENV_FILE=${1:-/opt/cs-mail/.env.production}
 
 # Never print credential values. This is safe to paste into an operations
 # ticket while still making configuration drift visible.
-secret_re='^(POSTGRES_PASSWORD|CS_MAIL_JWT_SECRET|CS_MAIL_DELIVERY_EVENT_SECRET|CS_MAIL_PROVISIONING_KEY|CS_MAIL_TOTP_KEY|CS_MAIL_MAIL_ADMIN_TOKEN|CS_MAIL_MAIL_ADMIN_SECRET|CS_MAIL_MAIL_JMAP_SECRET|CS_MAIL_SMTP_PASSWORD)='
+secret_re='^(POSTGRES_PASSWORD|CS_MAIL_JWT_SECRET|CS_MAIL_DELIVERY_EVENT_SECRET|CS_MAIL_PROVISIONING_KEY|CS_MAIL_TOTP_KEY|CS_MAIL_MAIL_ADMIN_TOKEN|CS_MAIL_MAIL_ADMIN_SECRET|CS_MAIL_MAIL_JMAP_SECRET|CS_MAIL_SMTP_PASSWORD|CS_MAIL_R2_ACCESS_KEY_ID|CS_MAIL_R2_SECRET_ACCESS_KEY)='
 while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ "$line" =~ $secret_re ]]; then
     key=${line%%=*}
