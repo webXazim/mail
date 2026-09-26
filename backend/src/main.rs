@@ -34,6 +34,12 @@ async fn main() -> anyhow::Result<()> {
         tracing_subscriber::fmt().with_env_filter(filter).init();
     }
 
+    if config.environment == "production" && config.billing_instant_activation {
+        tracing::warn!(
+            "CS_MAIL_BILLING_INSTANT_ACTIVATION is enabled for production acceptance testing; public launch certification remains blocked until it is disabled"
+        );
+    }
+
     let pool = PgPoolOptions::new()
         .max_connections(config.db_max_connections)
         .acquire_timeout(Duration::from_secs(10))

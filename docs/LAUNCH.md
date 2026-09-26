@@ -15,7 +15,7 @@ Before public launch, all of the following must pass:
 - Frontend lint/typecheck/tests/build and Rust fmt/Clippy/tests/release build are blocking deployment gates.
 - Alert delivery is tested end-to-end.
 - Real external inbox placement is tested with unrelated providers.
-- `CS_MAIL_ENVIRONMENT=production` and `CS_MAIL_BILLING_INSTANT_ACTIVATION=false`; the production API must refuse unsafe activation configuration.
+- `CS_MAIL_ENVIRONMENT=production`; payment-approved activation is the default. Controlled acceptance testing may temporarily enable instant activation, but final launch certification requires `CS_MAIL_BILLING_INSTANT_ACTIVATION=false`.
 - Platform Admin → Diagnostics → Public launch readiness has no unresolved blockers.
 - Billing/provider durable issue gauges show no unexplained dead jobs, failed lifecycle/invoice notices, failed purges, or stale mailbox reconciliation.
 - The latest live launch certification is passed and was run immediately before opening public controls.

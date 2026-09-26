@@ -69,8 +69,9 @@ def main() -> int:
     environment = values.get("CS_MAIL_ENVIRONMENT", "production").strip().lower()
     if environment != "production":
         print("CS_MAIL_ENVIRONMENT must be production when set", file=sys.stderr); return 1
-    if values.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false").strip().lower() != "false":
-        print("CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production", file=sys.stderr); return 1
+    instant_activation = values.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false").strip().lower()
+    if instant_activation not in {"true", "false"}:
+        print("CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false", file=sys.stderr); return 1
 
     if values.get("CS_MAIL_WEB_HOST", "mail.crescentsphere.com") != "mail.crescentsphere.com":
         print("CS_MAIL_WEB_HOST must be mail.crescentsphere.com", file=sys.stderr); return 1

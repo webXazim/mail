@@ -462,22 +462,28 @@ def check_static(root: Path) -> str:
     freeze_script = (root / "deploy/production/freeze-launch.sh").read_text()
     if ("validate_runtime_profile" not in config_rs
             or "CS_MAIL_ENVIRONMENT" not in config_rs
-            or "CS_MAIL_RELEASE_SHA256" not in config_rs
-            or "CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production" not in config_rs):
-        raise GateError("production runtime profile must fail closed on unsafe launch configuration")
+            or "CS_MAIL_RELEASE_SHA256" not in config_rs):
+        raise GateError("production runtime profile validation is incomplete")
+    if "if self.billing_instant_activation" in config_rs:
+        raise GateError("production runtime must allow explicit acceptance-test instant activation; public launch safety belongs to certification/freeze")
+    preflight_script = (root / "deploy/production/preflight.sh").read_text()
+    validate_env_script = (root / "deploy/production/validate-env.py").read_text()
+    if ("acceptance-test mode is active" not in preflight_script
+            or "CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false" not in validate_env_script):
+        raise GateError("controlled instant-activation acceptance testing must remain explicit and validated")
     if "CS_MAIL_ENVIRONMENT=production" not in env_example or "CS_MAIL_BILLING_INSTANT_ACTIVATION=false" not in env_example:
         raise GateError("production environment example must pin production profile and payment-approved activation")
     if "operational_evidence" not in backup_script or "operational_evidence" not in restore_script:
         raise GateError("backup and restore drill must write durable operational evidence")
     if "cs_mail_offsite_backup" not in proof_script or "stalwart_offsite_backup" not in proof_script:
         raise GateError("offsite backup proof recorder must cover CS Mail and shared Stalwart data")
-    for freeze_token in ("certify-launch.sh", "public_signup_enabled", "cs_mail_offsite_backup", "stalwart_offsite_backup", "PUBLIC LAUNCH FREEZE PASS"):
+    for freeze_token in ("certify-launch.sh", "public_signup_enabled", "cs_mail_offsite_backup", "stalwart_offsite_backup", "instant billing activation must be false", "PUBLIC LAUNCH FREEZE PASS"):
         if freeze_token not in freeze_script:
             raise GateError(f"final launch-freeze gate is missing: {freeze_token}")
     if ("expiry must enter grace before suspension" not in lifecycle_tests
             or "test instant activation is bootstrap-only" not in lifecycle_tests):
         raise GateError("billing integration tests must cover grace, suspension and recovery activation safety")
-    return "contract v32, migration 0049, production-env compatibility, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v33, migration 0049, production acceptance-test compatibility, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:
@@ -500,7 +506,7 @@ def check_env_file(env_file: Path, env: dict[str, str]) -> str:
     if env.get("CS_MAIL_ENVIRONMENT", "production").strip().lower() != "production":
         raise GateError("CS_MAIL_ENVIRONMENT must be production when set for launch certification")
     if env.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "").strip().lower() != "false":
-        raise GateError("CS_MAIL_BILLING_INSTANT_ACTIVATION must remain false in production; use an isolated non-production environment for bypass testing")
+        raise GateError("CS_MAIL_BILLING_INSTANT_ACTIVATION must be false for public launch certification; disable acceptance-test instant activation before launch")
     if env.get("CS_MAIL_PROVIDER_NAMESPACE", "cs-mail") != "cs-mail":
         raise GateError("CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail")
     alert_from = env.get("CS_MAIL_ALERT_EMAIL_FROM") or env["CS_MAIL_SMTP_USERNAME"]

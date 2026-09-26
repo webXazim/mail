@@ -112,8 +112,10 @@ pub struct Config {
     pub attachment_consumed_grace_secs: u64,
     /// Cleanup worker cadence.
     pub attachment_cleanup_secs: u64,
-    /// Non-production testing switch: when true, placing an order activates the selected
-    /// plan immediately while the invoice remains due. Production startup rejects this.
+    /// Acceptance-testing switch: when true, placing an order activates the selected
+    /// plan immediately while the invoice remains due. It defaults false. Production
+    /// deployment may run with it explicitly enabled for controlled testing, but the
+    /// public-launch certification/freeze gate requires it to be false.
     pub billing_instant_activation: bool,
     /// SMTP endpoint used for outgoing mail (internal relay `mail:25` in dev).
     pub smtp: SmtpConfig,
@@ -370,8 +372,9 @@ impl Config {
             attachment_cleanup_secs: env_or("CS_MAIL_ATTACHMENT_CLEANUP_SECS", "900")
                 .parse()
                 .unwrap_or(900),
-            // Billing bypasses must fail closed. A typo in production must
-            // never turn an unpaid order into an active subscription.
+            // Default payment-gated. Acceptance testing can explicitly enable the
+            // bypass, but launch certification/freeze refuses to open publicly while
+            // it remains enabled.
             billing_instant_activation: env_bool("CS_MAIL_BILLING_INSTANT_ACTIVATION", false)?,
             smtp: SmtpConfig::from_env(),
             log_format: env_or("CS_MAIL_LOG_FORMAT", "text").trim().to_string(),
@@ -402,11 +405,6 @@ impl Config {
         }
         if self.return_token_links {
             return Err(anyhow::anyhow!("CS_MAIL_DEV_RETURN_TOKEN_LINKS must be false in production"));
-        }
-        if self.billing_instant_activation {
-            return Err(anyhow::anyhow!(
-                "CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production; unpaid orders cannot activate a public subscription"
-            ));
         }
         if self.provider_namespace != "cs-mail" {
             return Err(anyhow::anyhow!("CS_MAIL_PROVIDER_NAMESPACE must remain cs-mail in production"));

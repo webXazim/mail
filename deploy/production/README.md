@@ -181,4 +181,4 @@ sudo bash ./deploy/production/certify-launch.sh \
   /opt/cs-mail/.env.certification
 ```
 
-Keep `CS_MAIL_ENVIRONMENT=production` and `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` on the public VPS. The API rejects production startup with the billing bypass enabled; run bypass/bootstrap tests only in an isolated non-production environment.
+Keep `CS_MAIL_ENVIRONMENT=production`. Billing defaults to `CS_MAIL_BILLING_INSTANT_ACTIVATION=false`; controlled acceptance testing may temporarily set it to `true`, which is surfaced as an operator warning. The final public-launch certification/freeze still requires `false`, so the bypass cannot be left enabled for launch.

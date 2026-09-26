@@ -82,20 +82,22 @@ See `deploy/production/README.md`, `deploy/production/CONFIGURATION.md`, `docs/P
 ## Platform state
 
 API contract: **v32**  
-Migration head: **0048_launch_freeze_operational_evidence.sql**
+Migration head: **0049_provisioning_operation_constraint_repair.sql**
 
 The localhost-only Platform Admin controls users, businesses, memberships, hosted domains/mailboxes, subscription/payment lifecycle, storage allocations, provider/recovery operations, audit/security functions and emergency SaaS switches. The public Nginx vhost returns `404` for `/mail/admin*` and `/api/admin/*`; operators access the admin UI only through an SSH tunnel to `127.0.0.1:18081`.
 
-Production always keeps:
+Production defaults to payment-approved activation:
 
 ```env
 CS_MAIL_ENVIRONMENT=production
 CS_MAIL_BILLING_INSTANT_ACTIVATION=false
 ```
 
-The API refuses to start in the production profile if instant billing activation
-is enabled. Bootstrap/instant-activation tests belong only in an isolated
-non-production environment.
+During controlled acceptance testing, the production deployment can explicitly
+set `CS_MAIL_BILLING_INSTANT_ACTIVATION=true`; preflight and the API emit a
+warning and test orders may activate immediately. The final public-launch
+certification/freeze remains fail-closed and will not pass until the flag is
+returned to `false`.
 
 ### Billing recovery operations
 

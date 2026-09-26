@@ -43,7 +43,7 @@ grep -q 'listen 127.0.0.1:18081;' "$nginx_file" || fail "Platform Admin must rem
 if grep -q 'listen 127.0.0.1:18082' "$nginx_file"; then fail "legacy Cloudflare Tunnel origin must not remain"; fi
 if grep -q 'real_ip_header CF-Connecting-IP' "$nginx_file"; then fail "Cloudflare-only real-IP trust must not remain in direct-DNS mode"; fi
 grep -q '^CS_MAIL_ENVIRONMENT=production$' "$ROOT/deploy/production/.env.production.example" || fail "production runtime profile is missing from the env contract"
-grep -q '^CS_MAIL_BILLING_INSTANT_ACTIVATION=false$' "$ROOT/deploy/production/.env.production.example" || fail "production billing must fail closed"
+grep -q '^CS_MAIL_BILLING_INSTANT_ACTIVATION=false$' "$ROOT/deploy/production/.env.production.example" || fail "production billing must default to payment approval"
 grep -q 'CS_MAIL_RELEASE_SHA256:.*unknown' "$ROOT/deploy/production/docker-compose.yml" || fail "running API release identity injection is missing"
 grep -q 'CS_MAIL_WEB_PROXY_MODE=edge' "$ROOT/deploy/production/.env.production.example" || fail "edge proxy mode is missing from the production env contract"
 grep -q 'CS_MAIL_SHARED_WEB_NETWORK=cs-platform-web' "$ROOT/deploy/production/.env.production.example" || fail "platform web network is missing from the production env contract"

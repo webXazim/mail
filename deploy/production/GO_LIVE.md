@@ -24,8 +24,10 @@ Before accepting another business, complete these checks in order:
    platform control plane. Open only what is needed for an operator-led test;
    keep public capabilities disabled until the two-business test, billing
    flow, and abuse review are complete.
-   Set `CS_MAIL_BILLING_INSTANT_ACTIVATION=false`; a test bypass must never
-   activate a real order. Use the platform admin interface to enable controls
+   Keep `CS_MAIL_BILLING_INSTANT_ACTIVATION=false` for the real payment-flow
+   acceptance test. If you intentionally exercise the instant-activation test
+   path, use only disposable test orders and return the flag to `false` before
+   launch certification. Use the platform admin interface to enable controls
    deliberately after the gates pass.
 5. Verify a real mailbox over web, IMAP TLS 993, and authenticated SMTP TLS
    465. Send externally, receive externally, reply, attach a file, and confirm
@@ -65,9 +67,10 @@ can replace Messenger's root/www route later without touching mail routing.
 
 ## Final launch freeze and opening sequence
 
-The production API must run with `CS_MAIL_ENVIRONMENT=production` and
-`CS_MAIL_BILLING_INSTANT_ACTIVATION=false`. Production startup fails closed if
-the billing bypass is enabled.
+The production API must run with `CS_MAIL_ENVIRONMENT=production`. Controlled
+acceptance testing may temporarily use `CS_MAIL_BILLING_INSTANT_ACTIVATION=true`,
+but the final launch freeze is fail-closed: public launch requires
+`CS_MAIL_BILLING_INSTANT_ACTIVATION=false`.
 
 Before the first public opening, complete the independent encrypted offsite
 backup jobs and have each job emit a root-owned, non-world-writable proof

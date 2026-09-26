@@ -145,9 +145,10 @@ sudo bash ./deploy/production/deploy-from-git.sh main
 sudo bash ./deploy/production/status.sh /opt/cs-mail/.env.production
 ```
 
-Keep public signup disabled throughout acceptance and keep
-`CS_MAIL_BILLING_INSTANT_ACTIVATION=false` on production. If a bootstrap bypass
-is needed, use an isolated non-production environment instead. Keep the Cloudflare Email Routing MX
+Keep public signup disabled throughout acceptance. Billing should normally keep
+`CS_MAIL_BILLING_INSTANT_ACTIVATION=false`; when the current acceptance test
+requires immediate activation, it may be set to `true` temporarily. The launch
+freeze will block opening until it is restored to `false`. Keep the Cloudflare Email Routing MX
 records until the mailbox acceptance test has passed, then cut over root MX
 to `smtp.crescentsphere.com` and verify inbound/outbound delivery.
 

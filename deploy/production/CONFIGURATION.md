@@ -68,17 +68,18 @@ lengths before Compose is touched.
 
 ## Billing activation safety
 
-Production is permanently payment-gated:
+Production defaults to payment-gated activation:
 
 ```dotenv
 CS_MAIL_ENVIRONMENT=production
 CS_MAIL_BILLING_INSTANT_ACTIVATION=false
 ```
 
-The API now refuses to start with instant billing activation enabled under the
-`production` runtime profile. Do not toggle this flag on the public VPS for
-acceptance testing. Any test that needs instant/bootstrap activation must run in
-an isolated `development` or `test` environment with non-customer data.
+For controlled acceptance testing, the public VPS may temporarily set
+`CS_MAIL_BILLING_INSTANT_ACTIVATION=true`. Preflight and the API warn clearly,
+and unpaid test orders can activate immediately. This does **not** make the
+configuration launch-ready: `sh manage launch-freeze` and launch certification
+require the flag to be `false` before public signup can be opened.
 
 A public order therefore follows invoice → payment submission → operator/payment
 verification → activation. Changing an environment value never settles an

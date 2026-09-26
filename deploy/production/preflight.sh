@@ -26,9 +26,11 @@ set -a; source "$ENV_FILE"; set +a
 [[ ${CS_MAIL_PUBLIC_ORIGIN%/} == "https://${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}" ]] || fail "CS_MAIL_PUBLIC_ORIGIN must exactly match https://CS_MAIL_WEB_HOST"
 [[ ${CS_MAIL_CORS_ORIGINS:-} == *"https://${CS_MAIL_WEB_HOST:-mail.crescentsphere.com}"* ]] || fail "CS_MAIL_CORS_ORIGINS must include the public web origin"
 case ${CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH:-true} in true|false) ;; *) fail "CS_MAIL_REQUIRE_PUBLIC_HTTPS_HEALTH must be true or false" ;; esac
-case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} in true|false) ;; *) fail "CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false" ;; esac
+case ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-false} in true|false) ;; *) fail "CS_MAIL_BILLING_INSTANT_ACTIVATION must be true or false" ;; esac
 [[ ${CS_MAIL_ENVIRONMENT:-production} == production ]] || fail "CS_MAIL_ENVIRONMENT must be production when set"
-[[ ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-true} == false ]] || fail "production billing instant activation must remain false; use an isolated non-production environment for bypass testing"
+if [[ ${CS_MAIL_BILLING_INSTANT_ACTIVATION:-false} == true ]]; then
+  echo "WARNING: CS_MAIL_BILLING_INSTANT_ACTIVATION=true — acceptance-test mode is active; unpaid test orders can activate immediately. Public launch-freeze will remain blocked until this is false." >&2
+fi
 proxy_mode=${CS_MAIL_WEB_PROXY_MODE:-host}
 case "$proxy_mode" in host|messenger|edge) ;; *) fail "CS_MAIL_WEB_PROXY_MODE must be host, messenger, or edge" ;; esac
 [[ ${CS_MAIL_CLIENT_HOST:-smtp.crescentsphere.com} == smtp.crescentsphere.com ]] || fail "CS_MAIL_CLIENT_HOST must remain smtp.crescentsphere.com"
