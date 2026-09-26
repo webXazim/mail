@@ -130,8 +130,9 @@ export function BusinessPage() {
     const onRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ kind?: string; payload?: { resource?: string; organization_id?: string } }>).detail
       if (detail?.kind !== 'resource-changed') return
-      if (!['business_domains', 'business_mailboxes'].includes(detail.payload?.resource ?? '')) return
-      if (activeId && detail.payload.organization_id && detail.payload.organization_id !== activeId) return
+      const payload = detail.payload
+      if (!payload || !['business_domains', 'business_mailboxes'].includes(payload.resource ?? '')) return
+      if (activeId && payload.organization_id && payload.organization_id !== activeId) return
       load(activeId || undefined).catch(() => undefined)
     }
     window.addEventListener('cs-mail-realtime', onRealtime)
