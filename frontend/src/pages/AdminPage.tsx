@@ -226,9 +226,11 @@ export function AdminPage() {
     if (remote) return
     const active = mailboxes.filter((mailbox) => mailbox.status === 'active')
     if (active.length === 0) return
-    if (!active.some((mailbox) => mailbox.email.toLowerCase() === forwarderForm.from.toLowerCase())) {
+    if (active.some((mailbox) => mailbox.email.toLowerCase() === forwarderForm.from.toLowerCase())) return
+    const timer = window.setTimeout(() => {
       setForwarderForm((current) => ({ ...current, from: active[0].email }))
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [remote, mailboxes, forwarderForm.from])
 
   useEffect(() => {

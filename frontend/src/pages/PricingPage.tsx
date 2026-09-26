@@ -32,12 +32,15 @@ export function PricingPage() {
   }, [])
 
   useEffect(() => {
-    load()
+    const initialLoad = window.setTimeout(load, 0)
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') navigate('/mail/inbox')
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(initialLoad)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
   }, [load, navigate])
 
   return (

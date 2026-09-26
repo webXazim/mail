@@ -54,13 +54,7 @@ export function ContactsPage() {
 
   useEffect(() => {
     const needle = query.trim()
-    if (!needle) {
-      setSearchResults(null)
-      setSearchTotal(0)
-      setSearchHasMore(false)
-      setSearchCursor(null)
-      return
-    }
+    if (!needle) return
     const timer = window.setTimeout(() => {
       void contactsService
         .page(needle)
@@ -75,7 +69,7 @@ export function ContactsPage() {
     return () => window.clearTimeout(timer)
   }, [query])
 
-  const filtered = useMemo(() => searchResults ?? list, [list, searchResults])
+  const filtered = useMemo(() => query.trim() ? (searchResults ?? []) : list, [list, query, searchResults])
   const displayTotal = query.trim() ? searchTotal : total
   const displayHasMore = query.trim() ? searchHasMore : hasMore
 

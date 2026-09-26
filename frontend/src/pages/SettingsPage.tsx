@@ -135,7 +135,8 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    void refreshSessions()
+    const timer = window.setTimeout(() => void refreshSessions(), 0)
+    return () => window.clearTimeout(timer)
   }, [refreshSessions])
 
   const refreshTwoFactor = useCallback(async () => {
@@ -150,7 +151,8 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    void refreshTwoFactor()
+    const timer = window.setTimeout(() => void refreshTwoFactor(), 0)
+    return () => window.clearTimeout(timer)
   }, [refreshTwoFactor])
 
   const startTwoFactorSetup = async () => {

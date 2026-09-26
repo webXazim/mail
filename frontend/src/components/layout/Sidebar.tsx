@@ -108,7 +108,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
     const attachments = mailbox.filter((mail) => mail.attachment).length
     const used = 0.4 + mailbox.filter((mail) => mail.folder !== 'Trash').length * 0.002 + attachments * 0.012
     return { used: used.toFixed(1), total: '15', percent: Math.min(100, Math.round((used / 15) * 100)) }
-  }, [mailbox, signedInProfile?.storage])
+  }, [mailbox, signedInProfile])
   const [resizing, setResizing] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [moreFoldersOpen, setMoreFoldersOpen] = useState(false)

@@ -55,7 +55,8 @@ export function NotificationsPage() {
   }, [nextBefore])
 
   useEffect(() => {
-    void load(false)
+    const timer = window.setTimeout(() => void load(false), 0)
+    return () => window.clearTimeout(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

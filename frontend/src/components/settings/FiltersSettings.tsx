@@ -94,7 +94,7 @@ export function FiltersSettings() {
   const [draft, setDraft] = useState<FilterRule | null>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(true)
 
   useEffect(() => {
     if (!notice) return
@@ -104,7 +104,6 @@ export function FiltersSettings() {
 
   useEffect(() => {
     let active = true
-    setBusy(true)
     rulesApi
       .refresh()
       .then((next) => active && setRules(next))

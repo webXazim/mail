@@ -105,7 +105,10 @@ export function AdminControlPlanePage() {
     } catch (reason) { fail(reason) } finally { setLoading(false) }
   }, [tab, loadControls, loadBusinesses, loadDomains, loadMailboxes, loadRecovery])
 
-  useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void reload(), 0)
+    return () => window.clearTimeout(timer)
+  }, [reload])
 
   const changeTab = (next: Tab) => {
     setTab(next)

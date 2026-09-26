@@ -39,7 +39,7 @@ import { settingsApi } from '../../services/settings'
 import { profileApi } from '../../services/profile'
 import { receiptRequestsApi } from '../../services/receipts'
 import type { RealtimeEvent } from '../../services/ws'
-import type { Draft, Mail, Mailbox } from '../../types'
+import type { Draft, Mail } from '../../types'
 import { initialMailState, mailboxReducer, type MailActionKind } from './mailboxReducer'
 
 export type MailToast = {
@@ -187,7 +187,8 @@ export function MailProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    void loadMailbox()
+    const timer = window.setTimeout(() => void loadMailbox(), 0)
+    return () => window.clearTimeout(timer)
   }, [loadMailbox])
 
   useEffect(() => {

@@ -109,13 +109,20 @@ function BusinessBillingPage() {
   }
 
   useEffect(() => {
-    void reload().catch((error) => setLoadError(friendlyError(error)))
-    void billingApi.refreshInvoices()
+    const initialLoad = window.setTimeout(() => {
+      void reload().catch((error) => setLoadError(friendlyError(error)))
+      void billingApi.refreshInvoices()
+    }, 0)
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') navigate('/mail/inbox')
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(initialLoad)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+    // reload is intentionally mount-only; user-triggered retries call it directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate])
 
   const showNotice = (message: string) => {

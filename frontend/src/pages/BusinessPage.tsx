@@ -90,48 +90,54 @@ export function BusinessPage() {
   }
 
   useEffect(() => {
-    load(readPendingCloudflareOAuth()?.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load businesses'))
-    organizationsApi.cloudflareOAuthConfig().then(setCloudflareOAuthConfig).catch(() => undefined)
+    const timer = window.setTimeout(() => {
+      load(readPendingCloudflareOAuth()?.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load businesses'))
+      organizationsApi.cloudflareOAuthConfig().then(setCloudflareOAuthConfig).catch(() => undefined)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (!params.has('code') && !params.has('error')) return
-    const pending = readPendingCloudflareOAuth()
-    if (cloudflareOAuthHandling.current) return
-    if (!pending) {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search)
+      if (!params.has('code') && !params.has('error')) return
+      const pending = readPendingCloudflareOAuth()
+      if (cloudflareOAuthHandling.current) return
+      if (!pending) {
+        cloudflareOAuthHandling.current = true
+        const nextUrl = new URL(window.location.href)
+        for (const key of ['code', 'state', 'error', 'error_description']) nextUrl.searchParams.delete(key)
+        window.history.replaceState(window.history.state, '', nextUrl.toString())
+        setError('Cloudflare setup expired. Connect Cloudflare again to continue.')
+        return
+      }
+      if (!detail) return
+      if (detail.id !== pending.organizationId) {
+        load(pending.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to restore business setup'))
+        return
+      }
       cloudflareOAuthHandling.current = true
+      const code = params.get('code')
+      const state = params.get('state')
       const nextUrl = new URL(window.location.href)
       for (const key of ['code', 'state', 'error', 'error_description']) nextUrl.searchParams.delete(key)
       window.history.replaceState(window.history.state, '', nextUrl.toString())
-      setError('Cloudflare setup expired. Connect Cloudflare again to continue.')
-      return
-    }
-    if (!detail) return
-    if (detail.id !== pending.organizationId) {
-      load(pending.organizationId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to restore business setup'))
-      return
-    }
-    cloudflareOAuthHandling.current = true
-    const code = params.get('code')
-    const state = params.get('state')
-    const nextUrl = new URL(window.location.href)
-    for (const key of ['code', 'state', 'error', 'error_description']) nextUrl.searchParams.delete(key)
-    window.history.replaceState(window.history.state, '', nextUrl.toString())
-    clearPendingCloudflareOAuth()
-    if (!code || state !== pending.state || params.has('error')) {
-      setError('Cloudflare connection was cancelled or did not match this setup attempt. Please try again.')
-      return
-    }
-    void (async () => {
-      try {
-        const result = await organizationsApi.exchangeCloudflareCode(pending.organizationId, pending.domainId, code, pending.verifier)
-        if (pending.mode === 'setup') await publishCloudflareChallenge(pending.domainId, result.access_token)
-        else await publishCloudflareMailDns(pending.domainId, result.access_token)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Cloudflare connection failed')
+      clearPendingCloudflareOAuth()
+      if (!code || state !== pending.state || params.has('error')) {
+        setError('Cloudflare connection was cancelled or did not match this setup attempt. Please try again.')
+        return
       }
-    })()
+      void (async () => {
+        try {
+          const result = await organizationsApi.exchangeCloudflareCode(pending.organizationId, pending.domainId, code, pending.verifier)
+          if (pending.mode === 'setup') await publishCloudflareChallenge(pending.domainId, result.access_token)
+          else await publishCloudflareMailDns(pending.domainId, result.access_token)
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Cloudflare connection failed')
+        }
+      })()
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [detail?.id])
 
   const startCloudflareConnection = async (domainId: string, mode: 'setup' | 'mail') => {
@@ -303,7 +309,7 @@ export function BusinessPage() {
     cloudflareTimer.current = setTimeout(() => void check(), 20_000)
   }
 
-  const publishCloudflareMailDns = async (domainId: string, suppliedToken?: string) => {
+  async function publishCloudflareMailDns(domainId: string, suppliedToken?: string) {
     if (!detail || !(suppliedToken || cloudflareTokens[domainId]?.trim())) return
     const organizationId = detail.id
     const token = suppliedToken || cloudflareTokens[domainId].trim()
@@ -326,7 +332,7 @@ export function BusinessPage() {
     }
   }
 
-  const publishCloudflareChallenge = async (domainId: string, suppliedToken?: string) => {
+  async function publishCloudflareChallenge(domainId: string, suppliedToken?: string) {
     if (!detail || !(suppliedToken || cloudflareTokens[domainId]?.trim())) return
     const organizationId = detail.id
     const token = suppliedToken || cloudflareTokens[domainId].trim()

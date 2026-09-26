@@ -55,10 +55,13 @@ export function MailClientsSettings() {
   }, [])
 
   useEffect(() => {
-    void refresh()
+    const initialRefresh = window.setTimeout(() => void refresh(), 0)
     const onMailboxChange = () => { setLoading(true); setCreated(null); void refresh() }
     window.addEventListener('cs-mail-mailbox-context-changed', onMailboxChange)
-    return () => window.removeEventListener('cs-mail-mailbox-context-changed', onMailboxChange)
+    return () => {
+      window.clearTimeout(initialRefresh)
+      window.removeEventListener('cs-mail-mailbox-context-changed', onMailboxChange)
+    }
   }, [refresh])
 
   useEffect(() => {

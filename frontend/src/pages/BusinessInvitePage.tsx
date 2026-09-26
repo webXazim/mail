@@ -9,15 +9,12 @@ export function BusinessInvitePage() {
   const navigate = useNavigate()
   const token = params.get('token') || ''
   const mailboxToken = params.get('mailbox_token') || ''
-  const [status, setStatus] = useState<'working' | 'done' | 'error'>('working')
-  const [message, setMessage] = useState('Accepting your business invitation…')
+  const missingToken = !token && !mailboxToken
+  const [status, setStatus] = useState<'working' | 'done' | 'error'>(missingToken ? 'error' : 'working')
+  const [message, setMessage] = useState(missingToken ? 'This invitation link is missing its token.' : 'Accepting your business invitation…')
 
   useEffect(() => {
-    if (!token && !mailboxToken) {
-      setStatus('error')
-      setMessage('This invitation link is missing its token.')
-      return
-    }
+    if (missingToken) return
     const accept = mailboxToken ? organizationsApi.acceptMailboxInvitation(mailboxToken) : organizationsApi.acceptInvitation(token)
     accept
       .then(async (result) => {
@@ -31,7 +28,7 @@ export function BusinessInvitePage() {
         setStatus('error')
         setMessage(cause instanceof Error ? cause.message : 'Unable to accept this invitation')
       })
-  }, [token, mailboxToken, navigate])
+  }, [token, mailboxToken, missingToken, navigate])
 
   return (
     <main className="invite-page">

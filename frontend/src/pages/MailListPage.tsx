@@ -376,13 +376,16 @@ export function MailListPage() {
 
   useEffect(() => {
     if (!remotePaged) return
-    setPage(1)
-    setRemoteRows([])
-    setRemoteAnchor(null)
-    setRemoteQueryState(null)
-    void loadRemotePage(true)
+    const timer = window.setTimeout(() => {
+      setPage(1)
+      setRemoteRows([])
+      setRemoteAnchor(null)
+      setRemoteQueryState(null)
+      void loadRemotePage(true)
+    }, 0)
     // loadRemotePage intentionally includes cursor state; a reset must only
     // rerun when the view/filter/sort changes, not after every fetched page.
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     remotePaged,

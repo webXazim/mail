@@ -43,10 +43,29 @@ export function AuditLogPage() {
   }, [category, nextBefore])
 
   useEffect(() => {
+    let active = true
+    void auditApi.page(category, null)
+      .then((page) => {
+        if (!active) return
+        setEntries(page.entries)
+        setHasMore(page.hasMore)
+        setNextBefore(page.nextBefore)
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Unable to load account activity')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [category])
+
+  const changeCategory = (next: 'all' | AccountAuditCategory) => {
     setLoading(true)
+    setError('')
     setNextBefore(null)
-    void load(false)
-  }, [category]) // eslint-disable-line react-hooks/exhaustive-deps
+    setCategory(next)
+  }
 
   return (
     <div className="settings-page" role="region" aria-label="Audit log">
@@ -70,7 +89,7 @@ export function AuditLogPage() {
           <select
             aria-label="Filter activity log"
             value={category}
-            onChange={(event) => setCategory(event.target.value as typeof category)}
+            onChange={(event) => changeCategory(event.target.value as typeof category)}
           >
             <option value="all">All activity</option>
             {Object.entries(filterLabel).map(([value, label]) => (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Check, CreditCard, History, Landmark, Plus, RefreshCw, Save, Trash2, Wrench } from 'lucide-react'
 import {
@@ -93,6 +93,11 @@ export function AdminBillingPage() {
   const [purgeConfirm, setPurgeConfirm] = useState<Record<string, string>>({})
   const [purgeReason, setPurgeReason] = useState<Record<string, string>>({})
 
+  const showNotice = useCallback((message: string) => {
+    setNotice(message)
+    window.setTimeout(() => setNotice(''), 5000)
+  }, [])
+
   const reloadOrders = async () => {
     const next = await adminBillingApi.orders(filter)
     setOrders(next)
@@ -129,16 +134,23 @@ export function AdminBillingPage() {
   }, [])
 
   useEffect(() => {
-    if (focusedBusinessId) {
+    if (!focusedBusinessId) return
+    const timer = window.setTimeout(() => {
       setTab('subscriptions')
       setSubscriptionPage(0)
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [focusedBusinessId])
 
   useEffect(() => {
-    if (tab === 'operations') void reloadOperations().catch((error) => showNotice(friendlyError(error)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
+    if (tab !== 'operations') return
+    const timer = window.setTimeout(() => {
+      void adminBillingApi.operations()
+        .then(setOperations)
+        .catch((error) => showNotice(friendlyError(error)))
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [tab, showNotice])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -147,11 +159,6 @@ export function AdminBillingPage() {
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedBusinessId, subscriptionQuery, subscriptionStatus, subscriptionPlan, subscriptionPage])
-
-  const showNotice = (message: string) => {
-    setNotice(message)
-    window.setTimeout(() => setNotice(''), 5000)
-  }
 
   const applySubscription = async (
     subscription: BusinessSubscriptionRow,

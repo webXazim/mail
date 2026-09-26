@@ -147,17 +147,20 @@ export function SearchPage() {
   )
 
   useEffect(() => {
-    setPage(1)
-    setChecked([])
-    setRemoteResults([])
-    setRemoteTotal(0)
-    setRemoteHasMore(false)
-    setRemoteAnchor(null)
-    setRemoteQueryState(null)
-    setRemoteError(null)
-    if (remoteMode && query.trim()) void loadRemoteSearch(true)
+    const timer = window.setTimeout(() => {
+      setPage(1)
+      setChecked([])
+      setRemoteResults([])
+      setRemoteTotal(0)
+      setRemoteHasMore(false)
+      setRemoteAnchor(null)
+      setRemoteQueryState(null)
+      setRemoteError(null)
+      if (remoteMode && query.trim()) void loadRemoteSearch(true)
+    }, 0)
     // Cursor state is intentionally excluded: changing it means another page
     // arrived, not that the search definition changed.
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, remoteMode, remoteSort])
 
