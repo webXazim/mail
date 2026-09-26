@@ -319,11 +319,11 @@ function BusinessBillingPage() {
           </section>}
           {summary.subscription_status === 'suspended' && hasCurrentPlan && <section className="settings-section" role="alert">
             <h2>Subscription suspended</h2>
-            <p>Mail access is disabled, but your business and mailbox data are retained for recovery{summary.data_retention_until ? ` until ${formatBillingDate(summary.data_retention_until)}` : ''}. Renew an eligible plan and complete payment approval to restore provider access.</p>
+            <p>Mail access is disabled, but your business and mailbox data are retained for recovery{summary.data_retention_until ? ` until ${formatBillingDate(summary.data_retention_until)}` : ''}. {summary.instant_activation ? 'Acceptance-test mode is enabled: ordering an eligible plan restores provider access immediately.' : 'Renew an eligible plan and complete payment approval to restore provider access.'}</p>
           </section>}
           {summary.retention_expired_at && !summary.purge_started_at && !summary.data_purged_at && <section className="settings-section" role="alert">
             <h2>Data-retention deadline reached</h2>
-            <p>Your retained mailbox data has not been deleted automatically. It is now eligible for an explicit platform-admin purge. Renew and complete payment approval before a purge begins to restore the retained mailbox data.</p>
+            <p>Your retained mailbox data has not been deleted automatically. It is now eligible for an explicit platform-admin purge. {summary.instant_activation ? 'Order an eligible plan before a purge begins to restore the retained mailbox data immediately in acceptance-test mode.' : 'Renew and complete payment approval before a purge begins to restore the retained mailbox data.'}</p>
           </section>}
           {purgeInProgress && <section className="settings-section" role="alert">
             <h2>Retained-data purge in progress</h2>
@@ -423,7 +423,9 @@ function BusinessBillingPage() {
                 {planActive
                   ? 'Your current plan remains active while a new invoice is reviewed. A same-plan renewal with the same mailbox quantity extends from your existing expiry; an approved upgrade starts a new billing term. Reductions can be scheduled for the renewal date without shortening your current paid access.'
                   : hasCurrentPlan
-                  ? 'Choose the plan you want to reactivate. Existing mail access is restored only after payment approval; capacity limits are validated before the invoice can be applied.'
+                  ? summary.instant_activation
+                    ? 'Acceptance-test mode is enabled: choosing an eligible plan reactivates suspended or expired service immediately when the order is placed. The invoice remains due for manual review.'
+                    : 'Choose the plan you want to reactivate. Existing mail access is restored only after payment approval; capacity limits are validated before the invoice can be applied.'
                   : summary.instant_activation
                   ? 'Testing mode is enabled: placing the order activates the plan immediately and issues an invoice. Payment remains due and can still be submitted for manual review.'
                   : 'Choose a plan and payment method. The invoice is issued immediately; the plan activates after manual payment verification.'}

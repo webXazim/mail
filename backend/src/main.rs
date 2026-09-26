@@ -131,6 +131,13 @@ async fn main() -> anyhow::Result<()> {
         metrics: Arc::new(Metrics::new()),
     };
 
+    if state.billing_instant_activation {
+        let repaired = cs_mail_api::services::billing::reconcile_test_instant_orders(&state).await?;
+        if repaired > 0 {
+            tracing::warn!(repaired, "reactivated legacy open billing invoice(s) for acceptance testing");
+        }
+    }
+
     cs_mail_api::handlers::attachments::migrate_legacy_inline_attachments(&state).await;
     cs_mail_api::handlers::attachments::spawn_cleanup_worker(state.clone());
     provisioning::spawn_worker(state.clone());

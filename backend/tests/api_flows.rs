@@ -1172,8 +1172,8 @@ async fn billing_manual_payment_flow() {
     assert_eq!(profile["plan"], "team", "cancelling an unpaid test invoice must not roll back the test plan");
 
     // Production lifecycle regression: period expiry must enter grace first,
-    // then suspend after the grace deadline. Test-only instant activation must
-    // never resurrect an expired/suspended paid estate.
+    // then suspend after the grace deadline. In isolated acceptance-test mode,
+    // a new order must immediately reactivate suspended service.
     sqlx::query("UPDATE organization_subscriptions SET status='active',current_period_end=now()-interval '1 minute',renewal_grace_end=NULL WHERE organization_id=$1")
         .bind(organization_id).execute(&t.db).await.expect("expire subscription for lifecycle test");
     let (status, diag) = send(&t.app, req("GET", "/api/admin/diagnostics", Some(&admin_token), None)).await;
@@ -1196,10 +1196,10 @@ async fn billing_manual_payment_flow() {
     let (status, recovery_order) = send(&t.app, req("POST", "/api/billing/orders", Some(&token),
         Some(json!({ "plan_code": "team", "payment_method": "bank", "customer_note": "Recovery" })))).await;
     assert_eq!(status, StatusCode::CREATED, "suspended recovery order: {recovery_order}");
-    assert_eq!(recovery_order["activation_mode"], "payment_approval", "test instant activation is bootstrap-only");
-    let still_suspended: String = sqlx::query_scalar("SELECT status FROM organization_subscriptions WHERE organization_id=$1")
-        .bind(organization_id).fetch_one(&t.db).await.expect("recovery pending status");
-    assert_eq!(still_suspended, "suspended", "placing a recovery invoice must not reactivate service before payment approval");
+    assert_eq!(recovery_order["activation_mode"], "test_instant", "acceptance-test ordering must reactivate suspended service immediately");
+    let reactivated: String = sqlx::query_scalar("SELECT status FROM organization_subscriptions WHERE organization_id=$1")
+        .bind(organization_id).fetch_one(&t.db).await.expect("recovery active status");
+    assert_eq!(reactivated, "active", "placing a recovery order must immediately reactivate service in acceptance-test mode");
     let recovery_order_id = recovery_order["id"].as_str().unwrap();
     let (status, _) = send(&t.app, req("POST", &format!("/api/billing/orders/{recovery_order_id}/cancel"), Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK);

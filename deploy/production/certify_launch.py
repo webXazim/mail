@@ -491,9 +491,16 @@ def check_static(root: Path) -> str:
         if freeze_token not in freeze_script:
             raise GateError(f"final launch-freeze gate is missing: {freeze_token}")
     if ("expiry must enter grace before suspension" not in lifecycle_tests
-            or "test instant activation is bootstrap-only" not in lifecycle_tests):
-        raise GateError("billing integration tests must cover grace, suspension and recovery activation safety")
-    return "contract v33, migration 0049, production acceptance-test compatibility, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+            or "acceptance-test ordering must reactivate suspended service immediately" not in lifecycle_tests):
+        raise GateError("billing integration tests must cover grace, suspension and acceptance-test recovery activation")
+    if ("let instant_reactivation = state.billing_instant_activation" not in billing_rs
+            or "pub async fn reconcile_test_instant_orders" not in billing_rs
+            or "activation_mode='test_instant'" not in billing_rs):
+        raise GateError("acceptance-test billing must reactivate inactive service on order and repair eligible legacy open invoices")
+    main_rs = (root / "backend/src/main.rs").read_text()
+    if "reconcile_test_instant_orders(&state).await?" not in main_rs:
+        raise GateError("API startup must repair eligible pre-fix open invoices when acceptance-test instant activation is enabled")
+    return "contract v34, migration 0049, acceptance-test suspended-service reactivation and legacy invoice repair, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

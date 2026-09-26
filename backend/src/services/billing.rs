@@ -781,6 +781,104 @@ async fn activate_plan_tx(
 }
 
 
+/// Repair open invoices created before acceptance-test reactivation was widened
+/// from bootstrap-only to all inactive retained subscriptions. This is deliberately limited to
+/// businesses whose service is not currently active/trial, so enabling the test
+/// flag cannot retroactively replace a healthy paid plan with an older invoice.
+/// It is idempotent: repaired orders are changed to `test_instant`, and
+/// `activate_plan_tx` protects assignment history with its order/source key.
+pub async fn reconcile_test_instant_orders(state: &AppState) -> Result<u64, ApiError> {
+    if !state.billing_instant_activation {
+        return Ok(0);
+    }
+
+    let candidates: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT o.id
+         FROM orders o
+         JOIN organization_subscriptions s ON s.organization_id=o.organization_id
+         WHERE o.status IN ('pending','submitted')
+           AND o.invoice_status='issued'
+           AND o.activation_mode='payment_approval'
+           AND s.data_purged_at IS NULL
+           AND (s.status NOT IN ('active','trial')
+                OR (s.current_period_end IS NOT NULL AND s.current_period_end<=now()))
+         ORDER BY o.created_at
+         LIMIT 100",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let mut repaired = 0u64;
+    for order_id in candidates {
+        let mut tx = state.db.begin().await.map_err(|e| ApiError::internal(e.to_string()))?;
+        let row: Option<(Uuid, Uuid, String, Uuid, String, String, i32, i64, chrono::DateTime<chrono::Utc>, i32, String)> = sqlx::query_as(
+            "SELECT o.user_id,o.organization_id,o.plan_code,o.plan_version_id,o.plan_name,o.interval,o.mailbox_count,
+                    pv.mailbox_bytes::bigint,COALESCE(o.due_at,now()),bs.grace_days,COALESCE(o.invoice_number,'')
+             FROM orders o
+             JOIN organization_subscriptions s ON s.organization_id=o.organization_id
+             JOIN plan_versions pv ON pv.id=o.plan_version_id
+             JOIN billing_settings bs ON bs.id=TRUE
+             WHERE o.id=$1
+               AND o.status IN ('pending','submitted')
+               AND o.invoice_status='issued'
+               AND o.activation_mode='payment_approval'
+               AND s.data_purged_at IS NULL
+               AND (s.status NOT IN ('active','trial')
+                    OR (s.current_period_end IS NOT NULL AND s.current_period_end<=now()))
+             FOR UPDATE OF o,s",
+        )
+        .bind(order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        let Some((order_user_id, organization_id, plan_code, plan_version_id, plan_name, interval, mailbox_count, mailbox_bytes, due_at, grace_days, invoice_number)) = row else {
+            tx.rollback().await.map_err(|e| ApiError::internal(e.to_string()))?;
+            continue;
+        };
+
+        let (period_start, period_end): (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+            "UPDATE orders SET activation_mode='test_instant',activated_at=COALESCE(activated_at,now()),
+                    period_start=COALESCE(period_start,now()),
+                    period_end=COALESCE(period_end,COALESCE(period_start,now())+CASE WHEN $2='year' THEN interval '1 year' ELSE interval '1 month' END),
+                    updated_at=now()
+             WHERE id=$1 RETURNING period_start,period_end",
+        )
+        .bind(order_id)
+        .bind(&interval)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        activate_plan_tx(
+            &mut tx,
+            organization_id,
+            &plan_code,
+            &plan_name,
+            plan_version_id,
+            mailbox_bytes,
+            mailbox_count,
+            period_start,
+            period_end,
+            order_id,
+            &invoice_number,
+            order_user_id,
+            due_at,
+            grace_days,
+            "test_instant",
+            false,
+            None,
+        )
+        .await?;
+        tx.commit().await.map_err(|e| ApiError::internal(e.to_string()))?;
+        repaired += 1;
+    }
+
+    Ok(repaired)
+}
+
+
 /// Keep manual-renewal subscription state aligned with authoritative period
 /// dates. Entitlement reads also fail closed on expired periods, so this worker
 /// primarily persists the operator-visible lifecycle and immutable history.
@@ -1024,9 +1122,10 @@ fn is_self_service_reduction(current: &PlanLimits, current_count: i32, target: &
         }
 }
 
-/// Create an invoice immediately. In current testing mode the plan is also
-/// activated in the same transaction, but the invoice stays due until payment
-/// is submitted and approved.
+/// Create an invoice immediately. In controlled acceptance-test mode an
+/// inactive/expired subscription is reactivated in the same transaction, while
+/// changes to a still-active paid/trial plan continue to require payment review.
+/// The invoice remains due until payment is submitted and approved.
 pub async fn create_order(
     state: &AppState,
     user_id: Uuid,
@@ -1127,16 +1226,20 @@ pub async fn create_order(
         )));
     }
 
-    let existing: Option<(String, String, i32, String, Option<Uuid>)> = sqlx::query_as(
+    let existing: Option<(String, String, i32)> = sqlx::query_as(
         "SELECT plan_code,
                 CASE WHEN status IN ('active','trial') AND current_period_end IS NOT NULL AND current_period_end<=now() THEN 'past_due' ELSE status END,
-                purchased_mailbox_count,assignment_source,last_order_id
+                purchased_mailbox_count
          FROM organization_subscriptions WHERE organization_id=$1 FOR UPDATE"
     ).bind(organization_id).fetch_optional(&mut *tx).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let first_test_activation = existing.as_ref().is_some_and(|(_, status, _, source, last_order_id)| {
-        status == "suspended" && source == "bootstrap" && last_order_id.is_none()
-    });
-    if let Some((_current_code, _, current_count, _, _)) = existing.as_ref().filter(|(_, status, _, _, _)| matches!(status.as_str(), "active" | "trial")) {
+    // Acceptance-test instant activation is also a recovery path. If service is
+    // suspended, cancelled, past due, expired, or has no subscription row yet,
+    // ordering an eligible plan immediately reactivates provider access. Keep
+    // live paid/trial plan changes on payment approval so an unpaid upgrade
+    // cannot silently replace working service.
+    let instant_reactivation = state.billing_instant_activation
+        && !existing.as_ref().is_some_and(|(_, status, _)| matches!(status.as_str(), "active" | "trial"));
+    if let Some((_current_code, _, current_count)) = existing.as_ref().filter(|(_, status, _)| matches!(status.as_str(), "active" | "trial")) {
         let current_plan = entitlements::for_organization(state, organization_id).await?.plan;
         if is_self_service_reduction(&current_plan, *current_count, &plan, mailbox_count) {
             return Err(ApiError::conflict(
@@ -1151,9 +1254,10 @@ pub async fn create_order(
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
-    // Test activation is only for the first plan. Never replace a live plan
-    // with an unpaid order; upgrades take effect after payment review.
-    let activation_mode = if state.billing_instant_activation && first_test_activation { "test_instant" } else { "payment_approval" };
+    // In controlled acceptance testing, inactive service is reactivated in the
+    // same transaction as the order. A currently active/trial plan is never
+    // displaced by an unpaid change; those changes still await payment review.
+    let activation_mode = if instant_reactivation { "test_instant" } else { "payment_approval" };
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO orders
           (user_id,organization_id,plan_code,plan_version_id,plan_name,amount_cents,currency,interval,seats,mailbox_count,included_mailbox_count,
