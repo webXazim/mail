@@ -112,7 +112,8 @@ grep -q 'cargo clippy --locked --all-targets' "$ROOT/backend/Dockerfile" || fail
 grep -q 'cargo test --locked --all-targets' "$ROOT/backend/Dockerfile" || fail "backend deploy image must run Rust tests"
 grep -q 'npm ci' "$ROOT/frontend/Dockerfile.production" || fail "frontend image must use npm ci"
 grep -q 'RUN npm run lint' "$ROOT/frontend/Dockerfile.production" || fail "frontend deploy image must block on lint"
-grep -q '0048_launch_freeze_operational_evidence.sql' "$ROOT/deploy/production/certify_launch.py" || fail "launch certifier must require operational-evidence migration"
+grep -q '0049_provisioning_operation_constraint_repair.sql' "$ROOT/deploy/production/certify_launch.py" || fail "launch certifier must require provisioning constraint repair migration"
+grep -q '0048_launch_freeze_operational_evidence.sql' "$ROOT/deploy/production/certify_launch.py" || fail "launch certifier must preserve operational-evidence migration checks"
 ok "locked backend/frontend builds and launch-freeze evidence are configured"
 
 python3 "$ROOT/deploy/production/certify_launch.py" --static-only --root "$ROOT" --report /tmp/cs-mail-release-static.json

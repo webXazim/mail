@@ -34,7 +34,9 @@ services:
     restart: unless-stopped
     environment:
       CS_MAIL_LISTEN_ADDR: ${CS_MAIL_LISTEN_ADDR:-0.0.0.0:8080}
-      CS_MAIL_ENVIRONMENT: ${CS_MAIL_ENVIRONMENT:-production}
+      # This is the production compose stack: never inherit a weaker runtime
+      # profile merely because an older env file omitted the setting.
+      CS_MAIL_ENVIRONMENT: production
       CS_MAIL_RELEASE_SHA256: ${CS_MAIL_RELEASE_SHA256:-unknown}
       CS_MAIL_PUBLIC_ORIGIN: ${CS_MAIL_PUBLIC_ORIGIN:?set CS_MAIL_PUBLIC_ORIGIN}
       CS_MAIL_CLOUDFLARE_OAUTH_CLIENT_ID: ${CS_MAIL_CLOUDFLARE_OAUTH_CLIENT_ID:-}

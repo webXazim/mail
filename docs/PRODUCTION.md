@@ -26,3 +26,8 @@ Migration `0048_launch_freeze_operational_evidence.sql` adds append-only local
 backup, restore-drill and offsite-backup evidence. The final launch gate is
 `sh manage launch-freeze`; it must pass with public controls closed before those
 controls are opened deliberately from localhost Platform Admin.
+
+
+### Upgrade 05F compatibility note
+
+The production Compose stack hard-pins the API runtime to `CS_MAIL_ENVIRONMENT=production`. Older root-owned production env files may omit that key; an explicit non-production value is still rejected. Migration `0049_provisioning_operation_constraint_repair.sql` repairs long-lived databases whose provisioning operation CHECK constraint predates the `set_access` lifecycle job.

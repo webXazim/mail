@@ -167,6 +167,27 @@ for _ in $(seq 1 60); do
 done
 [[ $ready -eq 1 ]] || { echo "new API failed readiness" >&2; exit 1; }
 
+# Verify the forward migration and the provider-job operation contract that
+# previously caused live 500s on `set_access` enqueue. Do this immediately
+# after API startup, before publishing the frontend or declaring success.
+echo "Verifying database migration head and provisioning operation contract..."
+db_service=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db)
+db_user=${POSTGRES_USER:-csmail}
+db_name=${POSTGRES_DB:-csmail}
+migration_head=$("${db_service[@]}" psql -U "$db_user" -d "$db_name" -Atqc   "SELECT COALESCE(max(version),0) FROM _sqlx_migrations WHERE success=TRUE")
+[[ "$migration_head" =~ ^[0-9]+$ && "$migration_head" -ge 49 ]] || {
+  echo "database migration head is $migration_head; expected at least 49" >&2
+  exit 1
+}
+operation_constraint=$("${db_service[@]}" psql -U "$db_user" -d "$db_name" -Atqc   "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='provisioning_jobs'::regclass AND conname='provisioning_jobs_operation_check'")
+for operation in ensure_mailbox set_quota set_credentials set_access delete_mailbox; do
+  grep -q "'$operation'" <<<"$operation_constraint" || {
+    echo "provisioning_jobs_operation_check is missing operation: $operation" >&2
+    exit 1
+  }
+done
+echo "Database migration/operation contract PASS (head=$migration_head)"
+
 echo "[5/8] Starting monitoring stack..."
 python3 "$ROOT/deploy/production/render-alertmanager.py"
 docker compose --profile monitoring --env-file "$ENV_FILE" -f "$COMPOSE" up -d --force-recreate alertmanager prometheus

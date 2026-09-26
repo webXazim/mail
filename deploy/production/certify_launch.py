@@ -35,7 +35,8 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
+EXPECTED_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
+LAUNCH_FREEZE_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
 DEFAULT_PUBLIC_ORIGIN = "https://mail.crescentsphere.com"
 
@@ -291,7 +292,14 @@ def check_static(root: Path) -> str:
             or 'queue_lifecycle_notice(state,organization_id,"suspended")' not in billing_service):
         raise GateError("subscription expiration/grace lifecycle worker is incomplete")
     recovery_migration = (root / "backend/migrations/0047_billing_recovery_operations.sql").read_text()
-    launch_freeze_migration = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    launch_freeze_migration = (root / "backend/migrations" / LAUNCH_FREEZE_MIGRATION).read_text()
+    provisioning_repair_migration = (root / "backend/migrations" / EXPECTED_MIGRATION).read_text()
+    if ("set_access" not in provisioning_repair_migration
+            or "provisioning_jobs_operation_check" not in provisioning_repair_migration
+            or "set_quota" not in provisioning_repair_migration
+            or "set_credentials" not in provisioning_repair_migration
+            or "delete_mailbox" not in provisioning_repair_migration):
+        raise GateError("migration 0049 must repair the complete provisioning operation constraint")
     if ("operational_evidence" not in launch_freeze_migration
             or "local_backup" not in launch_freeze_migration
             or "restore_drill" not in launch_freeze_migration
@@ -469,7 +477,7 @@ def check_static(root: Path) -> str:
     if ("expiry must enter grace before suspension" not in lifecycle_tests
             or "test instant activation is bootstrap-only" not in lifecycle_tests):
         raise GateError("billing integration tests must cover grace, suspension and recovery activation safety")
-    return "contract v32, migration 0048, exact-release certification, strict production runtime profile, append-only backup/restore/offsite evidence, retained-data purge controls, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v32, migration 0049, production-env compatibility, repaired provisioning operation authority, exact-release certification, backup/restore/offsite evidence, billing/provider recovery diagnostics, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:
@@ -489,8 +497,8 @@ def check_env_file(env_file: Path, env: dict[str, str]) -> str:
     sha = env["CS_MAIL_RELEASE_SHA256"].lower()
     if not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise GateError("CS_MAIL_RELEASE_SHA256 must be the 64-character deployed source-tree SHA-256")
-    if env.get("CS_MAIL_ENVIRONMENT", "").strip().lower() != "production":
-        raise GateError("CS_MAIL_ENVIRONMENT must be production for launch certification")
+    if env.get("CS_MAIL_ENVIRONMENT", "production").strip().lower() != "production":
+        raise GateError("CS_MAIL_ENVIRONMENT must be production when set for launch certification")
     if env.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "").strip().lower() != "false":
         raise GateError("CS_MAIL_BILLING_INSTANT_ACTIVATION must remain false in production; use an isolated non-production environment for bypass testing")
     if env.get("CS_MAIL_PROVIDER_NAMESPACE", "cs-mail") != "cs-mail":

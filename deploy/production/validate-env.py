@@ -62,8 +62,13 @@ def main() -> int:
     if not mailer_key.startswith("cs_live_"):
         print("CS_MAILER_API_KEY must be a production sending key", file=sys.stderr); return 1
 
-    if values.get("CS_MAIL_ENVIRONMENT", "") != "production":
-        print("CS_MAIL_ENVIRONMENT must be production", file=sys.stderr); return 1
+    # Backward-compatible production profile: older root-owned env files may
+    # predate CS_MAIL_ENVIRONMENT. This production-only deployment stack always
+    # injects the runtime profile as production, so absence is safe; an explicit
+    # non-production value is still rejected.
+    environment = values.get("CS_MAIL_ENVIRONMENT", "production").strip().lower()
+    if environment != "production":
+        print("CS_MAIL_ENVIRONMENT must be production when set", file=sys.stderr); return 1
     if values.get("CS_MAIL_BILLING_INSTANT_ACTIVATION", "false").strip().lower() != "false":
         print("CS_MAIL_BILLING_INSTANT_ACTIVATION must be false in production", file=sys.stderr); return 1
 
