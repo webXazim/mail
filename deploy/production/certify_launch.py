@@ -35,7 +35,7 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0050_r2_attachment_storage.sql"
+EXPECTED_MIGRATION = "0051_mailbox_delete_cleanup_queue.sql"
 PROVISIONING_REPAIR_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
 LAUNCH_FREEZE_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
@@ -489,6 +489,14 @@ def check_static(root: Path) -> str:
             or "refreshing stale provider account id before verified mailbox deletion" not in provisioning_rs
             or "Stored provider account id no longer matches the mailbox ownership binding" in provisioning_rs):
         raise GateError("verified Stalwart ownership binding must self-heal stale provider account ids instead of dead-lettering mailbox operations")
+    cleanup_migration = (root / "backend/migrations/0051_mailbox_delete_cleanup_queue.sql").read_text()
+    if ("provider mailbox already absent; finalizing local mailbox deletion" not in provisioning_rs
+            or "mailbox_cleanup_jobs" not in provisioning_rs
+            or "requeue_stuck_mailbox_deletions" not in provisioning_rs
+            or "deferred object cleanup will retry in background" not in provisioning_rs
+            or "CREATE TABLE IF NOT EXISTS mailbox_cleanup_jobs" not in cleanup_migration
+            or "storage_backend IN ('local','r2','mailbox_dirs')" not in cleanup_migration):
+        raise GateError("mailbox deletion must treat provider absence as success, hard-delete the UI row, and durably retry object cleanup")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()
     validate_env_script = (root / "deploy/production/validate-env.py").read_text()
     if ("acceptance-test mode is active" not in preflight_script
@@ -550,7 +558,7 @@ def check_static(root: Path) -> str:
             or "20 GiB PostgreSQL operating envelope" not in capacity_doc
             or "Stalwart mailbox storage" not in capacity_doc):
         raise GateError("capacity reporting/documentation is incomplete")
-    return "contract v37, migration 0050, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v38, migration 0051, idempotent provider-absent mailbox finalization, durable blob cleanup redrive, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

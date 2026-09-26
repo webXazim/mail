@@ -906,6 +906,12 @@ pub fn spawn_worker(state: AppState) {
                 if let Err(error) = reconcile_users(&state).await {
                     tracing::warn!(%error, "mailbox reconciliation pass failed");
                 }
+                if let Err(error) = requeue_stuck_mailbox_deletions(&state).await {
+                    tracing::warn!(%error, "stuck mailbox deletion redrive failed");
+                }
+                if let Err(error) = drain_mailbox_cleanup_jobs(&state).await {
+                    tracing::warn!(%error, "mailbox object cleanup pass failed");
+                }
                 if let Err(error) = cleanup_jobs(&state.db).await {
                     tracing::warn!(%error, "provisioning job cleanup failed");
                 }
@@ -1196,12 +1202,20 @@ async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     let mailbox_id=job.mailbox_id.ok_or_else(|| JobFailure::permanent("Deletion job is not bound to a hosted mailbox"))?;
     let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM mailboxes WHERE id=$1 AND deleted_at IS NULL)")
         .bind(mailbox_id).fetch_one(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
-    if !exists { return Ok(()); }
+    if !exists {
+        // The user-facing mailbox row is already gone. Any remaining blob cleanup
+        // is handled by the independent durable cleanup queue.
+        return Ok(());
+    }
     let mailbox=resolve_job_mailbox(state,job).await?;
     if mailbox.mailbox_status!="deleting" { return Err(JobFailure::permanent("Hosted mailbox is no longer marked for deletion")); }
     if mailbox.domain_is_system { return Err(JobFailure::permanent("Automatic deletion of protected system-domain provider accounts is disabled on the shared mail server")); }
     let provider_domain_id=mailbox.provider_domain_id.as_deref().filter(|v|!v.trim().is_empty())
         .ok_or_else(||JobFailure::permanent("Hosted mailbox provider domain binding is missing"))?;
+
+    // Provider absence is a successful, idempotent delete state. If an earlier
+    // attempt removed the Stalwart account but failed during local cleanup, a
+    // retry must finalize CS Mail instead of preserving a ghost mailbox row.
     let found=state.stalwart.find_customer_account(provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
     if let Some(account)=found {
         let expected=mailbox.provider_account_id.clone().filter(|v|!v.is_empty()).or_else(||job.account_id.clone().filter(|v|!v.is_empty()));
@@ -1216,20 +1230,125 @@ async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure
             refresh_provider_account_binding(state,&mailbox,&account).await?;
         }
         state.stalwart.destroy_customer_account(&account,provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
+    } else {
+        tracing::info!(mailbox_id=%mailbox.mailbox_id,address=%mailbox.address,"provider mailbox already absent; finalizing local mailbox deletion");
     }
-    let objects:Vec<(String,String)>=sqlx::query_as("SELECT storage_key,storage_backend FROM staged_attachments WHERE mailbox_id=$1")
-        .bind(mailbox.mailbox_id).fetch_all(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
-    for (key,backend) in objects { state.object_store.delete(&key,&backend).await.map_err(JobFailure::transient)?; }
-    let imports:Vec<(String,)>=sqlx::query_as("SELECT storage_key FROM mailbox_imports WHERE mailbox_id=$1")
-        .bind(mailbox.mailbox_id).fetch_all(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
-    for (key,) in imports { state.object_store.delete_local(&key).await.map_err(JobFailure::transient)?; }
-    state.object_store.delete_local_mailbox_dirs(mailbox.mailbox_id).await.map_err(JobFailure::transient)?;
+
+    // Snapshot all mailbox-owned storage into a durable cleanup queue BEFORE
+    // the mailbox row is removed. The cleanup queue deliberately has no FK to
+    // mailboxes, so R2/local cleanup can continue after the UI/DB mailbox has
+    // disappeared. This makes provider deletion + mailbox hard-delete atomic
+    // from the customer's perspective without abandoning storage cleanup.
+    let mut tx=state.db.begin().await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    sqlx::query(
+        "INSERT INTO mailbox_cleanup_jobs(mailbox_id,storage_backend,storage_key)
+         SELECT mailbox_id,storage_backend,storage_key FROM staged_attachments WHERE mailbox_id=$1
+         ON CONFLICT(mailbox_id,storage_backend,storage_key) DO NOTHING"
+    ).bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    sqlx::query(
+        "INSERT INTO mailbox_cleanup_jobs(mailbox_id,storage_backend,storage_key)
+         SELECT mailbox_id,'local',storage_key FROM mailbox_imports WHERE mailbox_id=$1
+         ON CONFLICT(mailbox_id,storage_backend,storage_key) DO NOTHING"
+    ).bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+    sqlx::query(
+        "INSERT INTO mailbox_cleanup_jobs(mailbox_id,storage_backend,storage_key)
+         VALUES($1,'mailbox_dirs',$2)
+         ON CONFLICT(mailbox_id,storage_backend,storage_key) DO NOTHING"
+    ).bind(mailbox.mailbox_id).bind(mailbox.mailbox_id.to_string()).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     sqlx::query("UPDATE provisioning_jobs SET target_email='deleted-mailbox@invalid',account_id=NULL,secret_ciphertext=NULL,updated_at=now() WHERE mailbox_id=$1")
-        .bind(mailbox.mailbox_id).execute(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+        .bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     let deleted=sqlx::query("DELETE FROM mailboxes WHERE id=$1 AND status='deleting' AND deleted_at IS NULL")
-        .bind(mailbox.mailbox_id).execute(&state.db).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+        .bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     if deleted.rows_affected()!=1 { return Err(JobFailure::transient("Mailbox deletion state changed before final database purge")); }
+    tx.commit().await.map_err(|e|JobFailure::transient(e.to_string()))?;
+
+    // Cleanup is intentionally decoupled from mailbox deletion. Try it now for
+    // fast reclamation, but a storage outage must not resurrect a deleted
+    // mailbox in the Business UI; the worker will retry the cleanup job.
+    if let Err(error)=drain_mailbox_cleanup_jobs_for(state,Some(mailbox.mailbox_id)).await {
+        tracing::warn!(mailbox_id=%mailbox.mailbox_id,%error,"mailbox deleted; deferred object cleanup will retry in background");
+    }
     Ok(())
+}
+
+async fn requeue_stuck_mailbox_deletions(state: &AppState) -> Result<u64, String> {
+    let ids:Vec<Uuid>=sqlx::query_scalar(
+        "SELECT m.id FROM mailboxes m
+         JOIN organization_domains d ON d.id=m.domain_id AND d.organization_id=m.organization_id
+         WHERE m.deleted_at IS NULL AND m.status='deleting' AND d.is_system=FALSE
+           AND NOT EXISTS (
+             SELECT 1 FROM provisioning_jobs j
+             WHERE j.mailbox_id=m.id AND j.operation='delete_mailbox'
+               AND j.status IN ('pending','retry','processing')
+           )
+         ORDER BY m.updated_at ASC
+         LIMIT 100"
+    ).fetch_all(&state.db).await.map_err(|e|e.to_string())?;
+    if ids.is_empty() { return Ok(0); }
+    let mut tx=state.db.begin().await.map_err(|e|e.to_string())?;
+    for mailbox_id in &ids {
+        state.provisioning.enqueue_mailbox_delete_tx(&mut tx,*mailbox_id).await.map_err(|e|e.to_string())?;
+    }
+    tx.commit().await.map_err(|e|e.to_string())?;
+    tracing::info!(count=ids.len(),"requeued stuck mailbox deletions");
+    Ok(ids.len() as u64)
+}
+
+async fn drain_mailbox_cleanup_jobs(state: &AppState) -> Result<u64, String> {
+    drain_mailbox_cleanup_jobs_for(state,None).await
+}
+
+async fn drain_mailbox_cleanup_jobs_for(state: &AppState, mailbox_filter: Option<Uuid>) -> Result<u64, String> {
+    // Recover abandoned cleanup leases first. Object and directory deletes are
+    // idempotent, so retry after a crashed worker is safe.
+    sqlx::query(
+        "UPDATE mailbox_cleanup_jobs SET status='retry',next_attempt_at=now(),updated_at=now(),
+                last_error=CASE WHEN last_error='' THEN 'cleanup worker lease expired' ELSE last_error END
+         WHERE status='processing' AND updated_at < now()-interval '15 minutes'"
+    ).execute(&state.db).await.map_err(|e|e.to_string())?;
+
+    let rows:Vec<(Uuid,Uuid,String,String,i32,i32)>=sqlx::query_as(
+        "UPDATE mailbox_cleanup_jobs AS cleanup
+         SET status='processing',attempts=cleanup.attempts+1,updated_at=now()
+         WHERE cleanup.id IN (
+           SELECT id FROM mailbox_cleanup_jobs
+           WHERE status IN ('pending','retry') AND next_attempt_at<=now()
+             AND ($1::uuid IS NULL OR mailbox_id=$1)
+           ORDER BY next_attempt_at,created_at
+           FOR UPDATE SKIP LOCKED
+           LIMIT 100
+         )
+         RETURNING cleanup.id,cleanup.mailbox_id,cleanup.storage_backend,cleanup.storage_key,cleanup.attempts,cleanup.max_attempts"
+    ).bind(mailbox_filter).fetch_all(&state.db).await.map_err(|e|e.to_string())?;
+
+    let mut completed=0u64;
+    for (id,mailbox_id,backend,key,attempts,max_attempts) in rows {
+        let result=if backend=="mailbox_dirs" {
+            state.object_store.delete_local_mailbox_dirs(mailbox_id).await
+        } else {
+            state.object_store.delete(&key,&backend).await
+        };
+        match result {
+            Ok(()) => {
+                sqlx::query("DELETE FROM mailbox_cleanup_jobs WHERE id=$1").bind(id).execute(&state.db).await.map_err(|e|e.to_string())?;
+                completed+=1;
+            }
+            Err(error) => {
+                let dead=attempts>=max_attempts;
+                let delay=(5_i64.saturating_mul(1_i64 << (attempts.saturating_sub(1).min(8) as u32))).clamp(5,3600);
+                sqlx::query(
+                    "UPDATE mailbox_cleanup_jobs SET status=$2,last_error=$3,
+                       next_attempt_at=CASE WHEN $2='dead' THEN next_attempt_at ELSE now()+($4*interval '1 second') END,
+                       completed_at=CASE WHEN $2='dead' THEN now() ELSE NULL END,updated_at=now()
+                     WHERE id=$1"
+                ).bind(id).bind(if dead{"dead"}else{"retry"}).bind(error.chars().take(MAX_ERROR_CHARS).collect::<String>()).bind(delay)
+                 .execute(&state.db).await.map_err(|e|e.to_string())?;
+            }
+        }
+    }
+    sqlx::query("DELETE FROM mailbox_cleanup_jobs WHERE status='dead' AND completed_at < now()-interval '30 days'")
+        .execute(&state.db).await.map_err(|e|e.to_string())?;
+    Ok(completed)
 }
 
 async fn complete_job(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
