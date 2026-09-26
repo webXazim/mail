@@ -3,7 +3,7 @@ import { apiFetch, mailboxContextStore } from '../lib/api'
 import { clearPrimaryIdentity, primaryAccount, setPrimaryIdentity } from './accounts'
 import { isDemoAllowed } from './auth'
 import { isRemoteMail } from './remote-mail'
-import { defaultSettings, settingsApi } from './settings'
+import { settingsApi } from './settings'
 
 export type Profile = {
   id: string
@@ -108,9 +108,10 @@ function applyIdentity(profile: Profile) {
   const name = displayNameOf(profile)
   setPrimaryIdentity({ name, email: profile.mailbox_email || profile.email })
   const current = settingsApi.load()
-  if (current.displayName === defaultSettings.displayName) {
-    settingsApi.save({ ...current, displayName: name })
+  if (current.displayName !== name) {
+    settingsApi.cache({ ...current, displayName: name })
   }
+  window.dispatchEvent(new Event('cs-mail-primary-identity-changed'))
 }
 
 export const profileApi = {

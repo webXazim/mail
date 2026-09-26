@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { ArrowLeft, CircleHelp, Menu, Search, X } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { displayNameOf, useProfile } from '../../services/profile'
+import { primaryAccount } from '../../services/accounts'
 
 type TopbarProps = { onOpenMobile: () => void; mobileOpen: boolean; onHelp: () => void; mailEnabled?: boolean }
 
@@ -11,6 +13,15 @@ export function Topbar({ onOpenMobile, mobileOpen, onHelp, mailEnabled = true }:
   const [searchParams] = useSearchParams()
   const query = searchParams.get('q') || ''
   const isMobile = useIsMobile()
+  const signedInProfile = useProfile()
+  const accountName = signedInProfile ? displayNameOf(signedInProfile) : primaryAccount().name
+  const accountInitials =
+    accountName
+      .trim()
+      .split(/\s+/)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .slice(0, 2)
+      .join('') || '?'
   const inputRef = useRef<HTMLInputElement>(null)
   const onSearchScreen = pathname.startsWith('/mail/search')
   useEffect(() => {
@@ -129,7 +140,7 @@ export function Topbar({ onOpenMobile, mobileOpen, onHelp, mailEnabled = true }:
           <CircleHelp size={17} />
         </button>
         <span className="top-divider" />
-        <span className="avatar avatar--teal">AM</span>
+        <span className="avatar avatar--teal" title={accountName} aria-label={accountName}>{accountInitials}</span>
       </div>
     </header>
   )

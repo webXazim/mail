@@ -38,6 +38,14 @@ export const defaultSettings: UserSettings = {
 
 const settingsKey = 'cs-mail:settings'
 
+const persistLocal = (next: UserSettings) => {
+  localStorage.setItem(settingsKey, JSON.stringify(next))
+  applyTheme(next.theme)
+  applyDensity(next.density)
+  applyRadius(next.radius)
+  applyAccent(next.accent)
+}
+
 export const applyTheme = (theme: UserSettings['theme']) => {
   document.documentElement.dataset.theme = theme
 }
@@ -63,30 +71,31 @@ export const settingsApi = {
     }
   },
   save(next: UserSettings) {
-    localStorage.setItem(settingsKey, JSON.stringify(next))
-    applyTheme(next.theme)
-    applyDensity(next.density)
-    applyRadius(next.radius)
-    applyAccent(next.accent)
+    persistLocal(next)
     if (isRemoteMail()) {
+      // Account identity lives in /api/profile. Do not persist displayName as a
+      // mailbox preference or it becomes a competing source of truth.
+      const { displayName: _accountDisplayName, ...mailboxSettings } = next
       void apiFetch<unknown>(
         '/api/settings',
-        { method: 'PUT', body: JSON.stringify(next) },
+        { method: 'PUT', body: JSON.stringify(mailboxSettings) },
         { retry: false },
       ).catch(() => {})
     }
+  },
+  /** Keep the browser cache aligned with the authoritative account profile
+   * without writing account identity into mailbox_settings. */
+  cache(next: UserSettings) {
+    persistLocal(next)
   },
   /** API-first hydration; falls back to the local cache when offline or in demo mode. */
   async refresh(): Promise<UserSettings> {
     if (!isRemoteMail()) return settingsApi.load()
     try {
       const remote = await apiFetch<Partial<UserSettings>>('/api/settings')
-      const next = { ...defaultSettings, ...settingsApi.load(), ...remote }
-      localStorage.setItem(settingsKey, JSON.stringify(next))
-      applyTheme(next.theme)
-      applyDensity(next.density)
-      applyRadius(next.radius)
-      applyAccent(next.accent)
+      const { displayName: _legacyMailboxDisplayName, ...remoteMailboxSettings } = remote
+      const next = { ...defaultSettings, ...settingsApi.load(), ...remoteMailboxSettings }
+      persistLocal(next)
       return next
     } catch {
       return settingsApi.load()

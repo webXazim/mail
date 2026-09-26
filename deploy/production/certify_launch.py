@@ -35,7 +35,7 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0052_realtime_mailbox_delete_finalization.sql"
+EXPECTED_MIGRATION = "0053_profile_display_name_authority.sql"
 PROVISIONING_REPAIR_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
 LAUNCH_FREEZE_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
@@ -278,6 +278,23 @@ def check_static(root: Path) -> str:
     profile_handler = (root / "backend/src/handlers/profile.rs").read_text()
     if "mailbox_quota_bytes" not in profile_handler or "provider_total_bytes" not in profile_handler:
         raise GateError("signed-in mailbox storage indicator is not mailbox-authoritative")
+    settings_handler = (root / "backend/src/handlers/settings.rs").read_text()
+    settings_service = (root / "frontend/src/services/settings.ts").read_text()
+    profile_service = (root / "frontend/src/services/profile.ts").read_text()
+    settings_page = (root / "frontend/src/pages/SettingsPage.tsx").read_text()
+    business_page = (root / "frontend/src/pages/BusinessPage.tsx").read_text()
+    topbar = (root / "frontend/src/components/layout/Topbar.tsx").read_text()
+    mail_context = (root / "frontend/src/state/mail/MailContext.tsx").read_text()
+    if ("profileApi.update({ display_name: name })" not in settings_page
+            or 'object.remove("displayName")' not in settings_handler
+            or "const { displayName: _accountDisplayName" not in settings_service
+            or "settingsApi.cache({ ...current, displayName: name })" not in profile_service
+            or "cs-mail-primary-identity-changed" not in profile_service
+            or "cs-mail-primary-identity-changed" not in mail_context
+            or 'json!({"resource": "profile"})' not in profile_handler
+            or "payload.resource === 'profile'" not in business_page
+            or '>AM<' in topbar):
+        raise GateError("account display name must be profile-authoritative and update navigation/account surfaces without competing mailbox settings")
     org_service = (root / "frontend/src/services/organizations.ts").read_text()
     business_page = (root / "frontend/src/pages/BusinessPage.tsx").read_text()
     if "updateMailboxStorage" not in org_service or "Mailboxes & storage" not in business_page or "business-mailbox-storage" not in business_page:
@@ -491,6 +508,7 @@ def check_static(root: Path) -> str:
         raise GateError("verified Stalwart ownership binding must self-heal stale provider account ids instead of dead-lettering mailbox operations")
     cleanup_migration = (root / "backend/migrations/0051_mailbox_delete_cleanup_queue.sql").read_text()
     realtime_delete_migration = (root / "backend/migrations/0052_realtime_mailbox_delete_finalization.sql").read_text()
+    profile_name_migration = (root / "backend/migrations/0053_profile_display_name_authority.sql").read_text()
     business_page = (root / "frontend/src/pages/BusinessPage.tsx").read_text()
     if ("provider mailbox already absent; finalizing local mailbox deletion" not in provisioning_rs
             or "mailbox_cleanup_jobs" not in provisioning_rs
@@ -506,6 +524,10 @@ def check_static(root: Path) -> str:
             or "NOT EXISTS (SELECT 1 FROM mailboxes WHERE id = event_mailbox_fk)" not in realtime_delete_migration
             or "'business_mailboxes'" not in business_page):
         raise GateError("mailbox hard-delete must suppress cascade realtime events, reject dangling realtime mailbox FKs, and refresh the Business UI after commit")
+    if ("latest_legacy_name" not in profile_name_migration
+            or "legacy.updated_at >= u.updated_at" not in profile_name_migration
+            or "payload - 'displayName'" not in profile_name_migration):
+        raise GateError("migration 0053 must promote the newest legacy account display name safely and remove the mailbox-settings duplicate")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()
     validate_env_script = (root / "deploy/production/validate-env.py").read_text()
     if ("acceptance-test mode is active" not in preflight_script
@@ -567,7 +589,7 @@ def check_static(root: Path) -> str:
             or "20 GiB PostgreSQL operating envelope" not in capacity_doc
             or "Stalwart mailbox storage" not in capacity_doc):
         raise GateError("capacity reporting/documentation is incomplete")
-    return "contract v39, migration 0052, realtime-safe mailbox hard deletion, idempotent provider-absent mailbox finalization, durable blob cleanup redrive, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v40, migration 0053, profile-authoritative account display names, realtime-safe mailbox hard deletion, idempotent provider-absent mailbox finalization, durable blob cleanup redrive, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

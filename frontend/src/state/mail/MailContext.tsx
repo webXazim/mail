@@ -207,6 +207,12 @@ export function MailProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('cs-mail-auth-changed', syncAuth)
   }, [loadMailbox])
 
+  useEffect(() => {
+    const syncPrimaryIdentity = () => setAccounts(accountsApi.list())
+    window.addEventListener('cs-mail-primary-identity-changed', syncPrimaryIdentity)
+    return () => window.removeEventListener('cs-mail-primary-identity-changed', syncPrimaryIdentity)
+  }, [])
+
   // Bootstrap the real identity (name/email) so the account switcher and
   // composer stop showing the demo fixture for signed-in users.
   useEffect(() => {

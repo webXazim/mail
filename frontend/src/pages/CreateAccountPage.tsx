@@ -30,7 +30,6 @@ export function CreateAccountPage() {
     try {
       const result = await authApi.register(name.trim(), email, password)
       if ('access' in result && result.access) {
-        localStorage.setItem('cs-mail:display-name', name.trim())
         navigate('/mail/business')
       } else {
         navigate('/verify-email', { state: { email: email.trim().toLowerCase() } })

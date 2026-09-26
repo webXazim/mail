@@ -32,7 +32,7 @@ import { labelsApi } from '../../services/labels'
 import { settingsApi } from '../../services/settings'
 import { authApi } from '../../services/auth'
 import { currentVirtualCounts, isRemoteMail } from '../../services/remote-mail'
-import { profileApi, useProfile, useRole } from '../../services/profile'
+import { displayNameOf, profileApi, useProfile, useRole } from '../../services/profile'
 import { primaryAccountId, unifiedViewId } from '../../services/accounts'
 import { ManageFolders } from '../ManageFolders'
 import { BrandIdentity } from '../BrandIdentity'
@@ -82,7 +82,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
   const profile = useMemo(() => {
     const active = accounts.find((account) => account.id === activeAccount) ?? accounts[0]
     const displayName = signedInProfile && active.id === primaryAccountId
-      ? signedInProfile.display_name || signedInProfile.email.split('@')[0]
+      ? displayNameOf(signedInProfile)
       : active.id === primaryAccountId && authApi.isDemo()
         ? settingsApi.load().displayName || active.name
         : active.name

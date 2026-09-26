@@ -32,6 +32,7 @@ pub async fn get(State(state): State<AppState>, auth: AuthUser) -> Result<Json<V
     let mut settings = row.map(|(p,)| p).unwrap_or_else(|| json!({}));
     if let Some(object) = settings.as_object_mut() {
         object.remove("twoFactor");
+        object.remove("displayName");
     }
     Ok(Json(settings))
 }
@@ -50,6 +51,7 @@ pub async fn put(
 
     if let Some(object) = payload.as_object_mut() {
         object.remove("twoFactor");
+        object.remove("displayName");
     }
 
     sqlx::query(

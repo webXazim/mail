@@ -131,7 +131,12 @@ export function BusinessPage() {
       const detail = (event as CustomEvent<{ kind?: string; payload?: { resource?: string; organization_id?: string } }>).detail
       if (detail?.kind !== 'resource-changed') return
       const payload = detail.payload
-      if (!payload || !['business_domains', 'business_mailboxes'].includes(payload.resource ?? '')) return
+      if (!payload) return
+      if (payload.resource === 'profile') {
+        load(activeId || undefined).catch(() => undefined)
+        return
+      }
+      if (!['business_domains', 'business_mailboxes'].includes(payload.resource ?? '')) return
       if (activeId && payload.organization_id && payload.organization_id !== activeId) return
       load(activeId || undefined).catch(() => undefined)
     }

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { settingsApi, type UserSettings } from '../services/settings'
 import { primaryAccount } from '../services/accounts'
+import { displayNameOf, profileApi, useProfile } from '../services/profile'
+import { isRemoteMail } from '../services/remote-mail'
 import type { RealtimeEvent } from '../services/ws'
 import { AccountsSettings } from '../components/settings/AccountsSettings'
 import { FiltersSettings } from '../components/settings/FiltersSettings'
@@ -67,8 +69,14 @@ export function SettingsPage() {
     const requested = searchParams.get('tab') as Tab | null
     return requested && tabs.some((item) => item.id === requested) ? requested : 'account'
   })
+  const signedInProfile = useProfile()
+  const remote = isRemoteMail()
   const [settings, setSettings] = useState<UserSettings>(() => settingsApi.load())
+  const [profileName, setProfileName] = useState(() =>
+    signedInProfile ? displayNameOf(signedInProfile) : settingsApi.load().displayName,
+  )
   const [saved, setSaved] = useState(false)
+  const [profileError, setProfileError] = useState('')
   const [permission, setPermission] = useState<'granted' | 'denied' | 'default' | 'unsupported'>(
     () =>
       notificationSupported()
@@ -111,11 +119,21 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    if (!signedInProfile) return
+    const timer = window.setTimeout(() => setProfileName(displayNameOf(signedInProfile)), 0)
+    return () => window.clearTimeout(timer)
+  }, [signedInProfile])
+
+  useEffect(() => {
     const onRealtime = (incoming: Event) => {
       const detail = (incoming as CustomEvent<RealtimeEvent>).detail
       if (detail?.kind !== 'resource-changed') return
-      if (detail.payload.resource !== 'settings' && detail.payload.resource !== 'profile') return
-      void settingsApi.refresh().then(setSettings).catch(() => {})
+      const resource = detail.payload?.resource
+      if (resource === 'settings') {
+        void settingsApi.refresh().then(setSettings).catch(() => {})
+      } else if (resource === 'profile') {
+        void profileApi.refresh().catch(() => {})
+      }
     }
     window.addEventListener('cs-mail-realtime', onRealtime)
     return () => window.removeEventListener('cs-mail-realtime', onRealtime)
@@ -297,10 +315,23 @@ export function SettingsPage() {
 
       {tab === 'account' && (
         <form
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault()
-            settingsApi.save(settings)
-            setSaved(true)
+            setProfileError('')
+            const name = profileName.trim()
+            if (!name) {
+              setProfileError('Display name is required')
+              return
+            }
+            try {
+              const nextSettings = { ...settings, displayName: name }
+              if (remote) await profileApi.update({ display_name: name })
+              settingsApi.save(nextSettings)
+              setSettings(nextSettings)
+              setSaved(true)
+            } catch (error) {
+              setProfileError(error instanceof Error ? error.message : 'Could not update profile')
+            }
           }}
         >
           <div className="settings-section">
@@ -308,21 +339,27 @@ export function SettingsPage() {
             <label>
               Display name
               <input
-                value={settings.displayName}
-                onChange={(event) => update({ displayName: event.target.value })}
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                autoComplete="name"
+                maxLength={80}
               />
             </label>
+            <small className="settings-hint">
+              Used for your CS Mail account, navigation and profile. Sender names are managed separately under Identities.
+            </small>
             <label>
-              Email address
-              <input value={primaryAccount().email} readOnly />
+              Sign-in email
+              <input value={signedInProfile?.login_email || signedInProfile?.email || primaryAccount().email} readOnly />
             </label>
+            {profileError && <p className="form-error" role="alert">{profileError}</p>}
           </div>
           <div className="settings-section">
             <h2>Signature</h2>
             <textarea
               value={settings.signature}
               onChange={(event) => update({ signature: event.target.value })}
-              placeholder={'Alex Morgan\nProduct & Operations\nCS Mail'}
+              placeholder={`${profileName || 'Your name'}\nRole or team\nCS Mail`}
             />
             <small className="settings-hint">Added to the bottom of new messages.</small>
           </div>

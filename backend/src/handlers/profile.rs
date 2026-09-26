@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::audit;
 use crate::domain::quota;
 use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
@@ -178,13 +179,14 @@ pub struct UpdateIn {
     onboarded: Option<bool>,
 }
 
-/// Bootstrap fields the client may set on first run: the display name shown as
-/// the From identity and the `onboarded` flag that dismisses first-run setup.
+/// Account-profile fields the client may set. `display_name` is the canonical
+/// CS Mail account name; sender/From names are managed by sender identities.
 pub async fn update(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(body): Json<UpdateIn>,
 ) -> Result<Json<Value>, ApiError> {
+    let mut profile_changed = false;
     if let Some(raw) = body.display_name {
         let name = raw.trim();
         if name.is_empty() {
@@ -199,6 +201,8 @@ pub async fn update(
             .execute(&state.db)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
+        profile_changed = true;
+        audit::record(&state, Some(auth.user_id), "profile.display_name_update", json!({"display_name": name})).await;
     }
 
     if body.onboarded == Some(true) {
@@ -207,6 +211,17 @@ pub async fn update(
             .execute(&state.db)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
+        profile_changed = true;
+    }
+
+    if profile_changed {
+        let _ = crate::ws::emit_event(
+            &state,
+            auth.user_id,
+            "resource-changed",
+            json!({"resource": "profile"}),
+        )
+        .await;
     }
 
     get(State(state), auth).await
