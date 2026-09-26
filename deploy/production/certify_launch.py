@@ -35,7 +35,7 @@ import uuid
 from typing import Any, Callable
 
 EXPECTED_CONTRACT = 32
-EXPECTED_MIGRATION = "0051_mailbox_delete_cleanup_queue.sql"
+EXPECTED_MIGRATION = "0052_realtime_mailbox_delete_finalization.sql"
 PROVISIONING_REPAIR_MIGRATION = "0049_provisioning_operation_constraint_repair.sql"
 LAUNCH_FREEZE_MIGRATION = "0048_launch_freeze_operational_evidence.sql"
 SAFETY_MIGRATION = "0042_launch_safety_defaults.sql"
@@ -490,6 +490,8 @@ def check_static(root: Path) -> str:
             or "Stored provider account id no longer matches the mailbox ownership binding" in provisioning_rs):
         raise GateError("verified Stalwart ownership binding must self-heal stale provider account ids instead of dead-lettering mailbox operations")
     cleanup_migration = (root / "backend/migrations/0051_mailbox_delete_cleanup_queue.sql").read_text()
+    realtime_delete_migration = (root / "backend/migrations/0052_realtime_mailbox_delete_finalization.sql").read_text()
+    business_page = (root / "frontend/src/pages/BusinessPage.tsx").read_text()
     if ("provider mailbox already absent; finalizing local mailbox deletion" not in provisioning_rs
             or "mailbox_cleanup_jobs" not in provisioning_rs
             or "requeue_stuck_mailbox_deletions" not in provisioning_rs
@@ -497,6 +499,13 @@ def check_static(root: Path) -> str:
             or "CREATE TABLE IF NOT EXISTS mailbox_cleanup_jobs" not in cleanup_migration
             or "storage_backend IN ('local','r2','mailbox_dirs')" not in cleanup_migration):
         raise GateError("mailbox deletion must treat provider absence as success, hard-delete the UI row, and durably retry object cleanup")
+    if ("set_config('cs_mail.suppress_realtime','on',true)" not in provisioning_rs
+            or '"resource":"business_mailboxes"' not in provisioning_rs
+            or "current_setting('cs_mail.suppress_realtime', TRUE) = 'on'" not in realtime_delete_migration
+            or "event_mailbox_fk := NULL" not in realtime_delete_migration
+            or "NOT EXISTS (SELECT 1 FROM mailboxes WHERE id = event_mailbox_fk)" not in realtime_delete_migration
+            or "'business_mailboxes'" not in business_page):
+        raise GateError("mailbox hard-delete must suppress cascade realtime events, reject dangling realtime mailbox FKs, and refresh the Business UI after commit")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()
     validate_env_script = (root / "deploy/production/validate-env.py").read_text()
     if ("acceptance-test mode is active" not in preflight_script
@@ -558,7 +567,7 @@ def check_static(root: Path) -> str:
             or "20 GiB PostgreSQL operating envelope" not in capacity_doc
             or "Stalwart mailbox storage" not in capacity_doc):
         raise GateError("capacity reporting/documentation is incomplete")
-    return "contract v38, migration 0051, idempotent provider-absent mailbox finalization, durable blob cleanup redrive, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v39, migration 0052, realtime-safe mailbox hard deletion, idempotent provider-absent mailbox finalization, durable blob cleanup redrive, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

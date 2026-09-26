@@ -1257,10 +1257,42 @@ async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     ).bind(mailbox.mailbox_id).bind(mailbox.mailbox_id.to_string()).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     sqlx::query("UPDATE provisioning_jobs SET target_email='deleted-mailbox@invalid',account_id=NULL,secret_ciphertext=NULL,updated_at=now() WHERE mailbox_id=$1")
         .bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
+
+    // Cascading mailbox-owned rows have realtime AFTER DELETE triggers. Those
+    // rows still contain the old mailbox_id while the parent delete is in
+    // progress, so emitting per-child realtime events can violate the
+    // realtime_events mailbox FK and roll the entire delete back. Suppress the
+    // cascade noise in this transaction; one account-global mailbox event is
+    // emitted after commit instead.
+    let _:String=sqlx::query_scalar("SELECT set_config('cs_mail.suppress_realtime','on',true)")
+        .fetch_one(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     let deleted=sqlx::query("DELETE FROM mailboxes WHERE id=$1 AND status='deleting' AND deleted_at IS NULL")
         .bind(mailbox.mailbox_id).execute(&mut *tx).await.map_err(|e|JobFailure::transient(e.to_string()))?;
     if deleted.rows_affected()!=1 { return Err(JobFailure::transient("Mailbox deletion state changed before final database purge")); }
     tx.commit().await.map_err(|e|JobFailure::transient(e.to_string()))?;
+
+    // Notify every active business member after commit. This event is
+    // deliberately account-global: the mailbox FK no longer exists, but the
+    // Business page still needs to remove the deleted row immediately.
+    let members:Vec<Uuid>=sqlx::query_scalar(
+        "SELECT user_id FROM organization_memberships WHERE organization_id=$1 AND status='active'"
+    ).bind(mailbox.organization_id).fetch_all(&state.db).await.unwrap_or_default();
+    for user_id in members {
+        if let Err(error)=crate::ws::emit_event(
+            state,
+            user_id,
+            "resource-changed",
+            serde_json::json!({
+                "resource":"business_mailboxes",
+                "action":"delete",
+                "organization_id":mailbox.organization_id,
+                "deleted_mailbox_id":mailbox.mailbox_id,
+                "address":mailbox.address.as_str(),
+            }),
+        ).await {
+            tracing::warn!(mailbox_id=%mailbox.mailbox_id,%user_id,%error,"mailbox deleted but realtime business refresh event failed");
+        }
+    }
 
     // Cleanup is intentionally decoupled from mailbox deletion. Try it now for
     // fast reclamation, but a storage outage must not resurrect a deleted
