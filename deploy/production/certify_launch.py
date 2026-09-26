@@ -484,6 +484,11 @@ def check_static(root: Path) -> str:
         raise GateError("scheduled billing changes must borrow target_code when binding it so the value remains available for audit JSON")
     if "if let Some((current_code, _, current_count, _, _))" in billing_rs:
         raise GateError("billing order flow must not retain an unused current_code binding")
+    provisioning_rs = (root / "backend/src/services/provisioning.rs").read_text()
+    if ("refreshing stale provider account id from verified ownership binding" not in provisioning_rs
+            or "refreshing stale provider account id before verified mailbox deletion" not in provisioning_rs
+            or "Stored provider account id no longer matches the mailbox ownership binding" in provisioning_rs):
+        raise GateError("verified Stalwart ownership binding must self-heal stale provider account ids instead of dead-lettering mailbox operations")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()
     validate_env_script = (root / "deploy/production/validate-env.py").read_text()
     if ("acceptance-test mode is active" not in preflight_script
@@ -545,7 +550,7 @@ def check_static(root: Path) -> str:
             or "20 GiB PostgreSQL operating envelope" not in capacity_doc
             or "Stalwart mailbox storage" not in capacity_doc):
         raise GateError("capacity reporting/documentation is incomplete")
-    return "contract v36, migration 0050, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
+    return "contract v37, migration 0050, stale provider-binding recovery, bounded R2 transfers, PostgreSQL capacity telemetry and retention, mailbox hard deletion, acceptance-test billing recovery, exact-release certification, backup/restore/offsite evidence, blocking release quality gates, atomic deployment, and closed public launch controls are coherent"
 
 
 def check_env_file(env_file: Path, env: dict[str, str]) -> str:

@@ -1058,6 +1058,43 @@ async fn process_ensure(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     mark_mailbox_ready(state, &mailbox, &account_id).await
 }
 
+async fn refresh_provider_account_binding(
+    state: &AppState,
+    mailbox: &JobMailbox,
+    account_id: &str,
+) -> Result<(), JobFailure> {
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| JobFailure::transient(e.to_string()))?;
+    sqlx::query(
+        "UPDATE mailboxes SET provider_account_id=$2, updated_at=now()
+         WHERE id=$1 AND deleted_at IS NULL",
+    )
+    .bind(mailbox.mailbox_id)
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| JobFailure::transient(e.to_string()))?;
+    if let Some(user_id) = mailbox.user_id {
+        sqlx::query(
+            "UPDATE users SET mail_account_id=$1, updated_at=now()
+             WHERE id=$2 AND primary_mailbox_id=$3",
+        )
+        .bind(account_id)
+        .bind(user_id)
+        .bind(mailbox.mailbox_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| JobFailure::transient(e.to_string()))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| JobFailure::transient(e.to_string()))?;
+    Ok(())
+}
+
 async fn resolve_owned_provider_account(
     state: &AppState,
     mailbox: &JobMailbox,
@@ -1077,12 +1114,15 @@ async fn resolve_owned_provider_account(
         state.stalwart.find_customer_account(provider_domain_id, &mailbox.local_part, &mailbox.provider_marker)
             .await.map_err(JobFailure::provider)?
     }.ok_or_else(|| JobFailure::transient("Mailbox has not been provisioned yet"))?;
-    if let Some(candidate) = candidate {
-        if candidate != found {
-            return Err(JobFailure::permanent(
-                "Stored provider account id no longer matches the mailbox ownership binding",
-            ));
-        }
+    if candidate.as_deref().is_some_and(|stored| stored != found.as_str()) {
+        tracing::warn!(
+            mailbox_id = %mailbox.mailbox_id,
+            address = %mailbox.address,
+            stored_provider_account_id = ?candidate.as_deref(),
+            resolved_provider_account_id = %found,
+            "refreshing stale provider account id from verified ownership binding"
+        );
+        refresh_provider_account_binding(state, mailbox, &found).await?;
     }
     Ok(found)
 }
@@ -1165,7 +1205,16 @@ async fn process_delete(state: &AppState, job: &JobRow) -> Result<(), JobFailure
     let found=state.stalwart.find_customer_account(provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
     if let Some(account)=found {
         let expected=mailbox.provider_account_id.clone().filter(|v|!v.is_empty()).or_else(||job.account_id.clone().filter(|v|!v.is_empty()));
-        if expected.is_some_and(|candidate|candidate!=account){return Err(JobFailure::permanent("Stored provider account id no longer matches the mailbox ownership binding"));}
+        if expected.as_deref().is_some_and(|stored|stored!=account.as_str()) {
+            tracing::warn!(
+                mailbox_id = %mailbox.mailbox_id,
+                address = %mailbox.address,
+                stored_provider_account_id = ?expected.as_deref(),
+                resolved_provider_account_id = %account,
+                "refreshing stale provider account id before verified mailbox deletion"
+            );
+            refresh_provider_account_binding(state,&mailbox,&account).await?;
+        }
         state.stalwart.destroy_customer_account(&account,provider_domain_id,&mailbox.local_part,&mailbox.provider_marker).await.map_err(JobFailure::provider)?;
     }
     let objects:Vec<(String,String)>=sqlx::query_as("SELECT storage_key,storage_backend FROM staged_attachments WHERE mailbox_id=$1")

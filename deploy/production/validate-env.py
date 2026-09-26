@@ -30,7 +30,7 @@ def main() -> int:
         print("usage: validate-env.py /opt/cs-mail/.env.production", file=sys.stderr)
         return 2
     path = Path(sys.argv[1])
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     values: dict[str, str] = {}
     for n, raw in enumerate(path.read_text().splitlines(), 1):
         line = raw.strip()
@@ -42,12 +42,17 @@ def main() -> int:
         if not KEY.fullmatch(key):
             print(f"invalid environment key on line {n}: {key!r}", file=sys.stderr); return 1
         if key in seen:
-            print(f"duplicate environment key on line {n}: {key}", file=sys.stderr); return 1
+            print(
+                f"duplicate environment key on line {n}: {key} "
+                f"(first defined on line {seen[key]}); keep exactly one definition",
+                file=sys.stderr,
+            )
+            return 1
         if any(token in value for token in DANGEROUS):
             print(f"shell command/interpolation syntax is forbidden in value for {key}", file=sys.stderr); return 1
         if "\x00" in value or "\r" in value:
             print(f"invalid control character in value for {key}", file=sys.stderr); return 1
-        seen.add(key); values[key] = value
+        seen[key] = n; values[key] = value
 
     for key, minimum in REQUIRED_SECRET_MIN.items():
         if len(values.get(key, "")) < minimum:
