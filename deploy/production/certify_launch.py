@@ -464,6 +464,11 @@ def check_static(root: Path) -> str:
             or "CS_MAIL_ENVIRONMENT" not in config_rs
             or "CS_MAIL_RELEASE_SHA256" not in config_rs):
         raise GateError("production runtime profile validation is incomplete")
+    if ("let config = Config {" not in config_rs
+            or "config.validate_runtime_profile()?;" not in config_rs
+            or "Ok(config)" not in config_rs
+            or "Ok(Config {" in config_rs):
+        raise GateError("Config::from_env must construct a named Config, validate the runtime profile, and then return it")
     if "if self.billing_instant_activation" in config_rs:
         raise GateError("production runtime must allow explicit acceptance-test instant activation; public launch safety belongs to certification/freeze")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()

@@ -246,7 +246,7 @@ impl Config {
             }
         };
 
-        Ok(Config {
+        let config = Config {
             listen_addr: env_or("CS_MAIL_LISTEN_ADDR", "0.0.0.0:8080").parse()?,
             environment,
             release_sha256,
