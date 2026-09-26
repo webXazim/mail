@@ -122,7 +122,6 @@ function BusinessBillingPage() {
       window.removeEventListener('keydown', handleKeyDown)
     }
     // reload is intentionally mount-only; user-triggered retries call it directly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate])
 
   const showNotice = (message: string) => {
