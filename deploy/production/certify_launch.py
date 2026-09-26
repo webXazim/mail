@@ -471,6 +471,11 @@ def check_static(root: Path) -> str:
         raise GateError("Config::from_env must construct a named Config, validate the runtime profile, and then return it")
     if "if self.billing_instant_activation" in config_rs:
         raise GateError("production runtime must allow explicit acceptance-test instant activation; public launch safety belongs to certification/freeze")
+    billing_rs = (root / "backend/src/services/billing.rs").read_text()
+    if ".bind(organization_id).bind(change_type).bind(&target_code).bind(target_version)" not in billing_rs:
+        raise GateError("scheduled billing changes must borrow target_code when binding it so the value remains available for audit JSON")
+    if "if let Some((current_code, _, current_count, _, _))" in billing_rs:
+        raise GateError("billing order flow must not retain an unused current_code binding")
     preflight_script = (root / "deploy/production/preflight.sh").read_text()
     validate_env_script = (root / "deploy/production/validate-env.py").read_text()
     if ("acceptance-test mode is active" not in preflight_script

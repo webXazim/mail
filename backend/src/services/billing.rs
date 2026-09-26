@@ -446,7 +446,7 @@ pub async fn schedule_subscription_change(
            target_mailbox_count=EXCLUDED.target_mailbox_count,effective_at=EXCLUDED.effective_at,status='pending',requested_by=EXCLUDED.requested_by,
            requested_at=now(),cancelled_by=NULL,cancelled_at=NULL,applied_at=NULL,blocked_reason=EXCLUDED.blocked_reason,note=EXCLUDED.note,updated_at=now()
          RETURNING id"
-    ).bind(organization_id).bind(change_type).bind(target_code).bind(target_version).bind(target_count).bind(effective_at).bind(user_id)
+    ).bind(organization_id).bind(change_type).bind(&target_code).bind(target_version).bind(target_count).bind(effective_at).bind(user_id)
      .bind(&blocked_reason).bind(note.trim()).fetch_one(&state.db).await.map_err(|e| ApiError::internal(e.to_string()))?;
     sqlx::query(
         "INSERT INTO subscription_assignment_history(organization_id,plan_code,plan_name,purchased_mailbox_count,assignment_source,payment_confirmed,assigned_by,event_type,period_end,status_after,reason,detail)
@@ -1136,7 +1136,7 @@ pub async fn create_order(
     let first_test_activation = existing.as_ref().is_some_and(|(_, status, _, source, last_order_id)| {
         status == "suspended" && source == "bootstrap" && last_order_id.is_none()
     });
-    if let Some((current_code, _, current_count, _, _)) = existing.as_ref().filter(|(_, status, _, _, _)| matches!(status.as_str(), "active" | "trial")) {
+    if let Some((_current_code, _, current_count, _, _)) = existing.as_ref().filter(|(_, status, _, _, _)| matches!(status.as_str(), "active" | "trial")) {
         let current_plan = entitlements::for_organization(state, organization_id).await?.plan;
         if is_self_service_reduction(&current_plan, *current_count, &plan, mailbox_count) {
             return Err(ApiError::conflict(
