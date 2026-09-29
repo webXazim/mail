@@ -79,3 +79,48 @@ After local readiness passes, add proxied Cloudflare A records for `connect`
 and `widget` to the actual VPS public IP and run the full Connect public
 readiness probe. No DNS port value is used; HAProxy receives 80/443. Do not
 route the apex or `www` to Messenger.
+
+## Restore the real visitor IP for Support abuse limits
+
+The first Connect cutover keeps `SUPPORT_TRUST_PROXY_HEADERS=False`. Before
+enabling it, upgrade both the Connect Nginx configuration and the HAProxy edge
+to PROXY v2. HAProxy passes the original TCP peer to Nginx. Nginx accepts
+`CF-Connecting-IP` only when that peer belongs to Cloudflare's published
+proxy ranges, then sends one verified IP to Django and Axum. All HTTPS
+Connect/widget traffic must pass through the shared edge. Mail's backend
+already uses PROXY v2 and is not changed by this upgrade.
+
+Perform this short coordinated update while Connect may be interrupted. Keep
+the old configuration files until every probe passes. Do not copy `.env` into
+Git or print its secrets.
+
+1. Before pulling, back up `/srv/apps/connect/nginx/snm.production.conf` and
+   `/srv/crescentsphere/platform-edge/haproxy.cfg` with a common timestamp.
+   Record the current Connect and Mail commit IDs.
+2. Pull the reviewed Connect `axum` and Mail `main` commits. Run
+   `docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml config --quiet`
+   in `/srv/apps/connect`. Validate the candidate Nginx file with
+   `docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps nginx nginx -t`.
+   Validate the Mail source HAProxy file with the one-off `haproxy -c`
+   command above. Do not recreate either live service if a validation fails.
+3. Recreate only `cs-connect` Nginx with
+   `docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml up -d --no-deps --force-recreate nginx`.
+   Then install the reviewed Mail `deploy/edge/haproxy.cfg` into
+   `/srv/crescentsphere/platform-edge/haproxy.cfg` and recreate only the
+   `cs-platform-edge` edge service. This order can briefly interrupt Connect
+   and widget; Mail continues through its unchanged backend.
+4. Repeat the three local HTTPS probes above and run
+   `bash scripts/production-readiness.sh --probe --skip-public` in Connect.
+   A direct HTTPS request to Connect Nginx without HAProxy will now fail by
+   design because that listener requires PROXY v2.
+5. Set `SUPPORT_TRUST_PROXY_HEADERS=True` in `/srv/apps/connect/.env` and set
+   `SUPPORT_TRUSTED_PROXY_CIDRS` to the subnet from
+   `docker network inspect cs-connect_messenger`. For the current deployment
+   it is `172.27.0.0/16`. Recreate only Connect `web` to load those values,
+   then run `docker compose ... exec -T web python manage.py check --deploy`
+   and the readiness probe again. Confirm `support.W002` is gone.
+
+If Connect/widget probes fail, first restore the saved edge HAProxy file and
+recreate `edge`; then restore the saved Connect Nginx file and recreate
+`nginx`. Leave `SUPPORT_TRUST_PROXY_HEADERS=False` until this coordinated
+update passes. Keep the Mail 200 probe in every check.
