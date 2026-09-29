@@ -13,9 +13,10 @@ For the current shared VPS, start with `QUICKSTART.md`.
 - Prometheus/Alertmanager: loopback only.
 - Runtime config: `/opt/cs-mail/.env.production`, outside Git, `root:root 0600`.
 
-The active VPS proxy is currently `cs-messenger-nginx-1`. Follow
-`../edge/README.md` to stage and cut over the independent platform edge before
-the first CS Mail deployment. CS Mail's application-owned tenancy uses the
+If the older `cs-messenger-nginx-1` proxy is still active, follow
+`../edge/README.md` for the initial independent edge bootstrap. For the new
+Connect production stack, use `../edge/CONNECT_PRODUCTION_CUTOVER.md` to attach
+the edge to `cs-connect_messenger`. CS Mail's application-owned tenancy uses the
 organization and mailbox schema; it does not require Stalwart Enterprise
 tenants. Complete `GO_LIVE.md` before accepting other businesses. The
 host-Nginx TLS script is for a different topology.

@@ -57,7 +57,7 @@ services:
 networks:
   messenger:
     external: true
-    name: cs-messenger_messenger
+    name: cs-connect_messenger
   platform_web:
     name: cs-platform-web
     driver: bridge

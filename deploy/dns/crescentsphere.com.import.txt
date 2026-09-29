@@ -1,5 +1,6 @@
 ;; CrescentSphere DNS rebuild for Cloudflare import.
 ;; Source: Cloudflare export dated 2026-09-23 18:10:39.
+;; connect/widget names reflect the planned cutover; verify the saved IPv4 before import.
 ;; Cloudflare creates SOA and NS; do not import those records.
 ;; Keep the cf-proxied tags for website and DNS-only mail hosts.
 ;; After Mailer supports the existing root Stalwart domain, add its
@@ -7,7 +8,8 @@
 
 ;; A Records
 crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
-dm.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
+connect.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
+widget.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:true
 mail.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:false
 smtp.crescentsphere.com.	1	IN	A	152.53.178.165 ; cf_tags=cf-proxied:false
 

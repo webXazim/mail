@@ -1,11 +1,17 @@
 # Independent platform edge on the shared VPS
 
-This is the direct first-deployment path for `mail.crescentsphere.com`.
+For the new `cs-connect` production stack at `/srv/apps/connect`, use
+[`CONNECT_PRODUCTION_CUTOVER.md`](CONNECT_PRODUCTION_CUTOVER.md). The procedure
+below is a historical Mail edge bootstrap around the older `cs-messenger`
+test stack. Its commands do not match the current Connect edge files and must
+not be run for the production cutover.
+
+The original first-deployment path for `mail.crescentsphere.com` was:
 Source lives in CS Mail's `deploy/edge/`; its separate VPS Compose project
 lives at `/srv/crescentsphere/platform-edge`. HAProxy takes public 80/443
-after cutover. It passes root, `www`, and `dm` to Messenger's existing Nginx,
+after cutover. It passes `connect` and `widget` to Messenger's Nginx,
 but sends `mail` to a dedicated Nginx TLS gateway and the private CS Mail web
-container. CS Mail does not use a Messenger vhost. Mailer stays on its own
+container. The root and `www` hosts are reserved for the company site. CS Mail does not use a Messenger vhost. Mailer stays on its own
 Cloudflare Tunnel; Stalwart stays on `smtp.crescentsphere.com`.
 
 Keep Messenger on public 80/443 until section 3. A staged edge uses only
@@ -79,16 +85,16 @@ sudo docker exec cs-platform-edge-mail_tls-1 nginx -t
 sudo docker network inspect cs-platform-web >/dev/null
 ```
 
-Probe `dm` and root through staging. Their direct local HTTPS probes use `-k`
+Probe `widget` and `connect` through staging. Their direct local HTTPS probes use `-k`
 because Messenger uses a Cloudflare Origin CA certificate. The mail probe must
 validate the Let's Encrypt certificate without `-k`; HTTP 502 is expected
 until CS Mail starts.
 
 ```bash
-curl --noproxy '*' --resolve dm.crescentsphere.com:18443:127.0.0.1 \
-  -ksS -o /dev/null -w '%{http_code}\n' https://dm.crescentsphere.com:18443/
-curl --noproxy '*' --resolve crescentsphere.com:18443:127.0.0.1 \
-  -ksS -o /dev/null -w '%{http_code}\n' https://crescentsphere.com:18443/
+curl --noproxy '*' --resolve widget.crescentsphere.com:18443:127.0.0.1 \
+  -ksS -o /dev/null -w '%{http_code}\n' https://widget.crescentsphere.com:18443/
+curl --noproxy '*' --resolve connect.crescentsphere.com:18443:127.0.0.1 \
+  -ksS -o /dev/null -w '%{http_code}\n' https://connect.crescentsphere.com:18443/
 curl --noproxy '*' --resolve mail.crescentsphere.com:18443:127.0.0.1 \
   -sS -o /dev/null -w '%{http_code}\n' https://mail.crescentsphere.com:18443/
 ```
@@ -97,7 +103,7 @@ curl --noproxy '*' --resolve mail.crescentsphere.com:18443:127.0.0.1 \
 
 Use a maintenance window. The active Messenger release must include the
 reviewed Compose change that removes only Nginx's public 80/443 bindings.
-Its private Nginx, TLS files, and root/`dm` vhosts remain. Do not recreate
+Its private Nginx, TLS files, and `connect`/`widget` vhosts remain. Do not recreate
 Messenger Nginx until all staging probes pass.
 
 ```bash
@@ -126,10 +132,10 @@ Then publish only the edge service and verify Messenger remains reachable:
 cd /srv/crescentsphere/platform-edge
 sudo docker compose up -d --force-recreate edge
 sudo ss -lntp '( sport = :80 or sport = :443 )'
-curl --noproxy '*' --resolve dm.crescentsphere.com:443:127.0.0.1 \
-  -ksS -o /dev/null -w '%{http_code}\n' https://dm.crescentsphere.com/
-curl --noproxy '*' --resolve crescentsphere.com:443:127.0.0.1 \
-  -ksS -o /dev/null -w '%{http_code}\n' https://crescentsphere.com/
+curl --noproxy '*' --resolve widget.crescentsphere.com:443:127.0.0.1 \
+  -ksS -o /dev/null -w '%{http_code}\n' https://widget.crescentsphere.com/
+curl --noproxy '*' --resolve connect.crescentsphere.com:443:127.0.0.1 \
+  -ksS -o /dev/null -w '%{http_code}\n' https://connect.crescentsphere.com/
 ```
 
 ## 4. Deploy CS Mail directly to the edge
@@ -174,5 +180,5 @@ sudo certbot renew --dry-run
 If the edge fails, stop its published `edge` service to release 80/443, then
 restore the saved Messenger production Compose and recreate only Messenger
 Nginx. Preserve CS Mail's database, Stalwart's data, and mailbox DNS. The
-company homepage can later replace Messenger's root/`www` route without
-changing `dm`, `mail`, or `mailer`.
+company homepage can later use the root/`www` hosts without
+changing `widget`, `mail`, or `mailer`.
