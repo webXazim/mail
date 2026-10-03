@@ -20,7 +20,9 @@ export async function beginConnectSignIn() {
   const verifier = randomUrlToken() + randomUrlToken()
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
   const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  sessionStorage.setItem(pendingKey, JSON.stringify({ state, verifier, createdAt: Date.now() }))
+  const requested = new URLSearchParams(location.search).get('return') || ''
+  const next = requested.startsWith('/api/auth/federation/authorize?') && !requested.includes('\\') ? requested : ''
+  sessionStorage.setItem(pendingKey, JSON.stringify({ state, verifier, next, createdAt: Date.now() }))
   authorize.searchParams.set('response_type', 'code')
   authorize.searchParams.set('client_id', config.client_id)
   authorize.searchParams.set('redirect_uri', config.redirect_uri)
@@ -31,16 +33,17 @@ export async function beginConnectSignIn() {
   location.assign(authorize.toString())
 }
 
-export function consumeConnectCallback(search: string): { code: string; verifier: string } {
+export function consumeConnectCallback(search: string): { code: string; verifier: string; next: string } {
   const params = new URLSearchParams(search)
   const raw = sessionStorage.getItem(pendingKey)
   sessionStorage.removeItem(pendingKey)
   history.replaceState(history.state, '', '/auth/connect/callback')
   if (!raw || params.has('error')) throw new Error('CS Connect sign-in was cancelled or expired.')
-  let pending: { state: string; verifier: string; createdAt: number }
+  let pending: { state: string; verifier: string; next?: string; createdAt: number }
   try { pending = JSON.parse(raw) } catch { throw new Error('Invalid CS Connect sign-in session.') }
   if (!params.get('code') || params.get('state') !== pending.state || Date.now() - pending.createdAt > 300_000) {
     throw new Error('CS Connect sign-in was invalid or expired. Please try again.')
   }
-  return { code: params.get('code')!, verifier: pending.verifier }
+  const next = pending.next?.startsWith('/api/auth/federation/authorize?') && !pending.next.includes('\\') ? pending.next : ''
+  return { code: params.get('code')!, verifier: pending.verifier, next }
 }

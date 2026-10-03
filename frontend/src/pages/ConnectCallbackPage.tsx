@@ -11,11 +11,11 @@ export function ConnectCallbackPage() {
   useEffect(() => {
     if (started.current) return
     started.current = true
-    let callback: { code: string; verifier: string }
+    let callback: { code: string; verifier: string; next: string }
     try { callback = consumeConnectCallback(location.search) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to complete sign-in.'); return }
     void authApi.completeConnect(callback.code, callback.verifier)
-      .then(() => navigate('/mail/business', { replace: true }))
+      .then(() => { if (callback.next) location.replace(callback.next); else navigate('/mail/business', { replace: true }) })
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to complete sign-in.'))
   }, [navigate])
   return <AuthShell eyebrow="CS Connect" title="Completing sign-in" copy="Opening your CS Mail account.">
