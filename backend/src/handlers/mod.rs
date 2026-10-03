@@ -4,6 +4,8 @@ pub mod admin;
 pub mod aliases;
 pub mod attachments;
 pub mod auth;
+pub mod federation;
+pub mod federation_provider;
 pub mod billing;
 pub mod calendar;
 pub mod contacts;

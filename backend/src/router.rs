@@ -72,7 +72,9 @@ pub fn build_router(state: AppState) -> Router {
             "/api/internal/delivery-events",
             axum::routing::post(handlers::deliverability::provider_event),
         )
-        .merge(handlers::auth::routes());
+        .merge(handlers::auth::routes())
+        .merge(handlers::federation::routes())
+        .merge(handlers::federation_provider::routes());
 
     let protected = Router::new()
         .route(

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Moon, ShieldCheck } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthShell } from '../components/AuthShell'
@@ -6,14 +6,20 @@ import { authApi } from '../services/auth'
 import { auditApi } from '../services/audit'
 import { profileApi } from '../services/profile'
 import { isLocalAdminOrigin } from '../lib/admin-origin'
+import { beginConnectSignIn } from '../lib/connect-federation'
 
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const requested = (location.state as { from?: string } | null)?.from || sessionStorage.getItem('cs-mail:return-to') || undefined
+  const authorizationReturn = new URLSearchParams(location.search).get('return')
+  const requested = (authorizationReturn?.startsWith('/api/auth/federation/authorize?') ? authorizationReturn : undefined) || (location.state as { from?: string } | null)?.from || sessionStorage.getItem('cs-mail:return-to') || undefined
   const continueAfterLogin = async () => {
     if (requested) {
       sessionStorage.removeItem('cs-mail:return-to')
+      if (requested.startsWith('/api/auth/federation/authorize?')) {
+        window.location.assign(requested)
+        return
+      }
       navigate(requested, { replace: true })
       return
     }
@@ -32,6 +38,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [challengeToken, setChallengeToken] = useState('')
   const [factorCode, setFactorCode] = useState('')
+  const [connectAvailable, setConnectAvailable] = useState(false)
+  useEffect(() => { void authApi.connectConfig().then((value) => setConnectAvailable(value.enabled)).catch(() => undefined) }, [])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -195,6 +203,7 @@ export function LoginPage() {
             {loading ? 'Working...' : 'Sign in'}
             {!loading && <ArrowRight size={16} />}
           </button>
+          {connectAvailable && <button type="button" className="text-button" onClick={() => void beginConnectSignIn().catch((cause) => setError(cause instanceof Error ? cause.message : 'CrescentSphere sign-in failed'))}>Use an existing CrescentSphere account</button>}
         </form>
       )}
     </AuthShell>

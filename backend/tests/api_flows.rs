@@ -71,6 +71,10 @@ async fn test_app() -> Option<TestApp> {
         realtime_batch_size: 20,
         realtime_event_retention_secs: 604_800,
         public_origin: "http://localhost:5174".into(),
+        connect_client_id: None,
+        connect_client_secret: None,
+        federation_client_id: None,
+        federation_client_secret: None,
         // No verification gate and no Stalwart bridge: flows stay hermetic.
         require_verification: false,
         return_token_links: true,

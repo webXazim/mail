@@ -9,6 +9,9 @@ import { capabilitiesApi } from './services/capabilities'
 const LoginPage = lazy(() =>
   import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })),
 )
+const ConnectCallbackPage = lazy(() =>
+  import('./pages/ConnectCallbackPage').then((module) => ({ default: module.ConnectCallbackPage })),
+)
 const CreateAccountPage = lazy(() =>
   import('./pages/CreateAccountPage').then((module) => ({ default: module.CreateAccountPage })),
 )
@@ -221,6 +224,7 @@ export default function App() {
     >
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/connect/callback" element={<ConnectCallbackPage />} />
         <Route path="/create-account" element={<CreateAccountPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />

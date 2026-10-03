@@ -3,6 +3,7 @@ import { ArrowRight, Eye, EyeOff, KeyRound, UserPlus } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthShell } from '../components/AuthShell'
 import { authApi } from '../services/auth'
+import { beginConnectSignIn } from '../lib/connect-federation'
 
 export function CreateAccountPage() {
   const navigate = useNavigate()
@@ -14,6 +15,8 @@ export function CreateAccountPage() {
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [connectAvailable, setConnectAvailable] = useState(false)
+  useEffect(() => { void authApi.connectConfig().then((value) => setConnectAvailable(value.enabled)).catch(() => undefined) }, [])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget as HTMLFormElement)
@@ -106,6 +109,7 @@ export function CreateAccountPage() {
           <ArrowRight size={16} />
           {loading ? 'Creating...' : 'Create account'}
         </button>
+          {connectAvailable && <button type="button" className="text-button" onClick={() => void beginConnectSignIn().catch((cause) => setError(cause instanceof Error ? cause.message : 'CrescentSphere sign-in failed'))}>Already use a CrescentSphere service? Continue with that account</button>}
       </form>
     </AuthShell>
   )

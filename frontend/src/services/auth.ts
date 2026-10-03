@@ -58,6 +58,22 @@ function demoAuth(email: string, name: string): AuthResponse {
 }
 
 export const authApi = {
+  async connectConfig(): Promise<{ enabled: boolean; client_id?: string; authorize_url?: string; redirect_uri?: string }> {
+    return apiFetch('/api/auth/connect/config', {}, { retry: false })
+  },
+
+  async completeConnect(code: string, codeVerifier: string): Promise<AuthResponse> {
+    const result = await apiFetch<AuthResponse>(
+      '/api/auth/connect/complete',
+      { method: 'POST', body: JSON.stringify({ code, code_verifier: codeVerifier }) },
+      { retry: false },
+    )
+    clearProfileCache()
+    tokenStore.set(result.access)
+    authApi.setDemo(false)
+    return result
+  },
+
   async login(email: string, password: string): Promise<AuthResponse | TwoFactorChallenge> {
     if (!email.includes('@') || password.length < 12) throw new Error('Invalid email or password')
     try {
