@@ -12,11 +12,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
   return { ...actual, useNavigate: () => navigateMock }
 })
 
-vi.mock('../services/auth', () => ({ authApi: { register: vi.fn() } }))
+vi.mock('../services/auth', () => ({ authApi: { register: vi.fn(), connectConfig: vi.fn() } }))
 
 describe('CreateAccountPage', () => {
   beforeEach(() => {
     navigateMock.mockReset()
+    vi.mocked(authApi.connectConfig).mockResolvedValue({ enabled: false })
     vi.mocked(authApi.register).mockReset()
   })
 

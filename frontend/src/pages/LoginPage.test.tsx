@@ -15,7 +15,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 })
 
 vi.mock('../services/auth', () => ({
-  authApi: { login: vi.fn(), verifyTwoFactor: vi.fn() },
+  authApi: { login: vi.fn(), verifyTwoFactor: vi.fn(), connectConfig: vi.fn() },
 }))
 
 vi.mock('../services/audit', () => ({
@@ -31,6 +31,7 @@ const mount = () => render(<MemoryRouter><LoginPage /></MemoryRouter>)
 describe('LoginPage', () => {
   beforeEach(() => {
     navigateMock.mockClear()
+    vi.mocked(authApi.connectConfig).mockResolvedValue({ enabled: false })
     vi.mocked(authApi.login).mockReset()
     vi.mocked(authApi.verifyTwoFactor).mockReset()
     vi.mocked(auditApi.add).mockReset()
