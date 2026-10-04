@@ -645,5 +645,6 @@ pub fn build_router(state: AppState) -> Router {
         .layer(contract_layer)
         .layer(security_layer)
         .layer(cors)
+        .merge(handlers::federation_provider::presence_routes())
         .with_state(state)
 }

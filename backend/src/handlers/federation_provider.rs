@@ -2,7 +2,7 @@
 //! tokens are short lived, hashed at rest, single-purpose and scoped to one
 //! confidential client. The browser's Mail session proves source ownership.
 use axum::extract::{Form, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -230,5 +230,31 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
     response
         .headers_mut()
         .insert("cache-control", "no-store".parse().unwrap());
+    response
+}
+
+// Only this read-only route permits credentialed presence checks from sister apps.
+pub fn presence_routes() -> Router<AppState> {
+    Router::new().route("/api/auth/federation/session-account", get(session_presence))
+}
+
+async fn session_presence(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let origin = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()).unwrap_or("");
+    if !["https://connect.crescentsphere.com", "https://docs.crescentsphere.com", "https://mail.crescentsphere.com", "https://mailer.crescentsphere.com"].contains(&origin) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let raw_cookie = cookie_token(&headers).unwrap_or_default();
+    let signed_in = if configured(&state) && !raw_cookie.is_empty() {
+        match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.email_verified_at IS NOT NULL AND u.status='active')")
+            .bind(hash(&raw_cookie)).fetch_one(&state.db).await {
+            Ok(value) => value,
+            Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        }
+    } else { false };
+    let mut response = Json(json!({"signed_in":signed_in})).into_response();
+    response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, headers[header::ORIGIN].clone());
+    response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".parse().unwrap());
+    response.headers_mut().insert(header::CACHE_CONTROL, "no-store, private".parse().unwrap());
+    response.headers_mut().insert(header::VARY, "Origin, Cookie".parse().unwrap());
     response
 }

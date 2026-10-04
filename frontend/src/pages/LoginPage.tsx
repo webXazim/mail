@@ -1,3 +1,4 @@
+import { useCsAccounts } from '../lib/csAccounts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Moon, ShieldCheck } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -39,6 +40,7 @@ export function LoginPage() {
   const [challengeToken, setChallengeToken] = useState('')
   const [factorCode, setFactorCode] = useState('')
   const [connectAvailable, setConnectAvailable] = useState(false)
+  const csAccounts = useCsAccounts('mail', connectAvailable)
   useEffect(() => { void authApi.connectConfig().then((value) => setConnectAvailable(value.enabled)).catch(() => undefined) }, [])
 
   const submit = async (event: FormEvent) => {
@@ -203,7 +205,7 @@ export function LoginPage() {
             {loading ? 'Working...' : 'Sign in'}
             {!loading && <ArrowRight size={16} />}
           </button>
-          {connectAvailable && <button type="button" className="text-button" onClick={() => void beginConnectSignIn().catch((cause) => setError(cause instanceof Error ? cause.message : 'CrescentSphere sign-in failed'))}>Use an existing CrescentSphere account</button>}
+          {csAccounts.length > 0 && <button type="button" className="text-button" onClick={() => void beginConnectSignIn().catch((cause) => setError(cause instanceof Error ? cause.message : 'CrescentSphere sign-in failed'))}>Sign in with CS account</button>}
         </form>
       )}
     </AuthShell>
