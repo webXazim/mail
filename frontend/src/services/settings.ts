@@ -22,7 +22,7 @@ export type UserSettings = {
 export const defaultSettings: UserSettings = {
   displayName: 'Alex Morgan',
   signature: '',
-  theme: 'dark',
+  theme: 'light',
   density: 'comfortable',
   radius: 'sharp',
   accent: 'lime',

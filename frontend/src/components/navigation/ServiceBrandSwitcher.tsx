@@ -130,7 +130,7 @@ function ServiceBrandMenu({ activeService = "connect", compact = false, mobile =
       <button ref={triggerRef} type="button" className="service-brand-switcher__trigger" aria-label={`${activeBrand.label}. Switch service`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
         onClick={() => { if (open) { setOpen(false); triggerRef.current?.focus(); } else showMenu(); }}
         onKeyDown={(event) => { if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(event.key)) { event.preventDefault(); showMenu(); } }}>
-        <span className="service-brand-switcher__mark"><ServiceLogo state={activeService} src={brandLogos[activeService]} morph /></span>
+        <span className="service-brand-switcher__mark"><ServiceLogo state={activeService} src={brandLogos[activeService]} /></span>
         {!compact && <strong>{activeBrand.label}</strong>}
         {mobile && <span className="ms-navigation__label">Services</span>}
       </button>

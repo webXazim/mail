@@ -5,6 +5,20 @@ import { settingsApi } from './settings'
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
+describe('default appearance', () => {
+  afterEach(() => { localStorage.removeItem('cs-mail:settings') })
+
+  it('starts in light mode when no theme has been saved', () => {
+    localStorage.removeItem('cs-mail:settings')
+    expect(settingsApi.load().theme).toBe('light')
+  })
+
+  it('preserves a saved dark theme preference', () => {
+    localStorage.setItem('cs-mail:settings', JSON.stringify({ theme: 'dark' }))
+    expect(settingsApi.load().theme).toBe('dark')
+  })
+})
+
 describe('settingsApi.deleteMyAccount — WS5.4 customer self-service erasure', () => {
   beforeEach(() => {
     tokenStore.clear()
