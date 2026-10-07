@@ -217,7 +217,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
     return (
       <aside id="sidebar" className={`sidebar ${mobile ? 'sidebar--open' : ''}`} aria-label="Business navigation">
         <div className="brand-row">
-          <a className="brand" href="/" aria-label="CS Mail home"><BrandIdentity /></a>
+          <div className="brand"><BrandIdentity /></div>
           <button className="icon-button sidebar-close" onClick={onCloseMobile} aria-label="Close navigation"><X size={17} /></button>
         </div>
         <section className="sidebar-workspace">
@@ -278,9 +278,7 @@ export function Sidebar({ mobile, onCloseMobile, onWidthChange, onCompose }: Sid
         onMouseDown={() => setResizing(true)}
       />
       <div className="brand-row">
-        <a className="brand" href="/" aria-label="CS Mail home">
-          <BrandIdentity />
-        </a>
+        <div className="brand"><BrandIdentity /></div>
         <button
           className="icon-button sidebar-close"
           onClick={onCloseMobile}

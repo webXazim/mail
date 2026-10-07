@@ -1,3 +1,5 @@
+import { ServiceBrandSwitcher } from './navigation/ServiceBrandSwitcher'
+
 type BrandIdentityProps = {
   className?: string
   logoClassName?: string
@@ -6,13 +8,11 @@ type BrandIdentityProps = {
 
 export function BrandIdentity({
   className = '',
-  logoClassName = 'brand-logo',
   showName = true,
 }: BrandIdentityProps) {
   return (
-    <span className={`brand-identity ${className}`.trim()}>
-      <img className={logoClassName} src="/cs-mail-logo.png" alt="" aria-hidden="true" />
-      {showName && <span className="brand-name">CS Mail</span>}
-    </span>
+    <div className={`brand-identity ${className}`.trim()}>
+      <ServiceBrandSwitcher activeService="mail" compact={!showName} />
+    </div>
   )
 }

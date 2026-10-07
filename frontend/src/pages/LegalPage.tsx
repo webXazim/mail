@@ -10,9 +10,7 @@ function LegalPageInner({ doc }: { doc: LegalDoc }) {
   return (
     <main className="legal-page">
       <header className="legal-head">
-        <Link to="/" className="legal-brand" aria-label="CS Mail home">
-          <BrandIdentity />
-        </Link>
+        <div className="legal-brand"><BrandIdentity /></div>
         <nav className="legal-nav" aria-label="Legal documents">
           {legalNav.map((item) => (
             <Link

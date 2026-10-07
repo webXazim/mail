@@ -14,9 +14,7 @@ export function PublicLayout() {
   return (
     <div className="site-shell">
       <header className="site-head">
-        <Link to="/" className="site-brand" aria-label="CS Mail home">
-          <BrandIdentity />
-        </Link>
+        <div className="site-brand"><BrandIdentity /></div>
         <nav className="site-nav" aria-label="Primary">
           <NavLink
             to="/features"
@@ -58,9 +56,7 @@ export function PublicLayout() {
       <footer className="site-foot">
         <div className="site-foot__cols">
           <div className="site-foot__brand">
-            <Link to="/" className="site-brand" aria-label="CS Mail home">
-              <BrandIdentity />
-            </Link>
+            <strong>CS Mail</strong>
             <p>Calm, focused email for teams. Space for the things that matter.</p>
             <Link to="/status" className="site-foot__status">
               <BarChart3 size={13} />
