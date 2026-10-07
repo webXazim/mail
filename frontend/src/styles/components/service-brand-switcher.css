@@ -21,3 +21,13 @@
   .service-brand-switcher__panel { grid-template-columns: repeat(2, minmax(0, 1fr)); border-radius: 16px; }
   .service-brand-switcher__item { min-height: 64px; }
 }
+.service-brand-switcher__panel { animation: service-brand-reveal .24s cubic-bezier(.22, .82, .2, 1); transform-origin: left top; }
+.service-brand-switcher__item { transition: background .18s ease, border-color .18s ease; }
+@keyframes service-brand-reveal {
+  from { opacity: 0; transform: translateX(-8px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .service-brand-switcher__panel { animation: none; }
+  .service-brand-switcher__item { transition: none; }
+}

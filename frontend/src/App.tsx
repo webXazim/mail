@@ -24,30 +24,6 @@ const ResetPasswordPage = lazy(() =>
 const VerifyEmailPage = lazy(() =>
   import('./pages/VerifyEmailPage').then((module) => ({ default: module.VerifyEmailPage })),
 )
-const HomePage = lazy(() =>
-  import('./pages/HomePage').then((module) => ({ default: module.HomePage })),
-)
-const FeaturesPage = lazy(() =>
-  import('./pages/FeaturesPage').then((module) => ({ default: module.FeaturesPage })),
-)
-const SecurityPage = lazy(() =>
-  import('./pages/SecurityPage').then((module) => ({ default: module.SecurityPage })),
-)
-const PublicPricingPage = lazy(() =>
-  import('./pages/PublicPricingPage').then((module) => ({ default: module.PublicPricingPage })),
-)
-const HelpPage = lazy(() =>
-  import('./pages/HelpPage').then((module) => ({ default: module.HelpPage })),
-)
-const ContactPage = lazy(() =>
-  import('./pages/ContactPage').then((module) => ({ default: module.ContactPage })),
-)
-const StatusPage = lazy(() =>
-  import('./pages/StatusPage').then((module) => ({ default: module.StatusPage })),
-)
-const PublicLayout = lazy(() =>
-  import('./components/layout/PublicLayout').then((module) => ({ default: module.PublicLayout })),
-)
 const MailLayout = lazy(() =>
   import('./components/layout/MailLayout').then((module) => ({ default: module.MailLayout })),
 )
@@ -229,15 +205,8 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
-        <Route element={<PublicLayout />}>
-          <Route index element={<HomePage />} />
-          <Route path="features" element={<FeaturesPage />} />
-          <Route path="security" element={<SecurityPage />} />
-          <Route path="pricing" element={<PublicPricingPage />} />
-          <Route path="help" element={<HelpPage />} />
-          <Route path="contact" element={<ContactPage />} />
-          <Route path="status" element={<StatusPage />} />
-        </Route>
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        {['features', 'security', 'pricing', 'help', 'contact', 'status'].map(path => <Route key={path} path={path} element={<Navigate to="/login" replace />} />)}
         <Route path="/legal/terms" element={<LegalPage docId="terms" />} />
         <Route path="/legal/privacy" element={<LegalPage docId="privacy" />} />
         <Route path="/legal/aup" element={<LegalPage docId="aup" />} />
