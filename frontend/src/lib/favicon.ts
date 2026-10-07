@@ -1,4 +1,6 @@
-const BASE_FAVICON = '/favicon-32.png?v=2'
+import mailLogo from '../assets/logos/cs-mail.svg'
+
+const BASE_FAVICON = mailLogo
 
 let logo: HTMLImageElement | null = null
 let currentUnread = 0
@@ -7,6 +9,7 @@ function drawFavicon() {
   const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!link) return
   if (!currentUnread || !logo?.complete || !logo.naturalWidth) {
+    link.type = 'image/svg+xml'
     link.href = BASE_FAVICON
     return
   }
@@ -17,7 +20,7 @@ function drawFavicon() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  // Preserve the shared CS mark and place the unread count above its edge.
+  // Preserve the Mail logo and place the unread count above its edge.
   ctx.drawImage(logo, 0, 0, 64, 64)
   ctx.fillStyle = '#ff6f66'
   ctx.beginPath()
@@ -28,6 +31,7 @@ function drawFavicon() {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(currentUnread > 9 ? '9+' : String(currentUnread), 50, 14)
+  link.type = 'image/png'
   link.href = canvas.toDataURL('image/png')
 }
 
