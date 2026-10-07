@@ -18,32 +18,33 @@ describe('service-to-service logo navigation', () => {
       const trigger = screen.getByRole('button', { name: `${names[current]}. Switch service` })
       fireEvent.click(trigger)
       const items = screen.getAllByRole('menuitem')
-      expect(items).toHaveLength(7)
+      expect(items).toHaveLength(6)
       for (const destination of services) {
+        if (destination === current) {
+          expect(screen.queryByRole('menuitem', { name: names[destination] })).toBeNull()
+          continue
+        }
         const item = screen.getByRole('menuitem', { name: names[destination] })
         expect(item.querySelector('img')?.getAttribute('src')).toBeTruthy()
-        if (destination === current) {
-          expect(item.getAttribute('aria-current')).toBe('true')
-          expect(document.activeElement).toBe(item)
-        } else {
-          expect(item.getAttribute('href')).toBe(`https://${destination}.crescentsphere.com`)
-        }
+        expect(item.getAttribute('href')).toBe(`https://${destination}.crescentsphere.com`)
       }
       expect(screen.getByRole('menuitem', { name: 'CrescentSphere' }).getAttribute('href')).toBe('https://crescentsphere.com')
       const selectedIndex = items.indexOf(document.activeElement as HTMLElement)
-      fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+      fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
       expect(document.activeElement).toBe(items[(selectedIndex + 1) % items.length])
+      fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+      expect(document.activeElement).toBe(items[selectedIndex])
       fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
       expect(screen.queryByRole('menu')).toBeNull()
       expect(document.activeElement).toBe(trigger)
     })
   }
 
-  it('keeps the current workspace when its own logo is selected', () => {
+  it('closes the panel when its main logo is clicked again', () => {
     render(<MemoryRouter initialEntries={['/mail/inbox']}><ServiceBrandSwitcher activeService="mail" /></MemoryRouter>)
     const trigger = screen.getByRole('button', { name: 'CS Mail. Switch service' })
     fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'CS Mail' }))
+    fireEvent.click(trigger)
     expect(screen.queryByRole('menu')).toBeNull()
     expect(document.activeElement).toBe(trigger)
   })
