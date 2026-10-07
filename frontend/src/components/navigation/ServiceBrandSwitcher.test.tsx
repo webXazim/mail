@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { ServiceBrandSwitcher } from './ServiceBrandSwitcher'
 
 // SVG geometry is verified in a browser; jsdom cannot initialize the morph engine.
@@ -16,6 +16,27 @@ const services = ['mail', 'mailer', 'docs', 'connect', 'notes', 'keylang'] as co
 const names = { mail: 'CS Mail', mailer: 'CS Mailer', docs: 'CS Docs', connect: 'CS Connect', notes: 'CS Notes', keylang: 'CS KeyLang' }
 
 describe('service-to-service logo navigation', () => {
+  it('closes on pathname and query changes and stays closed after navigating back', () => {
+    let navigate: NavigateFunction
+    function NavigationFixture() {
+      navigate = useNavigate()
+      return <ServiceBrandSwitcher activeService="mail" />
+    }
+    render(<MemoryRouter initialEntries={['/mail/inbox']}><NavigationFixture /></MemoryRouter>)
+    const openMenu = () => fireEvent.click(screen.getByRole('button', { name: 'CS Mail. Switch service' }))
+    openMenu()
+    expect(screen.getByRole('menu')).toBeTruthy()
+    act(() => { void navigate('/mail/sent') })
+    expect(screen.queryByRole('menu')).toBeNull()
+    openMenu()
+    act(() => { void navigate('/mail/sent?filter=unread') })
+    expect(screen.queryByRole('menu')).toBeNull()
+    act(() => { void navigate(-1) })
+    expect(screen.queryByRole('menu')).toBeNull()
+    openMenu()
+    expect(screen.getByRole('menu')).toBeTruthy()
+  })
+
   for (const current of services) {
     it(`offers every other service from ${names[current]}`, () => {
       render(<MemoryRouter><ServiceBrandSwitcher activeService={current} /></MemoryRouter>)

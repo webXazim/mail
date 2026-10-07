@@ -39,7 +39,15 @@ const themeTokens: Record<Exclude<ServiceKey, "master-mark">, readonly [string, 
 const themeProperties = ["--service-menu-surface", "--service-menu-text", "--service-menu-muted", "--service-menu-line", "--service-menu-hover", "--service-menu-focus"];
 const themeFallbacks = ["#ffffff", "#171817", "#5f625f", "#e4e5e3", "#f5f5f4", "#989d98"];
 
-export function ServiceBrandSwitcher({ activeService = "connect", compact = false, mobile = false, onOpen }: { activeService?: ServiceKey; compact?: boolean; mobile?: boolean; onOpen?: () => void }) {
+type ServiceBrandSwitcherProps = { activeService?: ServiceKey; compact?: boolean; mobile?: boolean; onOpen?: () => void };
+
+export function ServiceBrandSwitcher(props: ServiceBrandSwitcherProps) {
+  const location = useLocation();
+  // A route change starts a fresh menu and cleans up the old panel's listeners.
+  return <ServiceBrandMenu key={JSON.stringify([location.pathname, location.search])} {...props} />;
+}
+
+function ServiceBrandMenu({ activeService = "connect", compact = false, mobile = false, onOpen }: ServiceBrandSwitcherProps) {
   const activeBrand = SERVICE_BRANDS.find((brand) => brand.key === activeService)!;
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 12, left: 12, width: 960 });
@@ -47,10 +55,6 @@ export function ServiceBrandSwitcher({ activeService = "connect", compact = fals
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
-  const location = useLocation();
-
-  useEffect(() => { setOpen(false); }, [location.pathname, location.search]);
-
   useEffect(() => {
     if (!open) return;
     const positionPanel = () => {
