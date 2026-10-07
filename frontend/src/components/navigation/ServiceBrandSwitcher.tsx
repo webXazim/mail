@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
+import { ServiceLogo } from "./ServiceLogo";
 import masterLogo from "../../assets/logos/cs-master-mark.svg";
 import mailLogo from "../../assets/logos/cs-mail.svg";
 import mailerLogo from "../../assets/logos/cs-mailer.svg";
@@ -18,7 +19,7 @@ export const SERVICE_BRANDS = [
   { key: "mail", label: "CS Mail", description: "Business email", href: "https://mail.crescentsphere.com" },
   { key: "mailer", label: "CS Mailer", description: "Transactional email", href: "https://mailer.crescentsphere.com" },
   { key: "docs", label: "CS Docs", description: "Operations", href: "https://docs.crescentsphere.com" },
-  { key: "connect", label: "CS Connect", description: "Private chat + Support Chat", href: "/" },
+  { key: "connect", label: "CS Connect", description: "Communication", href: "https://connect.crescentsphere.com" },
   { key: "notes", label: "CS Notes", description: "Secure notes", href: "https://notes.crescentsphere.com" },
   { key: "keylang", label: "CS KeyLang", description: "Typing & language", href: "https://keylang.crescentsphere.com" },
 ] as const;
@@ -125,7 +126,7 @@ export function ServiceBrandSwitcher({ activeService = "connect", compact = fals
       <button ref={triggerRef} type="button" className="service-brand-switcher__trigger" aria-label={`${activeBrand.label}. Switch service`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
         onClick={() => { if (open) { setOpen(false); triggerRef.current?.focus(); } else showMenu(); }}
         onKeyDown={(event) => { if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(event.key)) { event.preventDefault(); showMenu(); } }}>
-        <span className="service-brand-switcher__mark"><img src={brandLogos[activeService]} alt="" /></span>
+        <span className="service-brand-switcher__mark"><ServiceLogo state={activeService} src={brandLogos[activeService]} morph /></span>
         {!compact && <strong>{activeBrand.label}</strong>}
         {mobile && <span className="ms-navigation__label">Services</span>}
       </button>
@@ -134,7 +135,7 @@ export function ServiceBrandSwitcher({ activeService = "connect", compact = fals
           {SERVICE_BRANDS.filter((brand) => brand.key !== activeService).map((brand) => (
             <a key={brand.key} className="service-brand-switcher__item" role="menuitem" aria-label={brand.label} aria-description={brand.description}
               href={brand.key === "connect" ? "https://connect.crescentsphere.com" : brand.href} onClick={() => setOpen(false)}>
-              <span className="service-brand-switcher__mark"><img src={brandLogos[brand.key]} alt="" /></span>
+              <span className="service-brand-switcher__mark"><ServiceLogo state={brand.key} src={brandLogos[brand.key]} /></span>
               <span><strong>{brand.label}</strong><small>{brand.description}</small></span>
             </a>
           ))}

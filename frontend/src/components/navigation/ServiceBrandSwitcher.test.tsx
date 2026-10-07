@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom'
 import { ServiceBrandSwitcher } from './ServiceBrandSwitcher'
 
+// SVG geometry is verified in a browser; jsdom cannot initialize the morph engine.
+vi.mock('../../brand/engine/cs-morph-logo.js', () => ({}))
+vi.mock('../../brand/engine/cs-logo-engine.js', () => ({}))
+
 beforeEach(() => {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ addEventListener: vi.fn(), removeEventListener: vi.fn() })))
 })
